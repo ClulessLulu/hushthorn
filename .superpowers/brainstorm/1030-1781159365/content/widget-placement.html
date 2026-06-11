@@ -1,0 +1,151 @@
+<style>
+  body { background: #0c0714; color: #e9d5ff; font-family: 'Segoe UI', sans-serif; }
+  h2 { color: #f0a6e0; font-size: 1.4rem; margin-bottom: 4px; }
+  .subtitle { color: #a78bca; margin-bottom: 24px; }
+
+  .cards { display: flex; flex-direction: column; gap: 18px; }
+  .card { background: linear-gradient(165deg, rgba(38,23,64,0.95), rgba(17,10,30,0.98)); border: 1px solid rgba(217,131,222,0.22); border-radius: 12px; overflow: hidden; cursor: pointer; transition: border-color .2s, transform .2s; }
+  .card:hover { border-color: rgba(240,166,224,0.6); transform: translateY(-2px); }
+  .card.selected { border-color: #f0a6e0; box-shadow: 0 0 20px rgba(217,70,239,0.3); }
+  .card-image { padding: 20px 24px 8px; }
+  .card-body { padding: 12px 24px 18px; border-top: 1px solid rgba(168,85,247,0.2); }
+  .card-body h3 { color: #f0a6e0; margin: 0 0 4px; font-size: 1rem; }
+  .card-body p { color: #a78bca; font-size: 0.85rem; margin: 0; }
+
+  /* Hushthorn-style mini UI chrome */
+  .ht-mock { background: #0c0714; border-radius: 8px; overflow: hidden; border: 1px solid rgba(168,85,247,0.25); }
+  .ht-header { background: linear-gradient(180deg, rgba(76,29,149,0.3) 0%, transparent 100%); padding: 10px 14px; text-align: center; border-bottom: 1px solid rgba(168,85,247,0.15); display: flex; align-items: center; justify-content: center; gap: 10px; position: relative; }
+  .ht-title { font-size: 1rem; background: linear-gradient(180deg, #fbcfe8, #d946ef); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: bold; }
+  .ht-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 10px; }
+  .ht-book-card { background: rgba(38,23,64,0.8); border: 1px solid rgba(217,131,222,0.15); border-radius: 4px; aspect-ratio: 2/3; }
+
+  /* Option A — header avatar chip */
+  .header-chip { display: flex; align-items: center; gap: 6px; background: rgba(88,28,135,0.5); border: 1px solid rgba(240,166,224,0.35); border-radius: 20px; padding: 3px 10px 3px 4px; }
+  .avatar-circle { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, #7c3aed, #db2777); display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+  .chip-text { font-size: 10px; color: #e9d5ff; line-height: 1.2; }
+  .chip-count { font-size: 11px; font-weight: bold; color: #f0a6e0; }
+
+  /* Option B — floating shelf widget */
+  .float-widget { position: relative; }
+  .shelf-widget { background: linear-gradient(165deg, rgba(38,23,64,0.97), rgba(17,10,30,0.99)); border: 1px solid rgba(240,166,224,0.3); border-radius: 10px; padding: 10px 12px; width: 160px; box-shadow: 0 0 24px rgba(124,58,237,0.25); }
+  .shelf-row { display: flex; align-items: flex-end; gap: 2px; height: 44px; background: rgba(0,0,0,0.3); border-radius: 4px; padding: 4px 6px 0; border-bottom: 2px solid rgba(168,85,247,0.4); margin-bottom: 6px; position: relative; }
+  .book-spine { border-radius: 2px 2px 0 0; width: 10px; flex-shrink: 0; }
+  .avatar-on-shelf { font-size: 20px; position: absolute; right: 6px; bottom: 0; line-height: 1; }
+  .widget-label { font-size: 9px; color: #c084fc; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 2px; }
+  .widget-count { font-size: 18px; font-weight: bold; color: #f0a6e0; line-height: 1; }
+  .widget-sub { font-size: 9px; color: #a78bca; }
+
+  /* Option C — stats banner above grid */
+  .stats-banner { background: linear-gradient(90deg, rgba(88,28,135,0.3), rgba(17,10,30,0.1), rgba(88,28,135,0.3)); border-top: 1px solid rgba(168,85,247,0.2); border-bottom: 1px solid rgba(168,85,247,0.2); padding: 8px 12px; display: flex; align-items: center; gap: 12px; }
+  .banner-avatar { font-size: 22px; }
+  .banner-shelf { display: flex; align-items: flex-end; gap: 2px; height: 28px; flex: 1; }
+  .banner-spine { border-radius: 2px 2px 0 0; width: 8px; }
+  .banner-spine.empty { background: rgba(88,28,135,0.2); border: 1px dashed rgba(168,85,247,0.2); }
+  .banner-stat { text-align: right; font-size: 10px; color: #a78bca; }
+  .banner-stat strong { display: block; font-size: 16px; color: #f0a6e0; line-height: 1; }
+
+  .badge { display: inline-block; font-size: 9px; background: rgba(217,70,239,0.2); border: 1px solid rgba(240,166,224,0.3); border-radius: 10px; padding: 1px 6px; color: #f0a6e0; margin-left: 4px; }
+</style>
+
+<h2>Where should the avatar widget live?</h2>
+<p class="subtitle">Three placements — click the one that feels right for Hushthorn.</p>
+
+<div class="cards">
+
+  <!-- Option A -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="ht-mock">
+        <div class="ht-header">
+          <div class="ht-title">✦ Hushthorn ✦</div>
+          <div class="header-chip">
+            <div class="avatar-circle">🧝</div>
+            <div class="chip-text">
+              <div class="chip-count">12 owned</div>
+              <div style="color:#c084fc;font-size:9px">8 read</div>
+            </div>
+          </div>
+        </div>
+        <div class="ht-grid">
+          <div class="ht-book-card"></div><div class="ht-book-card"></div>
+          <div class="ht-book-card"></div><div class="ht-book-card"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A · Header chip <span class="badge">always visible</span></h3>
+      <p>A compact avatar + count pill tucked into the header. Always in view, never in the way. Click it to expand into a full shelf view.</p>
+    </div>
+  </div>
+
+  <!-- Option B -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="ht-mock" style="position:relative;min-height:110px;">
+        <div class="ht-header"><div class="ht-title">✦ Hushthorn ✦</div></div>
+        <div class="ht-grid">
+          <div class="ht-book-card"></div><div class="ht-book-card"></div>
+          <div class="ht-book-card"></div><div class="ht-book-card"></div>
+        </div>
+        <!-- floating widget bottom-right -->
+        <div style="position:absolute;bottom:10px;right:10px;">
+          <div class="shelf-widget">
+            <div class="widget-label">Your shelf</div>
+            <div class="shelf-row">
+              <div class="book-spine" style="height:32px;background:#7c3aed"></div>
+              <div class="book-spine" style="height:38px;background:#db2777"></div>
+              <div class="book-spine" style="height:28px;background:#6d28d9"></div>
+              <div class="book-spine" style="height:36px;background:#be185d"></div>
+              <div class="book-spine" style="height:30px;background:#7c3aed"></div>
+              <div class="book-spine" style="height:34px;background:#9333ea"></div>
+              <div class="avatar-on-shelf">🧝</div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px">
+              <div><div class="widget-count">12</div><div class="widget-sub">books owned</div></div>
+              <div style="text-align:right"><div class="widget-count" style="font-size:13px;color:#c084fc">8</div><div class="widget-sub">read</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B · Floating shelf widget <span class="badge">draggable</span></h3>
+      <p>A self-contained floating card with a mini bookshelf and your avatar perched at the end. Book spines grow as your collection does. Can be collapsed to a small icon.</p>
+    </div>
+  </div>
+
+  <!-- Option C -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="ht-mock">
+        <div class="ht-header"><div class="ht-title">✦ Hushthorn ✦</div></div>
+        <div class="stats-banner">
+          <div class="banner-avatar">🧝</div>
+          <div class="banner-shelf">
+            <div class="banner-spine" style="height:22px;background:#7c3aed"></div>
+            <div class="banner-spine" style="height:26px;background:#db2777"></div>
+            <div class="banner-spine" style="height:18px;background:#6d28d9"></div>
+            <div class="banner-spine" style="height:24px;background:#be185d"></div>
+            <div class="banner-spine" style="height:20px;background:#9333ea"></div>
+            <div class="banner-spine" style="height:22px;background:#7c3aed"></div>
+            <div class="banner-spine empty" style="height:22px"></div>
+            <div class="banner-spine empty" style="height:22px"></div>
+            <div class="banner-spine empty" style="height:22px"></div>
+            <div class="banner-spine empty" style="height:22px"></div>
+          </div>
+          <div class="banner-stat"><strong>12</strong>owned</div>
+          <div class="banner-stat"><strong style="color:#c084fc">8</strong>read</div>
+        </div>
+        <div class="ht-grid">
+          <div class="ht-book-card"></div><div class="ht-book-card"></div>
+          <div class="ht-book-card"></div><div class="ht-book-card"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C · Progress banner <span class="badge">above the grid</span></h3>
+      <p>A horizontal strip between the nav and the book grid. Your avatar stands at one end, books fill in from left to right as you add them. Empty slots show dashed outlines as goals.</p>
+    </div>
+  </div>
+
+</div>

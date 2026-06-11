@@ -1,0 +1,266 @@
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=EB+Garamond:ital,wght@0,400;1,400&display=swap');
+
+body {
+  background: #0c0714;
+  background-image:
+    radial-gradient(ellipse 70% 55% at 50% -5%, rgba(76,29,149,0.45), transparent 70%),
+    radial-gradient(ellipse 35% 30% at 8% 96%, rgba(236,72,153,0.12), transparent 70%),
+    radial-gradient(ellipse 35% 30% at 92% 96%, rgba(168,85,247,0.12), transparent 70%);
+  color: #e9d5ff;
+  font-family: 'EB Garamond', serif;
+  min-height: 100vh;
+  padding: 0;
+  margin: 0;
+}
+
+h2 { color: #f0a6e0; font-family: 'Cinzel', serif; font-size: 1.3rem; margin: 0 0 4px; letter-spacing: .06em; }
+.subtitle { color: #a78bca; font-style: italic; margin-bottom: 20px; font-size: 0.9rem; }
+
+.page-wrap { max-width: 520px; margin: 0 auto; padding: 20px 16px 40px; }
+
+/* back link */
+.back-link { display: inline-flex; align-items: center; gap: 6px; font-family: 'Cinzel', serif; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #c084fc; margin-bottom: 20px; opacity: .8; cursor: pointer; }
+.back-link:hover { opacity: 1; color: #f0a6e0; }
+
+/* ── avatar frame ── */
+.avatar-section { text-align: center; margin-bottom: 24px; }
+.avatar-frame {
+  width: 120px; height: 120px; border-radius: 50%; margin: 0 auto 12px;
+  background: linear-gradient(135deg, rgba(88,28,135,0.8), rgba(190,24,93,0.5));
+  border: 2px solid rgba(240,166,224,0.45);
+  box-shadow: 0 0 30px rgba(217,70,239,0.25), inset 0 0 20px rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center;
+  position: relative; overflow: hidden;
+}
+.avatar-svg { width: 88px; height: 88px; }
+
+.reader-name { font-family: 'Cinzel', serif; font-size: 1rem; color: #f0a6e0; margin-bottom: 4px; }
+.reader-name input {
+  background: transparent; border: none; border-bottom: 1px solid rgba(240,166,224,0.35);
+  color: #f0a6e0; font-family: 'Cinzel', serif; font-size: 1rem; text-align: center;
+  width: 180px; padding: 2px 6px; outline: none;
+}
+.reader-name input:focus { border-bottom-color: #f0a6e0; }
+
+/* ── customiser ── */
+.customiser { background: linear-gradient(165deg, rgba(38,23,64,0.9), rgba(17,10,30,0.95)); border: 1px solid rgba(217,131,222,0.2); border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+.custom-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.custom-row:last-child { margin-bottom: 0; }
+.custom-label { font-family: 'Cinzel', serif; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; color: #a78bca; width: 54px; flex-shrink: 0; }
+.swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+.swatch {
+  width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
+  border: 2px solid transparent; transition: transform .15s, border-color .15s;
+}
+.swatch:hover { transform: scale(1.15); }
+.swatch.active { border-color: #f0a6e0; box-shadow: 0 0 8px rgba(240,166,224,0.6); }
+
+.save-btn {
+  width: 100%; padding: 10px; border-radius: 4px; border: none; cursor: pointer;
+  background: linear-gradient(90deg, #9333ea, #db2777);
+  color: white; font-family: 'Cinzel', serif; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .08em; margin-top: 4px;
+  transition: opacity .2s;
+}
+.save-btn:hover { opacity: .85; }
+
+/* ── divider ── */
+.divider { display: flex; align-items: center; gap: 10px; margin: 20px 0 16px; }
+.divider-line { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(240,166,224,0.4), transparent); }
+.divider-label { font-family: 'Cinzel', serif; font-size: 9px; text-transform: uppercase; letter-spacing: .1em; color: #a78bca; white-space: nowrap; }
+
+/* ── stats ── */
+.stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px; }
+.stat-card { background: linear-gradient(165deg, rgba(38,23,64,0.85), rgba(17,10,30,0.9)); border: 1px solid rgba(217,131,222,0.18); border-radius: 8px; padding: 12px 14px; }
+.stat-number { font-family: 'Cinzel', serif; font-size: 1.6rem; color: #f0a6e0; line-height: 1; margin-bottom: 2px; }
+.stat-number.muted { color: #c084fc; }
+.stat-label { font-size: 11px; color: #a78bca; font-style: italic; }
+.sword-row { display: flex; gap: 3px; margin-top: 4px; }
+.sword-pip { width: 8px; height: 14px; border-radius: 1px; }
+.sword-pip.filled { background: #a5b4fc; }
+.sword-pip.empty { background: rgba(88,28,135,0.4); }
+
+/* ── mini shelf ── */
+.shelf-preview { background: linear-gradient(165deg, rgba(38,23,64,0.85), rgba(17,10,30,0.9)); border: 1px solid rgba(217,131,222,0.18); border-radius: 8px; padding: 14px; }
+.shelf-track {
+  display: flex; align-items: flex-end; gap: 3px;
+  height: 52px;
+  background: rgba(0,0,0,0.25); border-radius: 4px;
+  padding: 6px 8px 0;
+  border-bottom: 2px solid rgba(168,85,247,0.35);
+  position: relative; overflow: hidden;
+}
+.spine { border-radius: 2px 2px 0 0; flex-shrink: 0; transition: height .3s ease; }
+.spine.empty { border: 1px dashed rgba(168,85,247,0.25); background: transparent; }
+.shelf-avatar { position: absolute; right: 6px; bottom: 0; font-size: 24px; line-height: 1; }
+.shelf-caption { font-size: 11px; color: #a78bca; font-style: italic; text-align: center; margin-top: 8px; }
+
+/* header chip preview */
+.chip-demo { display: inline-flex; align-items: center; gap: 6px; background: rgba(88,28,135,0.5); border: 1px solid rgba(240,166,224,0.35); border-radius: 20px; padding: 4px 12px 4px 5px; margin-top: 14px; cursor: pointer; }
+.chip-avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #7c3aed, #db2777); display: flex; align-items: center; justify-content: center; font-size: 15px; }
+.chip-info { font-size: 11px; line-height: 1.4; }
+.chip-name { color: #f0a6e0; font-family: 'Cinzel', serif; font-size: 10px; }
+.chip-count { color: #c084fc; }
+</style>
+
+<div class="page-wrap">
+
+  <div class="back-link">← Back to the archive</div>
+
+  <!-- ── Avatar section ── -->
+  <div class="avatar-section">
+    <div class="avatar-frame">
+      <!-- Simple SVG avatar — placeholder for artist art -->
+      <svg class="avatar-svg" viewBox="0 0 88 88" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- body / robe -->
+        <ellipse cx="44" cy="78" rx="22" ry="14" fill="#6d28d9" opacity=".9"/>
+        <path d="M26 72 Q44 66 62 72 L64 88 H24 Z" fill="#5b21b6"/>
+        <!-- book in hands -->
+        <rect x="30" y="63" width="18" height="13" rx="1.5" fill="#db2777" opacity=".9"/>
+        <line x1="39" y1="63" x2="39" y2="76" stroke="#f9a8d4" stroke-width="1"/>
+        <!-- neck -->
+        <rect x="40" y="53" width="8" height="8" rx="2" fill="#c4956a"/>
+        <!-- head -->
+        <ellipse cx="44" cy="46" rx="16" ry="17" fill="#c4956a"/>
+        <!-- hair -->
+        <path d="M28 40 Q28 24 44 23 Q60 24 60 40 Q57 28 44 27 Q31 28 28 40Z" fill="#1e1b4b"/>
+        <path d="M28 40 Q25 50 28 56 Q26 45 28 40Z" fill="#1e1b4b"/>
+        <path d="M60 40 Q63 50 60 56 Q62 45 60 40Z" fill="#1e1b4b"/>
+        <!-- eyes -->
+        <ellipse cx="38" cy="46" rx="3" ry="3.5" fill="white"/>
+        <ellipse cx="50" cy="46" rx="3" ry="3.5" fill="white"/>
+        <ellipse cx="38.5" cy="46.5" rx="2" ry="2.2" fill="#4c1d95"/>
+        <ellipse cx="50.5" cy="46.5" rx="2" ry="2.2" fill="#4c1d95"/>
+        <circle cx="39" cy="46" r=".7" fill="white" opacity=".7"/>
+        <circle cx="51" cy="46" r=".7" fill="white" opacity=".7"/>
+        <!-- blush -->
+        <ellipse cx="34" cy="50" rx="3.5" ry="2" fill="#f9a8d4" opacity=".45"/>
+        <ellipse cx="54" cy="50" rx="3.5" ry="2" fill="#f9a8d4" opacity=".45"/>
+        <!-- mouth -->
+        <path d="M40 54 Q44 57 48 54" stroke="#be185d" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+        <!-- small crown -->
+        <path d="M34 29 L36 24 L40 27 L44 22 L48 27 L52 24 L54 29Z" fill="none" stroke="#f0a6e0" stroke-width="1.2" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <div class="reader-name"><input value="Lady of the Archive" /></div>
+    <div style="font-size:11px;color:#a78bca;font-style:italic;margin-top:2px">click name to edit</div>
+  </div>
+
+  <!-- ── Customiser ── -->
+  <div class="customiser">
+    <div class="custom-row">
+      <div class="custom-label">Hair</div>
+      <div class="swatches">
+        <div class="swatch active" style="background:#1e1b4b" title="Midnight"></div>
+        <div class="swatch" style="background:#7c2d12" title="Auburn"></div>
+        <div class="swatch" style="background:#c4b5fd" title="Lavender"></div>
+        <div class="swatch" style="background:#d1d5db" title="Silver"></div>
+        <div class="swatch" style="background:#fbbf24" title="Golden"></div>
+        <div class="swatch" style="background:#831843" title="Crimson"></div>
+      </div>
+    </div>
+    <div class="custom-row">
+      <div class="custom-label">Skin</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#fde68a" title="Fair"></div>
+        <div class="swatch active" style="background:#c4956a" title="Warm"></div>
+        <div class="swatch" style="background:#a0522d" title="Tan"></div>
+        <div class="swatch" style="background:#7c4c2a" title="Bronze"></div>
+        <div class="swatch" style="background:#4a2c17" title="Deep"></div>
+        <div class="swatch" style="background:#d4a5a5" title="Blush"></div>
+      </div>
+    </div>
+    <div class="custom-row">
+      <div class="custom-label">Robe</div>
+      <div class="swatches">
+        <div class="swatch active" style="background:#5b21b6" title="Violet"></div>
+        <div class="swatch" style="background:#831843" title="Crimson"></div>
+        <div class="swatch" style="background:#1e3a5f" title="Midnight blue"></div>
+        <div class="swatch" style="background:#064e3b" title="Forest"></div>
+        <div class="swatch" style="background:#1c1c1c" title="Obsidian"></div>
+        <div class="swatch" style="background:#7f1d1d" title="Blood"></div>
+      </div>
+    </div>
+    <button class="save-btn">✦ Save my avatar ✦</button>
+  </div>
+
+  <!-- ── Stats ── -->
+  <div class="divider">
+    <div class="divider-line"></div>
+    <div class="divider-label">Reading Chronicle</div>
+    <div class="divider-line"></div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-number">12</div>
+      <div class="stat-label">tomes owned</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number muted">8</div>
+      <div class="stat-label">scrolls read</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number" style="color:#c084fc">4</div>
+      <div class="stat-label">on the wishlist</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label" style="margin-bottom:4px">avg verdict</div>
+      <div class="sword-row">
+        <div class="sword-pip filled"></div>
+        <div class="sword-pip filled"></div>
+        <div class="sword-pip filled"></div>
+        <div class="sword-pip filled"></div>
+        <div class="sword-pip empty"></div>
+      </div>
+      <div style="font-size:10px;color:#a78bca;margin-top:4px;font-style:italic">4 of 5 swords</div>
+    </div>
+  </div>
+
+  <!-- ── Mini shelf ── -->
+  <div class="divider">
+    <div class="divider-line"></div>
+    <div class="divider-label">Your Shelf</div>
+    <div class="divider-line"></div>
+  </div>
+
+  <div class="shelf-preview">
+    <div class="shelf-track">
+      <div class="spine" style="height:40px;width:11px;background:#7c3aed"></div>
+      <div class="spine" style="height:44px;width:9px;background:#db2777"></div>
+      <div class="spine" style="height:36px;width:12px;background:#6d28d9"></div>
+      <div class="spine" style="height:42px;width:10px;background:#be185d"></div>
+      <div class="spine" style="height:38px;width:11px;background:#4c1d95"></div>
+      <div class="spine" style="height:44px;width:9px;background:#9333ea"></div>
+      <div class="spine" style="height:40px;width:10px;background:#7c3aed"></div>
+      <div class="spine" style="height:36px;width:12px;background:#5b21b6"></div>
+      <div class="spine empty" style="height:38px;width:10px"></div>
+      <div class="spine empty" style="height:38px;width:10px"></div>
+      <div class="spine empty" style="height:38px;width:10px"></div>
+      <div class="spine empty" style="height:38px;width:10px"></div>
+      <div class="shelf-avatar">🧝</div>
+    </div>
+    <div class="shelf-caption">8 of 12 owned books read · 4 empty slots waiting</div>
+  </div>
+
+  <!-- ── Header chip preview ── -->
+  <div class="divider">
+    <div class="divider-line"></div>
+    <div class="divider-label">Header chip · how it looks</div>
+    <div class="divider-line"></div>
+  </div>
+
+  <div style="text-align:center">
+    <div class="chip-demo">
+      <div class="chip-avatar">🧝</div>
+      <div class="chip-info">
+        <div class="chip-name">Lady of the Archive</div>
+        <div class="chip-count">12 owned · 8 read</div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:#a78bca;font-style:italic;margin-top:8px">click this in the header to reach this page</div>
+  </div>
+
+</div>

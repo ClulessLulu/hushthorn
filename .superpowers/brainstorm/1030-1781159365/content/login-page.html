@@ -1,0 +1,184 @@
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Rozha+One&family=Cinzel:wght@500;600;700&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap');
+
+* { box-sizing: border-box; }
+body {
+  background: #0c0714;
+  background-image:
+    radial-gradient(ellipse 70% 55% at 50% -5%, rgba(76,29,149,0.45), transparent 70%),
+    radial-gradient(ellipse 45% 35% at 50% 18%, rgba(217,70,239,0.13), transparent 70%),
+    radial-gradient(ellipse 35% 30% at 8% 96%, rgba(236,72,153,0.15), transparent 70%),
+    radial-gradient(ellipse 35% 30% at 92% 96%, rgba(168,85,247,0.15), transparent 70%);
+  color: #e9d5ff;
+  font-family: 'EB Garamond', serif;
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+
+.login-card {
+  background: linear-gradient(165deg, rgba(38,23,64,0.95), rgba(17,10,30,0.98));
+  border: 1px solid rgba(217,131,222,0.22);
+  box-shadow: inset 0 0 0 1px rgba(10,6,18,0.9), 0 0 40px rgba(124,58,237,0.15);
+  border-radius: 14px;
+  padding: 36px 32px 32px;
+  width: 100%; max-width: 380px;
+  text-align: center;
+}
+
+/* crown */
+.crown svg { margin: 0 auto 2px; display: block; }
+
+/* title */
+.app-title {
+  font-family: 'Rozha One', serif;
+  font-size: 2.8rem;
+  background: linear-gradient(180deg, #fbcfe8 0%, #d946ef 60%, #a855f7 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 14px rgba(217,70,239,0.35));
+  margin-bottom: 2px; line-height: 1;
+}
+.app-sub { font-style: italic; color: #c084fc; font-size: 0.85rem; margin-bottom: 28px; }
+
+/* tabs */
+.auth-tabs { display: flex; gap: 0; margin-bottom: 24px; border-radius: 6px; overflow: hidden; border: 1px solid rgba(168,85,247,0.3); }
+.auth-tab {
+  flex: 1; padding: 8px; font-family: 'Cinzel', serif; font-size: 10px;
+  text-transform: uppercase; letter-spacing: .08em; cursor: pointer;
+  background: transparent; color: #a78bca; border: none; transition: all .2s;
+}
+.auth-tab.active { background: linear-gradient(135deg, rgba(147,51,234,0.5), rgba(219,39,119,0.4)); color: #f0a6e0; }
+
+/* form */
+.field { margin-bottom: 14px; text-align: left; }
+.field label { display: block; font-family: 'Cinzel', serif; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; color: #a78bca; margin-bottom: 5px; }
+.field input {
+  width: 100%; background: rgba(12,7,20,0.7); border: 1px solid rgba(168,85,247,0.3);
+  border-radius: 5px; padding: 10px 12px; color: #e9d5ff; font-family: 'EB Garamond', serif;
+  font-size: 1rem; outline: none; transition: border-color .2s;
+}
+.field input:focus { border-color: rgba(240,166,224,0.7); box-shadow: 0 0 0 2px rgba(217,70,239,0.12); }
+.field input::placeholder { color: #6b4f7e; }
+
+/* rule */
+.rule { height: 1px; background: linear-gradient(90deg, transparent, rgba(240,166,224,0.4), transparent); margin: 4px 0 18px; }
+
+/* submit */
+.submit-btn {
+  width: 100%; padding: 12px; border: none; border-radius: 5px; cursor: pointer;
+  background: linear-gradient(90deg, #7c3aed, #db2777);
+  color: white; font-family: 'Cinzel', serif; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .1em;
+  box-shadow: 0 0 20px rgba(217,70,239,0.3);
+  transition: opacity .2s, box-shadow .2s;
+}
+.submit-btn:hover { opacity: .9; box-shadow: 0 0 28px rgba(217,70,239,0.45); }
+
+/* divider */
+.or-row { display: flex; align-items: center; gap: 10px; margin: 18px 0; }
+.or-line { flex: 1; height: 1px; background: rgba(168,85,247,0.2); }
+.or-text { font-size: 11px; color: #6b4f7e; font-style: italic; }
+
+/* oauth */
+.oauth-btn {
+  width: 100%; padding: 10px; border-radius: 5px; cursor: pointer;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(168,85,247,0.25);
+  color: #c084fc; font-family: 'Cinzel', serif; font-size: 10px;
+  text-transform: uppercase; letter-spacing: .06em;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: background .2s, border-color .2s;
+}
+.oauth-btn:hover { background: rgba(88,28,135,0.25); border-color: rgba(240,166,224,0.4); }
+
+.forgot { font-size: 12px; color: #6b4f7e; font-style: italic; margin-top: 12px; cursor: pointer; }
+.forgot:hover { color: #c084fc; }
+
+/* signup extra field — hidden by default */
+.signup-only { display: none; }
+.signup-only.show { display: block; }
+
+/* frame */
+.frame {
+  position: fixed; inset: 10px; border-radius: 26px; pointer-events: none; z-index: 40;
+  border: 1px solid rgba(240,166,224,0.28);
+  box-shadow: inset 0 0 0 4px rgba(12,7,20,0.9), inset 0 0 0 5px rgba(168,85,247,0.25), inset 0 0 60px rgba(124,58,237,0.1);
+}
+</style>
+
+<div class="frame"></div>
+
+<div class="login-card">
+
+  <!-- crown -->
+  <svg width="56" height="32" viewBox="0 0 60 33" fill="none" style="margin:0 auto 4px;display:block">
+    <path d="M7 26 L9 10 L19 19 L30 4 L41 19 L51 10 L53 26 Z" stroke="#f0a6e0" stroke-width="1.8" stroke-linejoin="round" fill="none"/>
+    <circle cx="30" cy="3.2" r="2" fill="#f0a6e0"/>
+    <circle cx="8.6" cy="8.6" r="1.7" fill="#f0a6e0"/>
+    <circle cx="51.4" cy="8.6" r="1.7" fill="#f0a6e0"/>
+    <path d="M7 29.5 H53" stroke="#f0a6e0" stroke-width="2.2" stroke-linecap="round"/>
+  </svg>
+
+  <div class="app-title">Hushthorn</div>
+  <div class="app-sub">a candlelit archive for the books you shouldn't read in public</div>
+
+  <!-- login / sign up tabs -->
+  <div class="auth-tabs">
+    <button class="auth-tab active" id="tabLogin" onclick="showTab('login')">Sign in</button>
+    <button class="auth-tab" id="tabSignup" onclick="showTab('signup')">Create account</button>
+  </div>
+
+  <!-- form -->
+  <form onsubmit="return false">
+    <!-- signup only: display name -->
+    <div class="field signup-only" id="fieldName">
+      <label>Your name</label>
+      <input type="text" placeholder="Lady of the Archive…" />
+    </div>
+
+    <div class="field">
+      <label>Email</label>
+      <input type="email" placeholder="your@grimoire.com" />
+    </div>
+
+    <div class="field">
+      <label>Password</label>
+      <input type="password" placeholder="••••••••••••" />
+    </div>
+
+    <!-- signup only: confirm password -->
+    <div class="field signup-only" id="fieldConfirm">
+      <label>Confirm password</label>
+      <input type="password" placeholder="••••••••••••" />
+    </div>
+
+    <div class="rule"></div>
+
+    <button class="submit-btn" id="submitBtn">Enter the Archive</button>
+
+    <div class="or-row">
+      <div class="or-line"></div>
+      <div class="or-text">or continue with</div>
+      <div class="or-line"></div>
+    </div>
+
+    <button class="oauth-btn">
+      <svg width="16" height="16" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+      Continue with Google
+    </button>
+  </form>
+
+  <div class="forgot" id="forgotLink">Forgot your password?</div>
+
+</div>
+
+<script>
+function showTab(tab) {
+  const isSignup = tab === 'signup';
+  document.getElementById('tabLogin').classList.toggle('active', !isSignup);
+  document.getElementById('tabSignup').classList.toggle('active', isSignup);
+  document.getElementById('fieldName').classList.toggle('show', isSignup);
+  document.getElementById('fieldConfirm').classList.toggle('show', isSignup);
+  document.getElementById('submitBtn').textContent = isSignup ? '✦ Open the Archive ✦' : 'Enter the Archive';
+  document.getElementById('forgotLink').style.display = isSignup ? 'none' : 'block';
+}
+</script>
