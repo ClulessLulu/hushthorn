@@ -292,6 +292,20 @@ const seedBooks = [
 /* ── main app ──────────────────────────────────────────────── */
 
 export default function Hushthorn() {
+  const [session, setSession] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthReady(true);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      setSession(session);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
   const [books, setBooks] = useState(seedBooks);
   const [shelfFilter, setShelfFilter] = useState("all");
   const [activeId, setActiveId] = useState(null);
@@ -378,6 +392,15 @@ export default function Hushthorn() {
     { key: "read", label: "Read" },
     { key: "unread", label: "Unread" },
   ];
+
+  if (!authReady) return (
+    <div className="ht-bg ht-body" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <style>{FONT_CSS}</style>
+      <div className="ht-frame" aria-hidden="true" />
+      <p className="ht-display text-purple-300/60 text-sm uppercase tracking-widest">Opening the archive…</p>
+    </div>
+  );
+  if (!session) return <AuthPage />;
 
   return (
     <div className="ht-bg ht-body text-purple-100">
@@ -906,6 +929,123 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
           The Oracle estimates each pepper rating — your own judgment, as always, is final.
         </p>
       )}
+    </div>
+  );
+}
+
+/* ── auth page ─────────────────────────────────────────────── */
+
+function AuthPage() {
+  const [mode, setMode] = useState('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (mode === 'signup' && password !== confirm) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error: authError } = mode === 'login'
+        ? await supabase.auth.signInWithPassword({ email, password })
+        : await supabase.auth.signUp({ email, password });
+      if (authError) throw authError;
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signInWithGoogle = () =>
+    supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    });
+
+  const INPUT = "w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2.5 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400 text-purple-100";
+  const LBL = "block ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1.5";
+
+  return (
+    <div className="ht-bg ht-body min-h-screen flex items-center justify-center p-4">
+      <style>{FONT_CSS}</style>
+      <div className="ht-frame" aria-hidden="true" />
+      <div className="ht-card rounded-xl p-8 w-full max-w-sm text-center">
+        <Crown size={52} />
+        <h1 className="ht-blackletter ht-glow text-5xl text-transparent bg-clip-text bg-gradient-to-b from-pink-200 via-fuchsia-300 to-fuchsia-500 mt-1 mb-1">
+          Hushthorn
+        </h1>
+        <p className="text-[13px] text-pink-200/60 italic mb-6">
+          a candlelit archive for the books you shouldn't read in public
+        </p>
+
+        <div className="flex mb-6 rounded-sm overflow-hidden border border-purple-700/40">
+          {['login', 'signup'].map(m => (
+            <button key={m} onClick={() => { setMode(m); setError(''); }}
+              className={`flex-1 py-2 ht-display text-[10px] uppercase tracking-widest transition-colors ${
+                mode === m
+                  ? 'bg-gradient-to-r from-purple-600/60 to-pink-600/50 text-pink-200'
+                  : 'text-purple-400 hover:text-purple-200'
+              }`}>
+              {m === 'login' ? 'Sign in' : 'Create account'}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={submit} className="space-y-3 text-left">
+          <div>
+            <label className={LBL}>Email</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+              required placeholder="your@grimoire.com" className={INPUT} />
+          </div>
+          <div>
+            <label className={LBL}>Password</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+              required placeholder="••••••••••••" className={INPUT} />
+          </div>
+          {mode === 'signup' && (
+            <div>
+              <label className={LBL}>Confirm password</label>
+              <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
+                placeholder="••••••••••••" className={INPUT} />
+            </div>
+          )}
+
+          {error && <p className="text-sm text-pink-300 text-center py-1">{error}</p>}
+
+          <div className="ht-rule my-1" aria-hidden="true" />
+
+          <button type="submit" disabled={loading}
+            className="ht-display w-full py-3 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest">
+            {loading
+              ? 'Opening the archive…'
+              : mode === 'login' ? 'Enter the Archive' : '✦ Open the Archive ✦'}
+          </button>
+        </form>
+
+        <div className="flex items-center gap-3 my-4">
+          <span className="ht-rule flex-1 inline-block" />
+          <span className="text-purple-400/60 text-xs italic">or</span>
+          <span className="ht-rule flex-1 inline-block" />
+        </div>
+
+        <button onClick={signInWithGoogle}
+          className="ht-display w-full py-2.5 rounded-sm border border-purple-700/40 bg-purple-950/40 hover:bg-purple-900/50 text-purple-300 text-[10px] uppercase tracking-widest flex items-center justify-center gap-2">
+          <svg width="14" height="14" viewBox="0 0 24 24">
+            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+          </svg>
+          Continue with Google
+        </button>
+      </div>
     </div>
   );
 }
