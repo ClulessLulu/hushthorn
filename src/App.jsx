@@ -308,7 +308,44 @@ export default function Hushthorn() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const [books, setBooks] = useState(seedBooks);
+  const [books, setBooks] = useState([]);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [avatar, setAvatar] = useState({
+    name: 'Keeper of the Archive',
+    gender: 'nonbinary',
+    hair_color: '#1e1b4b',
+    skin_tone: '#c4956a',
+    robe_color: '#5b21b6',
+  });
+  const [avatarOpen, setAvatarOpen] = useState(false);
+
+  useEffect(() => {
+    if (!session) { setBooks([]); return; }
+    setDataLoading(true);
+    Promise.all([
+      supabase.from('books').select('*').order('created_at', { ascending: false }),
+      supabase.from('notes').select('*').order('created_at', { ascending: false }),
+      supabase.from('avatars').select('*').eq('user_id', session.user.id).maybeSingle(),
+    ]).then(([{ data: booksData }, { data: notesData }, { data: avatarData }]) => {
+      const notesByBook = {};
+      for (const n of (notesData || [])) {
+        if (!notesByBook[n.book_id]) notesByBook[n.book_id] = [];
+        notesByBook[n.book_id].push({
+          id: n.id, page: n.page, isQuote: n.is_quote,
+          text: n.text, isVoice: n.is_voice, date: n.date,
+        });
+      }
+      setBooks((booksData || []).map(b => ({
+        id: b.id, title: b.title, author: b.author, year: b.year,
+        coverUrl: b.cover_url, genres: b.genres || [], shelf: b.shelf,
+        read: b.read, overall: b.overall, smut: b.smut,
+        notes: notesByBook[b.id] || [],
+      })));
+      if (avatarData) setAvatar(avatarData);
+      setDataLoading(false);
+    });
+  }, [session]);
+
   const [shelfFilter, setShelfFilter] = useState("all");
   const [activeId, setActiveId] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -474,6 +511,10 @@ export default function Hushthorn() {
           <OracleSection books={books} onAddToWishlist={addBook} />
         ) : view === "pair" ? (
           <PairSection books={books} onImport={importBooks} />
+        ) : dataLoading ? (
+          <div className="text-center py-20 text-purple-300/60">
+            <p className="ht-display text-xl">The archive stirs…</p>
+          </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-20 text-purple-300/60">
             <p className="ht-display text-xl">This shelf lies bare.</p>
