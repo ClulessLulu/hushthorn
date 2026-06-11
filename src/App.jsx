@@ -534,6 +534,14 @@ export default function Hushthorn() {
           <span className="text-pink-300/70 text-[10px]">◆</span>
           <span className="ht-rule w-24 inline-block" />
         </div>
+        <div className="mt-4 flex justify-center">
+          <AvatarChip
+            avatar={avatar}
+            ownedCount={books.filter(b => b.shelf === 'owned').length}
+            readCount={books.filter(b => b.read).length}
+            onClick={() => setAvatarOpen(true)}
+          />
+        </div>
       </header>
 
       {/* shelf banners */}
@@ -637,6 +645,15 @@ export default function Hushthorn() {
       </main>
 
       {addOpen && <AddBookModal onAdd={addBook} onClose={() => setAddOpen(false)} />}
+      {avatarOpen && (
+        <AvatarPage
+          avatar={avatar}
+          books={books}
+          session={session}
+          onSave={(updated) => { setAvatar(updated); setAvatarOpen(false); }}
+          onClose={() => setAvatarOpen(false)}
+        />
+      )}
       {activeBook && (
         <DetailPanel
           book={activeBook}
@@ -1050,9 +1067,207 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
   );
 }
 
+/* ── avatar chip + page ────────────────────────────────────── */
+
+function AvatarChip({ avatar, ownedCount, readCount, onClick }) {
+  const emoji = { female: '🧝‍♀️', male: '🧝‍♂️', nonbinary: '🧝' }[avatar.gender] || '🧝';
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-2 bg-purple-900/50 hover:bg-purple-800/60 border border-purple-600/40 hover:border-pink-400/50 rounded-full px-3 py-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
+    >
+      <span className="text-xl leading-none">{emoji}</span>
+      <div className="text-left">
+        <div className="ht-display text-[10px] text-pink-200 leading-tight">{avatar.name}</div>
+        <div className="ht-display text-[9px] text-purple-300/80">{ownedCount} owned · {readCount} read</div>
+      </div>
+    </button>
+  );
+}
+
+const HAIR_STYLES = {
+  female:   'M28 40 Q28 24 44 23 Q60 24 60 40 Q57 28 44 27 Q31 28 28 40Z M28 40 Q24 55 27 65 Q26 50 28 40Z M60 40 Q64 55 61 65 Q62 50 60 40Z',
+  male:     'M29 42 Q28 26 44 24 Q60 26 59 42 Q57 30 44 28 Q31 30 29 42Z',
+  nonbinary:'M28 40 Q28 24 44 23 Q60 24 60 40 Q57 28 44 27 Q31 28 28 40Z M60 40 Q64 48 61 56 Q62 44 60 40Z',
+};
+const LASH_STYLES = {
+  female:   'M35 43.5 L33.5 41.5 M37.5 43 L37 41 M40 43.2 L40.5 41.2 M47 43.5 L45.5 41.5 M49.5 43 L49 41 M52 43.2 L52.5 41.2',
+  male:     '',
+  nonbinary:'M37.5 43 L37 41.2 M40 43.2 L40.5 41.4 M49.5 43 L49 41.2 M52 43.2 L52.5 41.4',
+};
+const HAIR_SWATCHES = ['#1e1b4b','#7c2d12','#c4b5fd','#d1d5db','#fbbf24','#831843'];
+const SKIN_SWATCHES = ['#fde68a','#c4956a','#a0522d','#7c4c2a','#4a2c17','#d4a5a5'];
+const ROBE_SWATCHES = ['#5b21b6','#831843','#1e3a5f','#064e3b','#1c1c1c','#9333ea'];
+const AVATAR_EMOJI  = { female: '🧝‍♀️', male: '🧝‍♂️', nonbinary: '🧝' };
+
+function AvatarPage({ avatar, books, session, onSave, onClose }) {
+  const [draft, setDraft] = useState({ ...avatar });
+  const [saving, setSaving] = useState(false);
+
+  const owned       = books.filter(b => b.shelf === 'owned');
+  const readCount   = books.filter(b => b.read).length;
+  const wishlistCount = books.filter(b => b.shelf === 'wishlist').length;
+  const ratedBooks  = books.filter(b => b.overall > 0);
+  const avgRating   = ratedBooks.length
+    ? Math.round(ratedBooks.reduce((s, b) => s + b.overall, 0) / ratedBooks.length)
+    : 0;
+
+  const save = async () => {
+    setSaving(true);
+    const { error } = await supabase.from('avatars').upsert({
+      user_id:    session.user.id,
+      name:       draft.name,
+      gender:     draft.gender,
+      hair_color: draft.hair_color,
+      skin_tone:  draft.skin_tone,
+      robe_color: draft.robe_color,
+      updated_at: new Date().toISOString(),
+    });
+    if (!error) onSave(draft);
+    setSaving(false);
+  };
+
+  const SwatchRow = ({ label, field, options }) => (
+    <div className="flex items-center gap-3">
+      <span className="ht-display text-[9px] uppercase tracking-widest text-purple-400 w-12 shrink-0">{label}</span>
+      <div className="flex gap-1.5 flex-wrap">
+        {options.map(color => (
+          <button key={color} onClick={() => setDraft(d => ({ ...d, [field]: color }))}
+            aria-label={color}
+            className={`w-6 h-6 rounded-full transition-transform hover:scale-110 focus:outline-none ${
+              draft[field] === color ? 'ring-2 ring-pink-400 ring-offset-1 ring-offset-purple-950 scale-110' : ''
+            }`}
+            style={{ background: color }} />
+        ))}
+      </div>
+    </div>
+  );
+
+  const genders = [
+    { key: 'female',    icon: '♀', label: 'Female' },
+    { key: 'male',      icon: '♂', label: 'Male' },
+    { key: 'nonbinary', icon: '⚧', label: 'Non-binary' },
+  ];
+
+  const spineColors = ['#7c3aed','#db2777','#6d28d9','#be185d','#4c1d95','#9333ea'];
+
+  return (
+    <Overlay onClose={onClose} label="Avatar profile">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="ht-display text-xl text-pink-200">Your Avatar</h2>
+        <button onClick={onClose} className="text-purple-300 hover:text-pink-300 text-xl px-2" aria-label="Close">✕</button>
+      </div>
+
+      {/* avatar SVG preview */}
+      <div className="flex flex-col items-center mb-5">
+        <div className="w-28 h-28 rounded-full bg-gradient-to-br from-purple-800/80 to-pink-900/50 border-2 border-pink-400/40 shadow-[0_0_30px_rgba(217,70,239,0.2)] flex items-center justify-center mb-3 overflow-hidden">
+          <svg width="88" height="88" viewBox="0 0 88 88" fill="none">
+            <ellipse cx="44" cy="78" rx="22" ry="14" fill={draft.robe_color} opacity=".9"/>
+            <path d="M26 72 Q44 66 62 72 L64 88 H24 Z" fill={draft.robe_color} opacity=".7"/>
+            <rect x="30" y="63" width="18" height="13" rx="1.5" fill="#db2777" opacity=".9"/>
+            <line x1="39" y1="63" x2="39" y2="76" stroke="#f9a8d4" strokeWidth="1"/>
+            <rect x="40" y="53" width="8" height="8" rx="2" fill={draft.skin_tone}/>
+            <ellipse cx="44" cy="46" rx="16" ry="17" fill={draft.skin_tone}/>
+            <path d={HAIR_STYLES[draft.gender]} fill={draft.hair_color}/>
+            <ellipse cx="38" cy="46" rx="3" ry="3.5" fill="white"/>
+            <ellipse cx="50" cy="46" rx="3" ry="3.5" fill="white"/>
+            <ellipse cx="38.5" cy="46.5" rx="2" ry="2.2" fill="#4c1d95"/>
+            <ellipse cx="50.5" cy="46.5" rx="2" ry="2.2" fill="#4c1d95"/>
+            <circle cx="39" cy="46" r=".7" fill="white" opacity=".7"/>
+            <circle cx="51" cy="46" r=".7" fill="white" opacity=".7"/>
+            {LASH_STYLES[draft.gender] && (
+              <path d={LASH_STYLES[draft.gender]} stroke="#1e1b4b" strokeWidth="1" strokeLinecap="round"/>
+            )}
+            <ellipse cx="34" cy="50" rx="3.5" ry="2" fill="#f9a8d4" opacity=".4"/>
+            <ellipse cx="54" cy="50" rx="3.5" ry="2" fill="#f9a8d4" opacity=".4"/>
+            <path d="M40 54 Q44 57 48 54" stroke="#be185d" strokeWidth="1.3" fill="none" strokeLinecap="round"/>
+            <path d="M34 29 L36 24 L40 27 L44 22 L48 27 L52 24 L54 29Z" fill="none" stroke="#f0a6e0" strokeWidth="1.2" strokeLinejoin="round"/>
+          </svg>
+        </div>
+        <input
+          value={draft.name}
+          onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+          className="bg-transparent border-b border-pink-400/40 focus:border-pink-400 focus:outline-none text-pink-200 ht-display text-sm text-center px-2 py-1 w-52"
+        />
+        <p className="text-[11px] text-purple-400/60 italic mt-1">click name to edit</p>
+      </div>
+
+      {/* customiser */}
+      <div className="ht-card rounded-md p-4 space-y-3 mb-5">
+        <div className="flex items-center gap-3">
+          <span className="ht-display text-[9px] uppercase tracking-widest text-purple-400 w-12 shrink-0">Form</span>
+          <div className="flex gap-2 flex-1">
+            {genders.map(g => (
+              <button key={g.key} onClick={() => setDraft(d => ({ ...d, gender: g.key }))}
+                className={`flex-1 py-1.5 rounded-sm border text-center transition-colors focus:outline-none ${
+                  draft.gender === g.key
+                    ? 'border-pink-400/60 bg-purple-600/30 text-pink-200'
+                    : 'border-purple-700/40 text-purple-400 hover:border-purple-500/60'
+                }`}>
+                <div className="text-sm">{g.icon}</div>
+                <div className="ht-display text-[8px] uppercase tracking-wide">{g.label}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+        <SwatchRow label="Hair"  field="hair_color" options={HAIR_SWATCHES} />
+        <SwatchRow label="Skin"  field="skin_tone"  options={SKIN_SWATCHES} />
+        <SwatchRow label="Robe"  field="robe_color" options={ROBE_SWATCHES} />
+        <button onClick={save} disabled={saving}
+          className="ht-display w-full py-2.5 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest mt-2">
+          {saving ? 'Inscribing…' : '✦ Save avatar ✦'}
+        </button>
+      </div>
+
+      {/* stats */}
+      <h3 className="ht-display text-xs uppercase tracking-widest text-purple-300/70 mb-2">Reading Chronicle</h3>
+      <div className="grid grid-cols-2 gap-2 mb-5">
+        {[
+          { n: owned.length,    label: 'tomes owned',    color: 'text-pink-200' },
+          { n: readCount,       label: 'scrolls read',   color: 'text-purple-300' },
+          { n: wishlistCount,   label: 'on the wishlist',color: 'text-indigo-300' },
+          { n: avgRating || 0,  label: avgRating ? `avg · ${'⚔'.repeat(avgRating)}` : 'avg verdict', color: 'text-pink-200' },
+        ].map(({ n, label, color }) => (
+          <div key={label} className="ht-card rounded-md p-3">
+            <div className={`ht-display text-2xl ${color}`}>{n}</div>
+            <div className="text-xs text-purple-400/70 italic">{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* mini shelf */}
+      <h3 className="ht-display text-xs uppercase tracking-widest text-purple-300/70 mb-2">Your Shelf</h3>
+      <div className="ht-card rounded-md p-3">
+        <div className="flex items-end gap-0.5 h-12 bg-black/20 rounded-sm px-2 pt-1 border-b-2 border-purple-500/40 relative overflow-hidden">
+          {owned.slice(0, 20).map((b, i) => (
+            <div key={b.id} style={{
+              height: `${28 + (i % 3) * 8}px`, width: '10px',
+              background: spineColors[i % spineColors.length],
+              borderRadius: '2px 2px 0 0',
+            }} />
+          ))}
+          {Array.from({ length: Math.max(0, 8 - owned.length) }).map((_, i) => (
+            <div key={i} style={{
+              height: '32px', width: '10px', borderRadius: '2px 2px 0 0',
+              border: '1px dashed rgba(168,85,247,0.3)',
+            }} />
+          ))}
+          <span className="absolute right-2 bottom-0 text-xl leading-none">
+            {AVATAR_EMOJI[draft.gender] || '🧝'}
+          </span>
+        </div>
+        <p className="text-[11px] text-purple-400/60 italic text-center mt-2">
+          {readCount} of {owned.length} owned books read
+          {owned.length < 8 ? ` · ${8 - owned.length} empty slot${8 - owned.length !== 1 ? 's' : ''} waiting` : ''}
+        </p>
+      </div>
+    </Overlay>
+  );
+}
+
 /* ── auth page ─────────────────────────────────────────────── */
 
-const AUTH_INPUT = "w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2.5 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400 text-purple-100";
+const AUTH_INPUT ="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2.5 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400 text-purple-100";
 const AUTH_LBL = "block ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1.5";
 
 function AuthPage() {
