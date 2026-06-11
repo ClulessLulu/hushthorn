@@ -296,10 +296,12 @@ export default function Hushthorn() {
   const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setAuthReady(true);
-    });
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+        setAuthReady(true);
+      })
+      .catch(() => setAuthReady(true));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
       setSession(session);
     });
@@ -935,6 +937,9 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
 
 /* ── auth page ─────────────────────────────────────────────── */
 
+const AUTH_INPUT = "w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2.5 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400 text-purple-100";
+const AUTH_LBL = "block ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1.5";
+
 function AuthPage() {
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
@@ -952,10 +957,17 @@ function AuthPage() {
     }
     setLoading(true);
     try {
-      const { error: authError } = mode === 'login'
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password });
-      if (authError) throw authError;
+      if (mode === 'login') {
+        const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
+        if (authError) throw authError;
+      } else {
+        const { data, error: authError } = await supabase.auth.signUp({ email, password });
+        if (authError) throw authError;
+        if (!data.session) {
+          setError('Check your inbox to confirm your email before signing in.');
+          return;
+        }
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -968,9 +980,6 @@ function AuthPage() {
       provider: 'google',
       options: { redirectTo: window.location.origin },
     });
-
-  const INPUT = "w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2.5 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400 text-purple-100";
-  const LBL = "block ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1.5";
 
   return (
     <div className="ht-bg ht-body min-h-screen flex items-center justify-center p-4">
@@ -1000,20 +1009,20 @@ function AuthPage() {
 
         <form onSubmit={submit} className="space-y-3 text-left">
           <div>
-            <label className={LBL}>Email</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-              required placeholder="your@grimoire.com" className={INPUT} />
+            <label htmlFor="auth-email" className={AUTH_LBL}>Email</label>
+            <input id="auth-email" type="email" value={email} onChange={e => setEmail(e.target.value)}
+              required placeholder="your@grimoire.com" className={AUTH_INPUT} />
           </div>
           <div>
-            <label className={LBL}>Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-              required placeholder="••••••••••••" className={INPUT} />
+            <label htmlFor="auth-password" className={AUTH_LBL}>Password</label>
+            <input id="auth-password" type="password" value={password} onChange={e => setPassword(e.target.value)}
+              required placeholder="••••••••••••" className={AUTH_INPUT} />
           </div>
           {mode === 'signup' && (
             <div>
-              <label className={LBL}>Confirm password</label>
-              <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-                placeholder="••••••••••••" className={INPUT} />
+              <label htmlFor="auth-confirm" className={AUTH_LBL}>Confirm password</label>
+              <input id="auth-confirm" type="password" required value={confirm} onChange={e => setConfirm(e.target.value)}
+                placeholder="••••••••••••" className={AUTH_INPUT} />
             </div>
           )}
 
