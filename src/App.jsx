@@ -910,7 +910,7 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
 "title" (string), "author" (string), "genre" (short string, e.g. "Vampire romantasy"), "reason" (one sentence explaining why it fits THIS library — reference their taste specifically), "spice" (integer 1-5, your estimate of its spice level).`;
 
       const data = await callClaude({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-6",
           max_tokens: 1000,
           messages: [{ role: "user", content: prompt }],
       });
@@ -1394,6 +1394,7 @@ function AddBookModal({ onAdd, onClose }) {
   const scanLoopRef = useRef(null);
   const [liveActive, setLiveActive] = useState(false);
   const [liveStatus, setLiveStatus] = useState("");
+  const [photoPreview, setPhotoPreview] = useState("");
 
   useEffect(() => {
     const q = query.trim();
@@ -1476,7 +1477,7 @@ function AddBookModal({ onAdd, onClose }) {
     setGenreLoading(true);
     try {
       const data = await callClaude({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-6",
           max_tokens: 1000,
           messages: [{
             role: "user",
@@ -1497,14 +1498,14 @@ function AddBookModal({ onAdd, onClose }) {
           genres: [...m.genres, ...fresh].slice(0, 6),
         };
       });
-      // best-effort cover from Google Books if none yet
+      // best-effort cover from Google Books if none yet (data URLs don't count)
       setManual((m) => {
-        if (m.coverUrl) return m;
+        if (m.coverUrl && !m.coverUrl.startsWith("data:")) return m;
         fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(title.trim())}&maxResults=1&printType=books`)
           .then((r) => r.json())
           .then((d) => {
             const thumbnail = d.items?.[0]?.volumeInfo?.imageLinks?.thumbnail;
-            if (thumbnail) setManual((m2) => (m2.coverUrl ? m2 : { ...m2, coverUrl: thumbnail.replace("http://", "https://") }));
+            if (thumbnail) setManual((m2) => ({ ...m2, coverUrl: thumbnail.replace("http://", "https://") }));
           })
           .catch(() => {});
         return m;
@@ -1531,7 +1532,7 @@ function AddBookModal({ onAdd, onClose }) {
       const [prefix, b64] = dataUrl.split(",");
       const mediaType = (prefix.match(/data:(.*?);/) || [])[1] || "image/jpeg";
       const data = await callClaude({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-6",
           max_tokens: 1000,
           messages: [{
             role: "user",
@@ -1563,7 +1564,7 @@ function AddBookModal({ onAdd, onClose }) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      setManual((m) => ({ ...m, coverUrl: reader.result }));
+      setPhotoPreview(reader.result);
       scanCover(reader.result);
     };
     reader.readAsDataURL(file);
@@ -1664,7 +1665,7 @@ function AddBookModal({ onAdd, onClose }) {
     canvas.getContext("2d").drawImage(v, 0, 0);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
     stopCamera();
-    setManual((m) => ({ ...m, coverUrl: dataUrl }));
+    setPhotoPreview(dataUrl);
     setMode("photo");
     scanCover(dataUrl);
   };
@@ -1764,7 +1765,7 @@ function AddBookModal({ onAdd, onClose }) {
             className="w-full aspect-[3/2] rounded-sm border-2 border-dashed border-purple-600/50 hover:border-pink-400/70 flex items-center justify-center overflow-hidden bg-purple-950/40"
           >
             <CoverImage
-              src={manual.coverUrl}
+              src={manual.coverUrl || photoPreview}
               alt="Uploaded cover"
               className="h-full object-contain"
               fallback={<span className="text-[15px] text-purple-300/70">📷 Tap to upload a cover photo</span>}
