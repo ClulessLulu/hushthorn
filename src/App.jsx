@@ -249,45 +249,6 @@ function Meter({ value, onChange, Icon, label, readOnly = false, size }) {
   );
 }
 
-/* ── seed data ─────────────────────────────────────────────── */
-
-const seedBooks = [
-  {
-    id: "seed-1",
-    title: "A Court of Mist and Fury",
-    author: "Sarah J. Maas",
-    year: 2016,
-    coverUrl: "https://covers.openlibrary.org/b/id/14333139-M.jpg",
-    genres: ["Romantasy", "Fae", "Epic fantasy"],
-    shelf: "owned",
-    read: true,
-    overall: 5,
-    smut: 4,
-    notes: [
-      {
-        id: "n1",
-        page: "112",
-        isQuote: true,
-        text: "To the stars who listen — and the dreams that are answered.",
-        isVoice: false,
-        date: "Jun 2",
-      },
-    ],
-  },
-  {
-    id: "seed-2",
-    title: "The Serpent and the Wings of Night",
-    author: "Carissa Broadbent",
-    year: 2022,
-    coverUrl: "https://covers.openlibrary.org/b/id/13451855-M.jpg",
-    genres: ["Vampires", "Dark romantasy"],
-    shelf: "wishlist",
-    read: false,
-    overall: 0,
-    smut: 0,
-    notes: [],
-  },
-];
 
 /* ── main app ──────────────────────────────────────────────── */
 
@@ -344,7 +305,11 @@ export default function Hushthorn() {
         read: b.read, overall: b.overall, smut: b.smut,
         notes: notesByBook[b.id] || [],
       })));
-      if (avatarData) setAvatar(avatarData);
+      if (avatarData) setAvatar({
+        name: avatarData.name, gender: avatarData.gender,
+        hair_color: avatarData.hair_color, skin_tone: avatarData.skin_tone,
+        robe_color: avatarData.robe_color,
+      });
     }).catch(err => console.error('data load:', err))
       .finally(() => setDataLoading(false));
   }, [session]);
@@ -542,6 +507,14 @@ export default function Hushthorn() {
             onClick={() => setAvatarOpen(true)}
           />
         </div>
+        <div className="mt-2 flex justify-center">
+          <button
+            onClick={() => supabase.auth.signOut()}
+            className="ht-display text-[9px] uppercase tracking-widest text-purple-400/50 hover:text-pink-300/70 transition-colors"
+          >
+            leave the archive
+          </button>
+        </div>
       </header>
 
       {/* shelf banners */}
@@ -664,7 +637,7 @@ export default function Hushthorn() {
       )}
 
       <footer className="text-center pb-8 text-sm text-purple-400/40 italic">
-        Hushthorn · demo build · the archives are kept by Open Library
+        Hushthorn · your archive, your secrets
       </footer>
     </div>
   );
@@ -1070,7 +1043,7 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
 /* ── avatar chip + page ────────────────────────────────────── */
 
 function AvatarChip({ avatar, ownedCount, readCount, onClick }) {
-  const emoji = { female: '🧝‍♀️', male: '🧝‍♂️', nonbinary: '🧝' }[avatar.gender] || '🧝';
+  const emoji = AVATAR_EMOJI[avatar.gender] || '🧝';
   return (
     <button
       onClick={onClick}
@@ -1103,6 +1076,7 @@ const AVATAR_EMOJI  = { female: '🧝‍♀️', male: '🧝‍♂️', nonbinar
 function AvatarPage({ avatar, books, session, onSave, onClose }) {
   const [draft, setDraft] = useState({ ...avatar });
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const owned       = books.filter(b => b.shelf === 'owned');
   const readCount   = books.filter(b => b.read).length;
@@ -1114,17 +1088,26 @@ function AvatarPage({ avatar, books, session, onSave, onClose }) {
 
   const save = async () => {
     setSaving(true);
-    const { error } = await supabase.from('avatars').upsert({
-      user_id:    session.user.id,
-      name:       draft.name,
-      gender:     draft.gender,
-      hair_color: draft.hair_color,
-      skin_tone:  draft.skin_tone,
-      robe_color: draft.robe_color,
-      updated_at: new Date().toISOString(),
-    });
-    if (!error) onSave(draft);
-    setSaving(false);
+    setSaveError('');
+    try {
+      const { error } = await supabase.from('avatars').upsert({
+        user_id:    session.user.id,
+        name:       draft.name,
+        gender:     draft.gender,
+        hair_color: draft.hair_color,
+        skin_tone:  draft.skin_tone,
+        robe_color: draft.robe_color,
+        updated_at: new Date().toISOString(),
+      });
+      if (error) {
+        console.error('avatar upsert:', error.message);
+        setSaveError("The scribe's quill faltered. Please try again.");
+      } else {
+        onSave({ name: draft.name, gender: draft.gender, hair_color: draft.hair_color, skin_tone: draft.skin_tone, robe_color: draft.robe_color });
+      }
+    } finally {
+      setSaving(false);
+    }
   };
 
   const SwatchRow = ({ label, field, options }) => (
@@ -1133,7 +1116,7 @@ function AvatarPage({ avatar, books, session, onSave, onClose }) {
       <div className="flex gap-1.5 flex-wrap">
         {options.map(color => (
           <button key={color} onClick={() => setDraft(d => ({ ...d, [field]: color }))}
-            aria-label={color}
+            aria-label={`${label}: ${color}`}
             className={`w-6 h-6 rounded-full transition-transform hover:scale-110 focus:outline-none ${
               draft[field] === color ? 'ring-2 ring-pink-400 ring-offset-1 ring-offset-purple-950 scale-110' : ''
             }`}
@@ -1185,6 +1168,7 @@ function AvatarPage({ avatar, books, session, onSave, onClose }) {
           </svg>
         </div>
         <input
+          aria-label="Avatar name"
           value={draft.name}
           onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
           className="bg-transparent border-b border-pink-400/40 focus:border-pink-400 focus:outline-none text-pink-200 ht-display text-sm text-center px-2 py-1 w-52"
@@ -1217,6 +1201,7 @@ function AvatarPage({ avatar, books, session, onSave, onClose }) {
           className="ht-display w-full py-2.5 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest mt-2">
           {saving ? 'Inscribing…' : '✦ Save avatar ✦'}
         </button>
+        {saveError && <p className="text-pink-400 text-xs text-center mt-1">{saveError}</p>}
       </div>
 
       {/* stats */}
