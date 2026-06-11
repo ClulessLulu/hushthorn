@@ -432,16 +432,17 @@ export default function Hushthorn() {
   });
 
   const updateBook = async (id, patch) => {
-    // Handle notes diff — detects one add or one delete per call
+    // Handle notes diff — detects adds and/or deletes by comparing ID sets
     if ('notes' in patch) {
       const current = books.find(b => b.id === id);
+      if (!current) return;
       const currentIds = new Set(current.notes.map(n => n.id));
       const patchIds = new Set(patch.notes.map(n => n.id));
       const added = patch.notes.find(n => !currentIds.has(n.id));
       const removed = current.notes.find(n => !patchIds.has(n.id));
       if (added) {
-        await supabase.from('notes').insert({
-          id: crypto.randomUUID(),
+        const { error } = await supabase.from('notes').insert({
+          id: added.id,
           book_id: id,
           user_id: session.user.id,
           page: added.page,
@@ -450,9 +451,11 @@ export default function Hushthorn() {
           is_voice: added.isVoice,
           date: added.date,
         });
+        if (error) { console.error('note insert:', error.message); return; }
       }
       if (removed) {
-        await supabase.from('notes').delete().eq('id', removed.id);
+        const { error } = await supabase.from('notes').delete().eq('id', removed.id);
+        if (error) { console.error('note delete:', error.message); return; }
       }
     }
     // Handle book field changes
@@ -461,13 +464,15 @@ export default function Hushthorn() {
       Object.entries(FIELD_MAP).filter(([k]) => k in patch).map(([k, v]) => [v, patch[k]])
     );
     if (Object.keys(dbPatch).length) {
-      await supabase.from('books').update(dbPatch).eq('id', id);
+      const { error } = await supabase.from('books').update(dbPatch).eq('id', id);
+      if (error) { console.error('updateBook:', error.message); return; }
     }
     setBooks(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
   };
 
   const removeBook = async (id) => {
-    await supabase.from('books').delete().eq('id', id);
+    const { error } = await supabase.from('books').delete().eq('id', id);
+    if (error) { console.error('removeBook:', error.message); return; }
     setBooks(prev => prev.filter(b => b.id !== id));
     setActiveId(null);
   };
@@ -1809,7 +1814,7 @@ function NotesSection({ book, onUpdate }) {
   const addNote = () => {
     if (!text.trim()) return;
     const note = {
-      id: `n-${Date.now()}`,
+      id: crypto.randomUUID(),
       page: page.trim(),
       isQuote,
       text: text.trim(),
