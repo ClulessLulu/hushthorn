@@ -355,17 +355,17 @@ export default function Hushthorn() {
   const [view, setView] = useState("library"); // library | oracle | pair
 
   // Smart-merge imported books: update existing entries, add new ones.
-  const importBooks = (items) => {
+  const importBooks = async (items) => {
+    let additions = [];
     setBooks((prev) => {
       const updated = prev.map((b) => ({ ...b, notes: [...b.notes] }));
       const byTitle = new Map(updated.map((b) => [b.title.toLowerCase(), b]));
-      const additions = [];
       const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      let c = 0;
+      const newAdditions = [];
       for (const item of items) {
         const key = item.title.toLowerCase();
         const newNotes = (item.notes || []).map((n) => ({
-          id: `imp-${Date.now()}-${c++}`,
+          id: crypto.randomUUID(),
           page: n.page || "",
           isQuote: !!n.isQuote,
           text: n.text,
@@ -382,8 +382,8 @@ export default function Hushthorn() {
           if ((!existing.genres || existing.genres.length === 0) && item.genres?.length) existing.genres = item.genres;
           if (!existing.coverUrl && item.coverUrl) existing.coverUrl = item.coverUrl;
         } else {
-          additions.push({
-            id: `b-${Date.now()}-${c++}`,
+          newAdditions.push({
+            id: crypto.randomUUID(),
             title: item.title,
             author: item.author || "Unknown author",
             year: null,
@@ -397,8 +397,27 @@ export default function Hushthorn() {
           });
         }
       }
-      return [...additions, ...updated];
+      additions = newAdditions;
+      return [...newAdditions, ...updated];
     });
+    // Write new books to Supabase
+    if (additions.length) {
+      await supabase.from('books').insert(
+        additions.map(b => ({
+          id: b.id,
+          user_id: session.user.id,
+          title: b.title,
+          author: b.author,
+          year: b.year ?? null,
+          cover_url: b.coverUrl,
+          genres: b.genres,
+          shelf: b.shelf,
+          read: b.read,
+          overall: b.overall,
+          smut: b.smut,
+        }))
+      );
+    }
   };
 
   const activeBook = books.find((b) => b.id === activeId) || null;
@@ -412,19 +431,66 @@ export default function Hushthorn() {
     return true;
   });
 
-  const updateBook = (id, patch) =>
-    setBooks((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+  const updateBook = async (id, patch) => {
+    // Handle notes diff — detects one add or one delete per call
+    if ('notes' in patch) {
+      const current = books.find(b => b.id === id);
+      const currentIds = new Set(current.notes.map(n => n.id));
+      const patchIds = new Set(patch.notes.map(n => n.id));
+      const added = patch.notes.find(n => !currentIds.has(n.id));
+      const removed = current.notes.find(n => !patchIds.has(n.id));
+      if (added) {
+        await supabase.from('notes').insert({
+          id: crypto.randomUUID(),
+          book_id: id,
+          user_id: session.user.id,
+          page: added.page,
+          is_quote: added.isQuote,
+          text: added.text,
+          is_voice: added.isVoice,
+          date: added.date,
+        });
+      }
+      if (removed) {
+        await supabase.from('notes').delete().eq('id', removed.id);
+      }
+    }
+    // Handle book field changes
+    const FIELD_MAP = { coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres' };
+    const dbPatch = Object.fromEntries(
+      Object.entries(FIELD_MAP).filter(([k]) => k in patch).map(([k, v]) => [v, patch[k]])
+    );
+    if (Object.keys(dbPatch).length) {
+      await supabase.from('books').update(dbPatch).eq('id', id);
+    }
+    setBooks(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
+  };
 
-  const removeBook = (id) => {
-    setBooks((prev) => prev.filter((b) => b.id !== id));
+  const removeBook = async (id) => {
+    await supabase.from('books').delete().eq('id', id);
+    setBooks(prev => prev.filter(b => b.id !== id));
     setActiveId(null);
   };
 
-  const addBook = (book) => {
-    const id = `b-${Date.now()}`;
-    setBooks((prev) => [{ ...book, id }, ...prev]);
+  const addBook = async (book) => {
+    const id = crypto.randomUUID();
+    const { error } = await supabase.from('books').insert({
+      id,
+      user_id: session.user.id,
+      title: book.title,
+      author: book.author,
+      year: book.year ?? null,
+      cover_url: book.coverUrl,
+      genres: book.genres,
+      shelf: book.shelf,
+      read: book.read,
+      overall: book.overall,
+      smut: book.smut,
+    });
+    if (error) { console.error('addBook:', error.message); return; }
+    setBooks(prev => [{ ...book, id, notes: [] }, ...prev]);
     setAddOpen(false);
-    if (book.shelf === "owned") setActiveId(id);
+    if (book.shelf === 'owned') setActiveId(id);
   };
 
   const shelfTabs = [
