@@ -320,13 +320,16 @@ export default function Hushthorn() {
   const [avatarOpen, setAvatarOpen] = useState(false);
 
   useEffect(() => {
-    if (!session) { setBooks([]); return; }
+    if (!session) { setBooks([]); setDataLoading(false); return; }
     setDataLoading(true);
+    const uid = session.user.id;
     Promise.all([
-      supabase.from('books').select('*').order('created_at', { ascending: false }),
-      supabase.from('notes').select('*').order('created_at', { ascending: false }),
-      supabase.from('avatars').select('*').eq('user_id', session.user.id).maybeSingle(),
-    ]).then(([{ data: booksData }, { data: notesData }, { data: avatarData }]) => {
+      supabase.from('books').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
+      supabase.from('notes').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
+      supabase.from('avatars').select('*').eq('user_id', uid).maybeSingle(),
+    ]).then(([{ data: booksData, error: bErr }, { data: notesData, error: nErr }, { data: avatarData }]) => {
+      if (bErr) console.error('books fetch:', bErr.message);
+      if (nErr) console.error('notes fetch:', nErr.message);
       const notesByBook = {};
       for (const n of (notesData || [])) {
         if (!notesByBook[n.book_id]) notesByBook[n.book_id] = [];
@@ -342,8 +345,8 @@ export default function Hushthorn() {
         notes: notesByBook[b.id] || [],
       })));
       if (avatarData) setAvatar(avatarData);
-      setDataLoading(false);
-    });
+    }).catch(err => console.error('data load:', err))
+      .finally(() => setDataLoading(false));
   }, [session]);
 
   const [shelfFilter, setShelfFilter] = useState("all");
