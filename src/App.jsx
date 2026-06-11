@@ -1297,15 +1297,15 @@ function AuthPage() {
     });
 
   return (
-    <div className="ht-bg ht-body min-h-screen flex items-center justify-center p-4">
+    <div className="ht-bg ht-body fixed inset-0 overflow-y-auto flex items-center justify-center p-4">
       <style>{FONT_CSS}</style>
       <div className="ht-frame" aria-hidden="true" />
-      <div className="ht-card rounded-xl p-8 w-full max-w-sm text-center">
+      <div className="ht-card rounded-xl p-8 w-full max-w-sm text-center" style={{ transform: 'none' }}>
         <Crown size={52} />
         <h1 className="ht-blackletter ht-glow text-5xl text-transparent bg-clip-text bg-gradient-to-b from-pink-200 via-fuchsia-300 to-fuchsia-500 mt-1 mb-1">
           Hushthorn
         </h1>
-        <p className="text-[13px] text-pink-200/60 italic mb-6">
+        <p className="text-[13px] italic mb-6" style={{ color: '#c084fc' }}>
           a candlelit archive for the books you shouldn't read in public
         </p>
 
