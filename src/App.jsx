@@ -1511,10 +1511,30 @@ function AddBookModal({ onAdd, onClose, session }) {
     });
   };
 
-  // Ask Claude for the book's author + genres from the title; also fetch a cover if missing.
+  // Fetch a Google Books cover for a title — runs regardless of whether Claude succeeds.
+  const fetchGoogleBooksCover = (title) => {
+    fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(title.trim())}&maxResults=1&printType=books`)
+      .then((r) => r.json())
+      .then((d) => {
+        const thumbnail = d.items?.[0]?.volumeInfo?.imageLinks?.thumbnail;
+        if (thumbnail) setManual((m) => {
+          if (m.coverUrl && !m.coverUrl.startsWith("data:")) return m;
+          return { ...m, coverUrl: thumbnail.replace("http://", "https://") };
+        });
+      })
+      .catch(() => {});
+  };
+
+  // Ask Claude for the book's author + genres from the title.
   const divineDetails = async (title, author) => {
     if (!title.trim()) return;
     setGenreLoading(true);
+    // Fetch cover from Google Books immediately, independent of Claude
+    setManual((m) => {
+      if (m.coverUrl && !m.coverUrl.startsWith("data:")) return m;
+      fetchGoogleBooksCover(title);
+      return m;
+    });
     try {
       const data = await callClaude({
           model: "claude-sonnet-4-6",
@@ -1537,18 +1557,6 @@ function AddBookModal({ onAdd, onClose, session }) {
           author: m.author.trim() ? m.author : (parsed.author || ""),
           genres: [...m.genres, ...fresh].slice(0, 6),
         };
-      });
-      // best-effort cover from Google Books if none yet (data URLs don't count)
-      setManual((m) => {
-        if (m.coverUrl && !m.coverUrl.startsWith("data:")) return m;
-        fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(title.trim())}&maxResults=1&printType=books`)
-          .then((r) => r.json())
-          .then((d) => {
-            const thumbnail = d.items?.[0]?.volumeInfo?.imageLinks?.thumbnail;
-            if (thumbnail) setManual((m2) => ({ ...m2, coverUrl: thumbnail.replace("http://", "https://") }));
-          })
-          .catch(() => {});
-        return m;
       });
     } catch {
       /* quiet failure — the user can fill details by hand */
@@ -2107,6 +2115,7 @@ function ImageCropModal({ src, onApply, onSkip }) {
           aspect={2 / 3}
           onCropChange={setCrop}
           onZoomChange={setZoom}
+          onRotationChange={setRotation}
           onCropComplete={onCropComplete}
           style={{
             containerStyle: { background: '#07040e' },
