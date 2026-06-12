@@ -2208,7 +2208,6 @@ function CoverEditor({ book, onUpdate, session }) {
         .filter(r => r.coverUrl)
         .slice(0, 8);
       setSearchResults(hits);
-      if (hits.length && !photoPreview) { setApiCoverUrl(hits[0].coverUrl); setCoverChoice("api"); }
     } catch { /* quiet */ } finally { setSearching(false); }
   };
 
@@ -2331,8 +2330,19 @@ function CoverEditor({ book, onUpdate, session }) {
           {searching ? "…" : "Search"}
         </button>
       </div>
-      {searchResults.length > 0 && (
+      {(book.coverUrl || searchResults.length > 0) && (
         <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {/* Current cover — always first so the user can compare and revert */}
+          {book.coverUrl && (
+            <button type="button" title="Current cover"
+              onClick={() => { setApiCoverUrl(book.coverUrl); setCoverChoice("api"); }}
+              className={`relative flex-shrink-0 rounded-sm overflow-hidden border-2 transition-colors ${
+                apiCoverUrl === book.coverUrl && coverChoice === "api" ? "border-pink-400" : "border-purple-700/40 hover:border-purple-500/60"
+              }`} style={{ width: 40, height: 60 }}>
+              <img src={book.coverUrl} alt="Current cover" className="w-full h-full object-cover" />
+              <span className="absolute bottom-0 inset-x-0 ht-display text-[6px] uppercase text-center bg-black/60 text-purple-200 leading-tight py-0.5">now</span>
+            </button>
+          )}
           {searchResults.map(r => (
             <button key={r.id} type="button" title={r.title}
               onClick={() => { setApiCoverUrl(r.coverUrl); setCoverChoice("api"); }}
