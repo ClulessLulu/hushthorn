@@ -2211,7 +2211,10 @@ function CoverEditor({ book, onUpdate, session }) {
     } catch { /* quiet */ } finally { setSearching(false); }
   };
 
-  useEffect(() => { if (editing) searchCovers(book.title); }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+  // On open, search by title + author so the official cover matches this exact book
+  useEffect(() => {
+    if (editing) searchCovers([book.title, book.author].filter(Boolean).join(" "));
+  }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePhoto = (e) => {
     const file = e.target.files?.[0];
@@ -2331,27 +2334,35 @@ function CoverEditor({ book, onUpdate, session }) {
         </button>
       </div>
       {(book.coverUrl || searchResults.length > 0) && (
-        <div className="flex gap-1.5 overflow-x-auto pb-1">
-          {/* Current cover — always first so the user can compare and revert */}
-          {book.coverUrl && (
-            <button type="button" title="Current cover"
-              onClick={() => { setApiCoverUrl(book.coverUrl); setCoverChoice("api"); }}
-              className={`relative flex-shrink-0 rounded-sm overflow-hidden border-2 transition-colors ${
-                apiCoverUrl === book.coverUrl && coverChoice === "api" ? "border-pink-400" : "border-purple-700/40 hover:border-purple-500/60"
-              }`} style={{ width: 40, height: 60 }}>
-              <img src={book.coverUrl} alt="Current cover" className="w-full h-full object-cover" />
-              <span className="absolute bottom-0 inset-x-0 ht-display text-[6px] uppercase text-center bg-black/60 text-purple-200 leading-tight py-0.5">now</span>
-            </button>
-          )}
-          {searchResults.map(r => (
-            <button key={r.id} type="button" title={r.title}
-              onClick={() => { setApiCoverUrl(r.coverUrl); setCoverChoice("api"); }}
-              className={`flex-shrink-0 rounded-sm overflow-hidden border-2 transition-colors ${
-                apiCoverUrl === r.coverUrl && coverChoice === "api" ? "border-pink-400" : "border-purple-700/40 hover:border-purple-500/60"
-              }`} style={{ width: 40, height: 60 }}>
-              <img src={r.coverUrl} alt={r.title} className="w-full h-full object-cover" />
-            </button>
-          ))}
+        <div>
+          <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1.5">
+            Covers from Google Books — tap to use the official art
+          </p>
+          <div className="flex gap-1.5 overflow-x-auto pb-1">
+            {/* Current cover — always first so the user can compare and revert */}
+            {book.coverUrl && (
+              <button type="button" title="Current cover"
+                onClick={() => { setApiCoverUrl(book.coverUrl); setCoverChoice("api"); }}
+                className={`relative flex-shrink-0 rounded-sm overflow-hidden border-2 transition-colors ${
+                  apiCoverUrl === book.coverUrl && coverChoice === "api" ? "border-pink-400" : "border-purple-700/40 hover:border-purple-500/60"
+                }`} style={{ width: 40, height: 60 }}>
+                <img src={book.coverUrl} alt="Current cover" className="w-full h-full object-cover" />
+                <span className="absolute bottom-0 inset-x-0 ht-display text-[6px] uppercase text-center bg-black/60 text-purple-200 leading-tight py-0.5">now</span>
+              </button>
+            )}
+            {searchResults.map((r, i) => (
+              <button key={r.id} type="button" title={r.title}
+                onClick={() => { setApiCoverUrl(r.coverUrl); setCoverChoice("api"); }}
+                className={`relative flex-shrink-0 rounded-sm overflow-hidden border-2 transition-colors ${
+                  apiCoverUrl === r.coverUrl && coverChoice === "api" ? "border-pink-400" : "border-purple-700/40 hover:border-purple-500/60"
+                }`} style={{ width: 40, height: 60 }}>
+                <img src={r.coverUrl} alt={r.title} className="w-full h-full object-cover" />
+                {i === 0 && (
+                  <span className="absolute bottom-0 inset-x-0 ht-display text-[6px] uppercase text-center bg-pink-900/80 text-pink-100 leading-tight py-0.5">official</span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
