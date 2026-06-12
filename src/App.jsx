@@ -1877,7 +1877,7 @@ function AddBookModal({ onAdd, onClose, session }) {
           <p className="text-sm text-purple-300/70 italic">
             Upload a likeness of the cover and the scribe will read the title and author for you. Anything it can't make out, you can inscribe by hand.
           </p>
-          <div className="relative w-full h-44 rounded-sm border-2 border-dashed border-purple-600/50 overflow-hidden bg-purple-950/40">
+          <div className="relative w-full h-64 rounded-sm border-2 border-dashed border-purple-600/50 overflow-hidden bg-purple-950/40">
             <button type="button" onClick={() => fileRef.current?.click()}
               className="w-full h-full flex items-center justify-center hover:border-pink-400/70">
               <CoverImage
