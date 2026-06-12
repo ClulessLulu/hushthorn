@@ -617,7 +617,7 @@ export default function Hushthorn() {
         )}
       </main>
 
-      {addOpen && <AddBookModal onAdd={addBook} onClose={() => setAddOpen(false)} />}
+      {addOpen && <AddBookModal onAdd={addBook} onClose={() => setAddOpen(false)} session={session} />}
       {avatarOpen && (
         <AvatarPage
           avatar={avatar}
@@ -1376,7 +1376,7 @@ function AuthPage() {
 
 /* ── add book modal ────────────────────────────────────────── */
 
-function AddBookModal({ onAdd, onClose }) {
+function AddBookModal({ onAdd, onClose, session }) {
   const [mode, setMode] = useState("search"); // search | photo
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -1395,6 +1395,7 @@ function AddBookModal({ onAdd, onClose }) {
   const [liveActive, setLiveActive] = useState(false);
   const [liveStatus, setLiveStatus] = useState("");
   const [photoPreview, setPhotoPreview] = useState("");
+  const [coverChoice, setCoverChoice] = useState("api"); // "api" | "photo"
   const [titleSuggs, setTitleSuggs] = useState([]);
   const [authorSuggs, setAuthorSuggs] = useState([]);
 
@@ -1611,6 +1612,7 @@ function AddBookModal({ onAdd, onClose }) {
     const reader = new FileReader();
     reader.onload = () => {
       setPhotoPreview(reader.result);
+      setCoverChoice("photo");
       scanCover(reader.result);
     };
     reader.readAsDataURL(file);
@@ -1712,6 +1714,7 @@ function AddBookModal({ onAdd, onClose }) {
     const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
     stopCamera();
     setPhotoPreview(dataUrl);
+    setCoverChoice("photo");
     setMode("photo");
     scanCover(dataUrl);
   };
@@ -1729,13 +1732,27 @@ function AddBookModal({ onAdd, onClose }) {
   const removeGenre = (g) =>
     setManual((m) => ({ ...m, genres: m.genres.filter((x) => x !== g) }));
 
-  const addManual = (shelf) => {
+  const addManual = async (shelf) => {
     if (!manual.title.trim()) return;
+    let coverUrl = manual.coverUrl;
+    if (coverChoice === "photo" && photoPreview && session) {
+      try {
+        const res = await fetch(photoPreview);
+        const blob = await res.blob();
+        const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
+        const path = `${session.user.id}/${crypto.randomUUID()}.${ext}`;
+        const { error } = await supabase.storage.from("covers").upload(path, blob, { contentType: blob.type });
+        if (!error) {
+          const { data: { publicUrl } } = supabase.storage.from("covers").getPublicUrl(path);
+          coverUrl = publicUrl;
+        }
+      } catch { /* fall back to API cover */ }
+    }
     onAdd({
       title: manual.title.trim(),
       author: manual.author.trim() || "Unknown author",
       year: null,
-      coverUrl: manual.coverUrl,
+      coverUrl,
       genres: manual.genres.slice(0, 6),
       shelf,
       read: false,
@@ -1811,13 +1828,41 @@ function AddBookModal({ onAdd, onClose }) {
             className="w-full aspect-[3/2] rounded-sm border-2 border-dashed border-purple-600/50 hover:border-pink-400/70 flex items-center justify-center overflow-hidden bg-purple-950/40"
           >
             <CoverImage
-              src={manual.coverUrl || photoPreview}
+              src={coverChoice === "photo" ? photoPreview : (manual.coverUrl || photoPreview)}
               alt="Uploaded cover"
               className="h-full object-contain"
               fallback={<span className="text-[15px] text-purple-300/70">📷 Tap to upload a cover photo</span>}
             />
           </button>
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+
+          {/* Cover source picker — shown when both options are available */}
+          {photoPreview && manual.coverUrl && (
+            <div>
+              <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1.5">Cover source</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setCoverChoice("photo")}
+                  className={`flex-1 flex items-center gap-2 px-2.5 py-2 rounded-sm border transition-colors ${
+                    coverChoice === "photo"
+                      ? "border-pink-400/70 bg-pink-400/10 text-pink-200"
+                      : "border-purple-700/40 text-purple-400 hover:border-purple-500/60"
+                  }`}>
+                  <img src={photoPreview} alt="" className="w-7 h-10 object-cover rounded-sm flex-shrink-0" />
+                  <span className="ht-display text-[9px] uppercase tracking-widest">Your photo</span>
+                </button>
+                <button type="button" onClick={() => setCoverChoice("api")}
+                  className={`flex-1 flex items-center gap-2 px-2.5 py-2 rounded-sm border transition-colors ${
+                    coverChoice === "api"
+                      ? "border-pink-400/70 bg-pink-400/10 text-pink-200"
+                      : "border-purple-700/40 text-purple-400 hover:border-purple-500/60"
+                  }`}>
+                  <img src={manual.coverUrl} alt="" className="w-7 h-10 object-cover rounded-sm flex-shrink-0" />
+                  <span className="ht-display text-[9px] uppercase tracking-widest">From the web</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {scanning && <p className="text-sm text-purple-300/70 italic">The scribe is reading the cover…</p>}
           {scanNotice && !scanning && <p className="text-sm text-pink-200/90 italic">{scanNotice}</p>}
           <div className="relative">
