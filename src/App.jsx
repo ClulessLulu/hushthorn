@@ -2425,7 +2425,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session }) {
       </div>
 
       <div className="flex flex-col sm:flex-row gap-5">
-        <div className="sm:w-36 flex-shrink-0">
+        <div className="sm:w-52 flex-shrink-0">
           <CoverEditor book={book} onUpdate={onUpdate} session={session} />
           <div className="mt-3 flex flex-col gap-1.5">
             <ToggleRow
@@ -2470,8 +2470,8 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session }) {
 function ToggleRow({ label, action, onClick }) {
   return (
     <div className="flex items-center justify-between gap-2 text-sm">
-      <span className="text-purple-300/80 italic">{label}</span>
-      <button onClick={onClick} className="ht-display text-[10px] uppercase px-2 py-1 rounded-sm bg-purple-800/50 hover:bg-purple-700/70 text-purple-100 whitespace-nowrap">
+      <span className="text-purple-300/80 italic min-w-0 truncate">{label}</span>
+      <button onClick={onClick} className="ht-display text-[10px] uppercase px-2 py-1 rounded-sm bg-purple-800/50 hover:bg-purple-700/70 text-purple-100 whitespace-nowrap flex-shrink-0">
         {action}
       </button>
     </div>
@@ -2633,7 +2633,7 @@ function Overlay({ children, onClose, label, wide }) {
       aria-label={label}
       aria-modal="true"
     >
-      <div className={`ht-bg w-full ${wide ? "max-w-2xl" : "max-w-lg"} max-h-[92vh] overflow-y-auto overscroll-y-contain rounded-t-md sm:rounded-md border border-purple-700/40 p-5 ht-body text-purple-100`}>
+      <div className={`ht-bg w-full ${wide ? "max-w-3xl" : "max-w-lg"} max-h-[92vh] overflow-y-auto overscroll-y-contain rounded-t-md sm:rounded-md border border-purple-700/40 p-5 ht-body text-purple-100`}>
         {children}
       </div>
     </div>
