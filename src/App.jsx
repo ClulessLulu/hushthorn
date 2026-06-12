@@ -633,6 +633,7 @@ export default function Hushthorn() {
           onClose={() => setActiveId(null)}
           onUpdate={(patch) => updateBook(activeBook.id, patch)}
           onRemove={() => removeBook(activeBook.id)}
+          session={session}
         />
       )}
 
@@ -2021,9 +2022,164 @@ function ModeTab({ active, onClick, children }) {
   );
 }
 
+/* ── cover editor ──────────────────────────────────────────── */
+
+function CoverEditor({ book, onUpdate, session }) {
+  const [editing, setEditing] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState("");
+  const [apiCoverUrl, setApiCoverUrl] = useState(book.coverUrl || "");
+  const [coverChoice, setCoverChoice] = useState("api");
+  const [searchQuery, setSearchQuery] = useState(book.title);
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const fileRef = useRef(null);
+
+  const searchCovers = async (q) => {
+    if (!q.trim()) return;
+    setSearching(true);
+    try {
+      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=8&printType=books`);
+      const data = await res.json();
+      const hits = (data.items || [])
+        .map(item => ({
+          id: item.id,
+          title: item.volumeInfo.title,
+          coverUrl: (item.volumeInfo.imageLinks?.thumbnail || item.volumeInfo.imageLinks?.smallThumbnail || "").replace("http://", "https://"),
+        }))
+        .filter(r => r.coverUrl)
+        .slice(0, 8);
+      setSearchResults(hits);
+      if (hits.length && !photoPreview) { setApiCoverUrl(hits[0].coverUrl); setCoverChoice("api"); }
+    } catch { /* quiet */ } finally { setSearching(false); }
+  };
+
+  useEffect(() => { if (editing) searchCovers(book.title); }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handlePhoto = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { setPhotoPreview(reader.result); setCoverChoice("photo"); };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      let coverUrl = apiCoverUrl || book.coverUrl;
+      if (coverChoice === "photo" && photoPreview && session) {
+        const res = await fetch(photoPreview);
+        const blob = await res.blob();
+        const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
+        const path = `${session.user.id}/${crypto.randomUUID()}.${ext}`;
+        const { error } = await supabase.storage.from("covers").upload(path, blob, { contentType: blob.type });
+        if (!error) {
+          const { data: { publicUrl } } = supabase.storage.from("covers").getPublicUrl(path);
+          coverUrl = publicUrl;
+        }
+      }
+      await onUpdate({ coverUrl });
+      setEditing(false);
+      setPhotoPreview("");
+    } finally { setSaving(false); }
+  };
+
+  const cancel = () => { setEditing(false); setPhotoPreview(""); setApiCoverUrl(book.coverUrl || ""); setCoverChoice("api"); };
+
+  const previewSrc = coverChoice === "photo" ? photoPreview : (apiCoverUrl || book.coverUrl);
+
+  if (!editing) {
+    return (
+      <div className="relative group cursor-pointer" onClick={() => setEditing(true)}>
+        <div className="aspect-[2/3] rounded-sm overflow-hidden bg-purple-950/60 flex items-center justify-center">
+          <CoverImage src={book.coverUrl} alt={`Cover of ${book.title}`} className="w-full h-full object-cover"
+            fallback={<span className="ht-display text-purple-400/60 text-xs px-2 text-center">{book.title}</span>} />
+        </div>
+        <div className="absolute inset-0 flex items-end justify-center pb-2 bg-black/0 group-hover:bg-black/40 transition-colors rounded-sm pointer-events-none">
+          <span className="ht-display text-[9px] uppercase tracking-widest text-transparent group-hover:text-white/90 transition-colors bg-black/50 px-2 py-1 rounded-sm">
+            ✎ Change cover
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {/* Live preview */}
+      <button onClick={() => fileRef.current?.click()}
+        className="w-full aspect-[2/3] rounded-sm border-2 border-dashed border-purple-600/50 hover:border-pink-400/70 flex items-center justify-center overflow-hidden bg-purple-950/40 relative">
+        <CoverImage src={previewSrc} alt="Cover preview" className="w-full h-full object-cover"
+          fallback={<span className="text-sm text-purple-300/70">📷 Upload photo</span>} />
+        <span className="absolute bottom-1.5 right-1.5 ht-display text-[8px] uppercase tracking-widest bg-black/60 text-purple-200 px-1.5 py-0.5 rounded-sm">
+          tap to upload
+        </span>
+      </button>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+
+      {/* Source picker */}
+      {photoPreview && (apiCoverUrl || book.coverUrl) && (
+        <div className="flex gap-2">
+          {[
+            { key: "photo", src: photoPreview, label: "Your photo" },
+            { key: "api",   src: apiCoverUrl || book.coverUrl, label: "From the web" },
+          ].map(({ key, src, label }) => (
+            <button key={key} type="button" onClick={() => setCoverChoice(key)}
+              className={`flex-1 flex items-center gap-2 px-2.5 py-2 rounded-sm border transition-colors ${
+                coverChoice === key ? "border-pink-400/70 bg-pink-400/10 text-pink-200" : "border-purple-700/40 text-purple-400 hover:border-purple-500/60"
+              }`}>
+              <img src={src} alt="" className="w-6 h-9 object-cover rounded-sm flex-shrink-0" />
+              <span className="ht-display text-[9px] uppercase tracking-widest">{label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* API cover search */}
+      <div className="flex gap-2">
+        <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && searchCovers(searchQuery)}
+          placeholder="Search covers by title…"
+          className="flex-1 bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400" />
+        <button onClick={() => searchCovers(searchQuery)} disabled={searching}
+          className="ht-display text-[10px] uppercase px-3 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100">
+          {searching ? "…" : "Search"}
+        </button>
+      </div>
+      {searchResults.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {searchResults.map(r => (
+            <button key={r.id} type="button" title={r.title}
+              onClick={() => { setApiCoverUrl(r.coverUrl); setCoverChoice("api"); }}
+              className={`flex-shrink-0 rounded-sm overflow-hidden border-2 transition-colors ${
+                apiCoverUrl === r.coverUrl && coverChoice === "api" ? "border-pink-400" : "border-purple-700/40 hover:border-purple-500/60"
+              }`} style={{ width: 40, height: 60 }}>
+              <img src={r.coverUrl} alt={r.title} className="w-full h-full object-cover" />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Save / Cancel */}
+      <div className="flex gap-2">
+        <button onClick={save} disabled={saving}
+          className="ht-display flex-1 py-2 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest">
+          {saving ? "Saving…" : "✦ Save cover"}
+        </button>
+        <button onClick={cancel}
+          className="ht-display px-3 py-2 rounded-sm border border-purple-700/40 hover:border-purple-500/60 text-purple-400 text-xs uppercase">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ── detail panel ──────────────────────────────────────────── */
 
-function DetailPanel({ book, onClose, onUpdate, onRemove }) {
+function DetailPanel({ book, onClose, onUpdate, onRemove, session }) {
   return (
     <Overlay onClose={onClose} label={book.title} wide>
       <div className="flex items-start justify-between mb-4 gap-3">
@@ -2039,14 +2195,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove }) {
 
       <div className="flex flex-col sm:flex-row gap-5">
         <div className="sm:w-36 flex-shrink-0">
-          <div className="aspect-[2/3] rounded-sm overflow-hidden bg-purple-950/60 flex items-center justify-center">
-            <CoverImage
-              src={book.coverUrl}
-              alt={`Cover of ${book.title}`}
-              className="w-full h-full object-cover"
-              fallback={<span className="ht-display text-purple-400/60 text-xs px-2 text-center">{book.title}</span>}
-            />
-          </div>
+          <CoverEditor book={book} onUpdate={onUpdate} session={session} />
           <div className="mt-3 flex flex-col gap-1.5">
             <ToggleRow
               label={book.shelf === "owned" ? "On the Owned shelf" : "On the Wishlist"}
