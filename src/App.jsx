@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Papa from "papaparse";
 import { supabase } from './lib/supabase';
+import Cropper from 'react-easy-crop';
 
 /* ── Claude API configuration ───────────────────────────────
    Option A (recommended): point CLAUDE_API_URL at your own proxy
@@ -94,6 +95,40 @@ const FONT_CSS = `
 .ht-recording { animation: ht-pulse 1.4s ease infinite; }
 @media (prefers-reduced-motion: reduce) { .ht-recording { animation: none; } .ht-card { transition: none; } }
 `;
+
+/* ── image crop utility ─────────────────────────────────────── */
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.addEventListener('load', () => resolve(img));
+    img.addEventListener('error', reject);
+    img.src = src;
+  });
+}
+
+async function getCroppedImg(src, pixelCrop, rotation = 0) {
+  const image = await loadImage(src);
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const maxSize = Math.max(image.width, image.height);
+  const safe = 2 * ((maxSize / 2) * Math.sqrt(2));
+  canvas.width = safe;
+  canvas.height = safe;
+  ctx.translate(safe / 2, safe / 2);
+  ctx.rotate((rotation * Math.PI) / 180);
+  ctx.translate(-safe / 2, -safe / 2);
+  ctx.drawImage(image, safe / 2 - image.width / 2, safe / 2 - image.height / 2);
+  const data = ctx.getImageData(0, 0, safe, safe);
+  canvas.width = pixelCrop.width;
+  canvas.height = pixelCrop.height;
+  ctx.putImageData(
+    data,
+    Math.round(0 - safe / 2 + image.width * 0.5 - pixelCrop.x),
+    Math.round(0 - safe / 2 + image.height * 0.5 - pixelCrop.y)
+  );
+  return canvas.toDataURL('image/jpeg', 0.92);
+}
 
 /* ── icons ─────────────────────────────────────────────────── */
 
@@ -1397,6 +1432,7 @@ function AddBookModal({ onAdd, onClose, session }) {
   const [liveStatus, setLiveStatus] = useState("");
   const [photoPreview, setPhotoPreview] = useState("");
   const [coverChoice, setCoverChoice] = useState("api"); // "api" | "photo"
+  const [cropSrc, setCropSrc] = useState("");
   const [titleSuggs, setTitleSuggs] = useState([]);
   const [authorSuggs, setAuthorSuggs] = useState([]);
 
@@ -1611,12 +1647,15 @@ function AddBookModal({ onAdd, onClose, session }) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      setPhotoPreview(reader.result);
-      setCoverChoice("photo");
-      scanCover(reader.result);
-    };
+    reader.onload = () => setCropSrc(reader.result);
     reader.readAsDataURL(file);
+  };
+
+  const applyPhoto = (dataUrl) => {
+    setPhotoPreview(dataUrl);
+    setCoverChoice("photo");
+    setCropSrc("");
+    scanCover(dataUrl);
   };
 
   /* ── live scanning ── */
@@ -1762,6 +1801,10 @@ function AddBookModal({ onAdd, onClose, session }) {
       notes: [],
     });
   };
+
+  if (cropSrc) {
+    return <ImageCropModal src={cropSrc} onApply={applyPhoto} onSkip={() => applyPhoto(cropSrc)} />;
+  }
 
   return (
     <Overlay onClose={onClose} label="Inscribe">
@@ -2022,10 +2065,96 @@ function ModeTab({ active, onClick, children }) {
   );
 }
 
+/* ── image crop modal ──────────────────────────────────────── */
+
+function ImageCropModal({ src, onApply, onSkip }) {
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+  const [applying, setApplying] = useState(false);
+
+  const onCropComplete = useCallback((_, pixels) => setCroppedAreaPixels(pixels), []);
+
+  const apply = async () => {
+    if (!croppedAreaPixels) return;
+    setApplying(true);
+    try {
+      onApply(await getCroppedImg(src, croppedAreaPixels, rotation));
+    } finally { setApplying(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#07040e' }}>
+      <style>{FONT_CSS}</style>
+
+      {/* top bar */}
+      <div className="flex items-center justify-between px-4 py-3 flex-shrink-0 border-b border-purple-900/60">
+        <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300">Adjust cover</p>
+        <button onClick={onSkip}
+          className="ht-display text-[9px] uppercase tracking-widest text-purple-400/70 hover:text-pink-300 transition-colors">
+          Skip — use as-is
+        </button>
+      </div>
+
+      {/* cropper area */}
+      <div className="relative flex-1">
+        <Cropper
+          image={src}
+          crop={crop}
+          zoom={zoom}
+          rotation={rotation}
+          aspect={2 / 3}
+          onCropChange={setCrop}
+          onZoomChange={setZoom}
+          onCropComplete={onCropComplete}
+          style={{
+            containerStyle: { background: '#07040e' },
+            cropAreaStyle: { border: '2px solid rgba(244,114,182,0.7)', boxShadow: '0 0 0 9999px rgba(7,4,14,0.75)' },
+          }}
+        />
+      </div>
+
+      {/* controls */}
+      <div className="flex-shrink-0 px-4 py-4 space-y-3 border-t border-purple-900/60" style={{ background: '#0c0714' }}>
+        {/* rotation buttons */}
+        <div className="flex items-center justify-center gap-3">
+          <button onClick={() => setRotation(r => r - 90)}
+            className="ht-display text-[10px] uppercase px-4 py-2 rounded-sm bg-purple-900/70 hover:bg-purple-800 text-purple-100 border border-purple-700/40">
+            ↺ Left 90°
+          </button>
+          <span className="ht-display text-[10px] text-purple-400/60 w-10 text-center">{((rotation % 360) + 360) % 360}°</span>
+          <button onClick={() => setRotation(r => r + 90)}
+            className="ht-display text-[10px] uppercase px-4 py-2 rounded-sm bg-purple-900/70 hover:bg-purple-800 text-purple-100 border border-purple-700/40">
+            ↻ Right 90°
+          </button>
+        </div>
+
+        {/* zoom slider */}
+        <div className="flex items-center gap-3">
+          <span className="ht-display text-[9px] uppercase text-purple-400 w-8 flex-shrink-0">Zoom</span>
+          <input type="range" min={1} max={3} step={0.05} value={zoom}
+            onChange={e => setZoom(Number(e.target.value))}
+            className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer accent-pink-400"
+            style={{ accentColor: '#f472b6' }} />
+          <span className="ht-display text-[9px] text-purple-400/60 w-8 text-right">{zoom.toFixed(1)}×</span>
+        </div>
+
+        {/* apply */}
+        <button onClick={apply} disabled={applying}
+          className="ht-display w-full py-3 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest">
+          {applying ? 'Cropping…' : '✦ Crop & use this cover'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ── cover editor ──────────────────────────────────────────── */
 
 function CoverEditor({ book, onUpdate, session }) {
   const [editing, setEditing] = useState(false);
+  const [cropSrc, setCropSrc] = useState("");
   const [photoPreview, setPhotoPreview] = useState("");
   const [apiCoverUrl, setApiCoverUrl] = useState(book.coverUrl || "");
   const [coverChoice, setCoverChoice] = useState("api");
@@ -2060,9 +2189,15 @@ function CoverEditor({ book, onUpdate, session }) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => { setPhotoPreview(reader.result); setCoverChoice("photo"); };
+    reader.onload = () => setCropSrc(reader.result);
     reader.readAsDataURL(file);
     e.target.value = "";
+  };
+
+  const applyPhoto = (dataUrl) => {
+    setPhotoPreview(dataUrl);
+    setCoverChoice("photo");
+    setCropSrc("");
   };
 
   const save = async () => {
@@ -2086,9 +2221,13 @@ function CoverEditor({ book, onUpdate, session }) {
     } finally { setSaving(false); }
   };
 
-  const cancel = () => { setEditing(false); setPhotoPreview(""); setApiCoverUrl(book.coverUrl || ""); setCoverChoice("api"); };
+  const cancel = () => { setEditing(false); setPhotoPreview(""); setCropSrc(""); setApiCoverUrl(book.coverUrl || ""); setCoverChoice("api"); };
 
   const previewSrc = coverChoice === "photo" ? photoPreview : (apiCoverUrl || book.coverUrl);
+
+  if (cropSrc) {
+    return <ImageCropModal src={cropSrc} onApply={applyPhoto} onSkip={() => applyPhoto(cropSrc)} />;
+  }
 
   if (!editing) {
     return (
