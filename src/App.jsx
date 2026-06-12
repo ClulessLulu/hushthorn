@@ -1433,6 +1433,7 @@ function AddBookModal({ onAdd, onClose, session }) {
   const [photoPreview, setPhotoPreview] = useState("");
   const [coverChoice, setCoverChoice] = useState("api"); // "api" | "photo"
   const [cropSrc, setCropSrc] = useState("");
+  const [originalPhotoSrc, setOriginalPhotoSrc] = useState("");
   const [titleSuggs, setTitleSuggs] = useState([]);
   const [authorSuggs, setAuthorSuggs] = useState([]);
 
@@ -1655,15 +1656,16 @@ function AddBookModal({ onAdd, onClose, session }) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => setCropSrc(reader.result);
+    reader.onload = () => { setOriginalPhotoSrc(reader.result); setCropSrc(reader.result); };
     reader.readAsDataURL(file);
   };
 
   const applyPhoto = (dataUrl) => {
+    const hadTitle = manual.title.trim().length > 0;
     setPhotoPreview(dataUrl);
     setCoverChoice("photo");
     setCropSrc("");
-    scanCover(dataUrl);
+    if (!hadTitle) scanCover(dataUrl);
   };
 
   /* ── live scanning ── */
@@ -1875,17 +1877,29 @@ function AddBookModal({ onAdd, onClose, session }) {
           <p className="text-sm text-purple-300/70 italic">
             Upload a likeness of the cover and the scribe will read the title and author for you. Anything it can't make out, you can inscribe by hand.
           </p>
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="w-full aspect-[3/2] rounded-sm border-2 border-dashed border-purple-600/50 hover:border-pink-400/70 flex items-center justify-center overflow-hidden bg-purple-950/40"
-          >
-            <CoverImage
-              src={coverChoice === "photo" ? photoPreview : (manual.coverUrl || photoPreview)}
-              alt="Uploaded cover"
-              className="h-full object-contain"
-              fallback={<span className="text-[15px] text-purple-300/70">📷 Tap to upload a cover photo</span>}
-            />
-          </button>
+          <div className="relative w-full aspect-[3/2] rounded-sm border-2 border-dashed border-purple-600/50 overflow-hidden bg-purple-950/40">
+            <button type="button" onClick={() => fileRef.current?.click()}
+              className="w-full h-full flex items-center justify-center hover:border-pink-400/70">
+              <CoverImage
+                src={coverChoice === "photo" ? photoPreview : (manual.coverUrl || photoPreview)}
+                alt="Uploaded cover"
+                className="h-full object-contain"
+                fallback={<span className="text-[15px] text-purple-300/70">📷 Tap to upload a cover photo</span>}
+              />
+            </button>
+            {photoPreview && coverChoice === "photo" && (
+              <div className="absolute bottom-1.5 right-1.5 flex gap-1">
+                <button type="button" onClick={() => fileRef.current?.click()}
+                  className="ht-display text-[8px] uppercase tracking-widest bg-black/70 hover:bg-purple-900 text-purple-200 px-1.5 py-0.5 rounded-sm">
+                  📷 Replace
+                </button>
+                <button type="button" onClick={() => setCropSrc(originalPhotoSrc)}
+                  className="ht-display text-[8px] uppercase tracking-widest bg-black/70 hover:bg-pink-900 text-pink-200 px-1.5 py-0.5 rounded-sm">
+                  ✎ Re-crop
+                </button>
+              </div>
+            )}
+          </div>
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
 
           {/* Cover source picker — shown when both options are available */}
@@ -2164,6 +2178,7 @@ function ImageCropModal({ src, onApply, onSkip }) {
 function CoverEditor({ book, onUpdate, session }) {
   const [editing, setEditing] = useState(false);
   const [cropSrc, setCropSrc] = useState("");
+  const [originalPhotoSrc, setOriginalPhotoSrc] = useState("");
   const [photoPreview, setPhotoPreview] = useState("");
   const [apiCoverUrl, setApiCoverUrl] = useState(book.coverUrl || "");
   const [coverChoice, setCoverChoice] = useState("api");
@@ -2198,7 +2213,7 @@ function CoverEditor({ book, onUpdate, session }) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => setCropSrc(reader.result);
+    reader.onload = () => { setOriginalPhotoSrc(reader.result); setCropSrc(reader.result); };
     reader.readAsDataURL(file);
     e.target.value = "";
   };
@@ -2230,7 +2245,7 @@ function CoverEditor({ book, onUpdate, session }) {
     } finally { setSaving(false); }
   };
 
-  const cancel = () => { setEditing(false); setPhotoPreview(""); setCropSrc(""); setApiCoverUrl(book.coverUrl || ""); setCoverChoice("api"); };
+  const cancel = () => { setEditing(false); setPhotoPreview(""); setCropSrc(""); setOriginalPhotoSrc(""); setApiCoverUrl(book.coverUrl || ""); setCoverChoice("api"); };
 
   const previewSrc = coverChoice === "photo" ? photoPreview : (apiCoverUrl || book.coverUrl);
 
@@ -2257,14 +2272,29 @@ function CoverEditor({ book, onUpdate, session }) {
   return (
     <div className="space-y-2.5">
       {/* Live preview */}
-      <button onClick={() => fileRef.current?.click()}
-        className="w-full aspect-[2/3] rounded-sm border-2 border-dashed border-purple-600/50 hover:border-pink-400/70 flex items-center justify-center overflow-hidden bg-purple-950/40 relative">
-        <CoverImage src={previewSrc} alt="Cover preview" className="w-full h-full object-cover"
-          fallback={<span className="text-sm text-purple-300/70">📷 Upload photo</span>} />
-        <span className="absolute bottom-1.5 right-1.5 ht-display text-[8px] uppercase tracking-widest bg-black/60 text-purple-200 px-1.5 py-0.5 rounded-sm">
-          tap to upload
-        </span>
-      </button>
+      <div className="relative w-full aspect-[2/3] rounded-sm border-2 border-dashed border-purple-600/50 overflow-hidden bg-purple-950/40">
+        <button type="button" onClick={() => fileRef.current?.click()}
+          className="w-full h-full flex items-center justify-center hover:border-pink-400/70">
+          <CoverImage src={previewSrc} alt="Cover preview" className="w-full h-full object-cover"
+            fallback={<span className="text-sm text-purple-300/70">📷 Upload photo</span>} />
+        </button>
+        {photoPreview && coverChoice === "photo" ? (
+          <div className="absolute bottom-1.5 right-1.5 flex gap-1">
+            <button type="button" onClick={() => fileRef.current?.click()}
+              className="ht-display text-[8px] uppercase tracking-widest bg-black/70 hover:bg-purple-900 text-purple-200 px-1.5 py-0.5 rounded-sm">
+              📷 Replace
+            </button>
+            <button type="button" onClick={() => setCropSrc(originalPhotoSrc)}
+              className="ht-display text-[8px] uppercase tracking-widest bg-black/70 hover:bg-pink-900 text-pink-200 px-1.5 py-0.5 rounded-sm">
+              ✎ Re-crop
+            </button>
+          </div>
+        ) : (
+          <span className="absolute bottom-1.5 right-1.5 pointer-events-none ht-display text-[8px] uppercase tracking-widest bg-black/60 text-purple-200 px-1.5 py-0.5 rounded-sm">
+            tap to upload
+          </span>
+        )}
+      </div>
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
 
       {/* Source picker */}
