@@ -2191,24 +2191,50 @@ function CoverEditor({ book, onUpdate, session }) {
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [failedCovers, setFailedCovers] = useState(new Set());
   const fileRef = useRef(null);
 
   const searchCovers = async (q) => {
     if (!q.trim()) return;
     setSearching(true);
+    setFailedCovers(new Set());
     try {
-      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=8&printType=books`);
-      const data = await res.json();
-      const hits = (data.items || [])
-        .map(item => ({
-          id: item.id,
-          title: item.volumeInfo.title,
-          coverUrl: (item.volumeInfo.imageLinks?.thumbnail || item.volumeInfo.imageLinks?.smallThumbnail || "").replace("http://", "https://"),
-        }))
-        .filter(r => r.coverUrl)
-        .slice(0, 8);
-      setSearchResults(hits);
-    } catch { /* quiet */ } finally { setSearching(false); }
+      const out = [];
+      const seen = new Set();
+      const pushHit = (id, title, coverUrl) => {
+        if (!coverUrl || seen.has(coverUrl)) return;
+        seen.add(coverUrl);
+        out.push({ id, title, coverUrl });
+      };
+
+      // Google Books — derive an Open Library cover from the ISBN when no thumbnail
+      try {
+        const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=10&printType=books`);
+        const data = await res.json();
+        for (const item of data.items || []) {
+          const v = item.volumeInfo || {};
+          const links = v.imageLinks || {};
+          let cover = (links.thumbnail || links.smallThumbnail || "").replace("http://", "https://");
+          if (!cover) {
+            const isbn = (v.industryIdentifiers || []).find(x => x.type === "ISBN_13" || x.type === "ISBN_10");
+            if (isbn) cover = `https://covers.openlibrary.org/b/isbn/${isbn.identifier}-M.jpg?default=false`;
+          }
+          pushHit(item.id, v.title, cover);
+        }
+      } catch { /* ignore */ }
+
+      // Open Library — reliable cover_i, fills in when Google has no art
+      try {
+        const res = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=10&fields=key,title,cover_i,isbn`);
+        const data = await res.json();
+        for (const doc of data.docs || []) {
+          if (doc.cover_i) pushHit(doc.key, doc.title, `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`);
+          else if (doc.isbn?.[0]) pushHit(doc.key, doc.title, `https://covers.openlibrary.org/b/isbn/${doc.isbn[0]}-M.jpg?default=false`);
+        }
+      } catch { /* ignore */ }
+
+      setSearchResults(out.slice(0, 12));
+    } finally { setSearching(false); }
   };
 
   // On open, search by title + author so the official cover matches this exact book
@@ -2350,13 +2376,14 @@ function CoverEditor({ book, onUpdate, session }) {
                 <span className="absolute bottom-0 inset-x-0 ht-display text-[6px] uppercase text-center bg-black/60 text-purple-200 leading-tight py-0.5">now</span>
               </button>
             )}
-            {searchResults.map((r, i) => (
+            {searchResults.filter(r => !failedCovers.has(r.coverUrl)).map((r, i) => (
               <button key={r.id} type="button" title={r.title}
                 onClick={() => { setApiCoverUrl(r.coverUrl); setCoverChoice("api"); }}
                 className={`relative flex-shrink-0 rounded-sm overflow-hidden border-2 transition-colors ${
                   apiCoverUrl === r.coverUrl && coverChoice === "api" ? "border-pink-400" : "border-purple-700/40 hover:border-purple-500/60"
                 }`} style={{ width: 40, height: 60 }}>
-                <img src={r.coverUrl} alt={r.title} className="w-full h-full object-cover" />
+                <img src={r.coverUrl} alt={r.title} className="w-full h-full object-cover"
+                  onError={() => setFailedCovers(s => new Set(s).add(r.coverUrl))} />
                 {i === 0 && (
                   <span className="absolute bottom-0 inset-x-0 ht-display text-[6px] uppercase text-center bg-pink-900/80 text-pink-100 leading-tight py-0.5">official</span>
                 )}
