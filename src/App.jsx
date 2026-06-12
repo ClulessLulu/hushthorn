@@ -1395,6 +1395,8 @@ function AddBookModal({ onAdd, onClose }) {
   const [liveActive, setLiveActive] = useState(false);
   const [liveStatus, setLiveStatus] = useState("");
   const [photoPreview, setPhotoPreview] = useState("");
+  const [titleSuggs, setTitleSuggs] = useState([]);
+  const [authorSuggs, setAuthorSuggs] = useState([]);
 
   useEffect(() => {
     const q = query.trim();
@@ -1523,6 +1525,50 @@ function AddBookModal({ onAdd, onClose }) {
     const timer = setTimeout(() => divineDetails(title, manual.author), 700);
     return () => clearTimeout(timer);
   }, [manual.title]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Title typeahead for photo mode
+  useEffect(() => {
+    if (mode !== "photo") return;
+    const q = manual.title.trim();
+    if (q.length < 2) { setTitleSuggs([]); return; }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=8&printType=books`);
+        const data = await res.json();
+        const JUNK = /(study guide|workbook|summary of|analysis of|reader'?s? guide|sparknotes|cliffsnotes)/i;
+        setTitleSuggs((data.items || [])
+          .map(item => ({
+            key: item.id,
+            title: item.volumeInfo.title,
+            author_name: item.volumeInfo.authors || [],
+            first_publish_year: item.volumeInfo.publishedDate ? parseInt(item.volumeInfo.publishedDate) : null,
+            _coverUrl: (item.volumeInfo.imageLinks?.thumbnail || "").replace("http://", "https://"),
+            subject: item.volumeInfo.categories || [],
+          }))
+          .filter(d => d.title && !JUNK.test(d.title))
+          .slice(0, 6));
+      } catch { setTitleSuggs([]); }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [manual.title, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Author typeahead for photo mode
+  useEffect(() => {
+    if (mode !== "photo") return;
+    const q = manual.author.trim();
+    if (q.length < 2) { setAuthorSuggs([]); return; }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=inauthor:${encodeURIComponent(q)}&maxResults=10&printType=books`);
+        const data = await res.json();
+        const names = [...new Set((data.items || []).flatMap(item => item.volumeInfo.authors || []))]
+          .filter(a => a.toLowerCase().includes(q.toLowerCase()))
+          .slice(0, 5);
+        setAuthorSuggs(names);
+      } catch { setAuthorSuggs([]); }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [manual.author, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ask Claude to read the cover photo and pull out title + author.
   const scanCover = async (dataUrl) => {
@@ -1774,18 +1820,66 @@ function AddBookModal({ onAdd, onClose }) {
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
           {scanning && <p className="text-sm text-purple-300/70 italic">The scribe is reading the cover…</p>}
           {scanNotice && !scanning && <p className="text-sm text-pink-200/90 italic">{scanNotice}</p>}
-          <input
-            value={manual.title}
-            onChange={(e) => setManual({ ...manual, title: e.target.value })}
-            placeholder="Title"
-            className="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400"
-          />
-          <input
-            value={manual.author}
-            onChange={(e) => setManual({ ...manual, author: e.target.value })}
-            placeholder="Author"
-            className="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400"
-          />
+          <div className="relative">
+            <input
+              value={manual.title}
+              onChange={(e) => { setManual({ ...manual, title: e.target.value }); }}
+              onBlur={() => setTimeout(() => setTitleSuggs([]), 150)}
+              placeholder="Title"
+              className="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400"
+            />
+            {titleSuggs.length > 0 && (
+              <div className="absolute z-20 w-full bg-[#130b22] border border-purple-700/60 rounded-sm mt-0.5 shadow-xl max-h-56 overflow-y-auto">
+                {titleSuggs.map(doc => (
+                  <button key={doc.key} type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setManual(m => ({
+                        ...m,
+                        title: doc.title,
+                        author: doc.author_name?.[0] || m.author,
+                        coverUrl: doc._coverUrl || m.coverUrl,
+                        genres: cleanGenres(doc.subject).length ? cleanGenres(doc.subject) : m.genres,
+                      }));
+                      setTitleSuggs([]);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-purple-800/50 text-left border-b border-purple-800/30 last:border-0"
+                  >
+                    {doc._coverUrl && <img src={doc._coverUrl} alt="" className="w-7 h-10 object-cover rounded-sm flex-shrink-0 opacity-80" />}
+                    <div>
+                      <div className="text-[13px] text-pink-100 leading-tight">{doc.title}</div>
+                      {doc.author_name?.[0] && <div className="text-[11px] text-purple-400">{doc.author_name[0]}</div>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="relative">
+            <input
+              value={manual.author}
+              onChange={(e) => { setManual({ ...manual, author: e.target.value }); }}
+              onBlur={() => setTimeout(() => setAuthorSuggs([]), 150)}
+              placeholder="Author"
+              className="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400"
+            />
+            {authorSuggs.length > 0 && (
+              <div className="absolute z-20 w-full bg-[#130b22] border border-purple-700/60 rounded-sm mt-0.5 shadow-xl">
+                {authorSuggs.map(name => (
+                  <button key={name} type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setManual(m => ({ ...m, author: name }));
+                      setAuthorSuggs([]);
+                    }}
+                    className="w-full px-3 py-2 hover:bg-purple-800/50 text-left text-[13px] text-pink-100 border-b border-purple-800/30 last:border-0"
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* genres: divined by AI, editable by hand */}
           <div className="space-y-1.5">
