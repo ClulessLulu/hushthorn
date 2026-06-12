@@ -1877,7 +1877,7 @@ function AddBookModal({ onAdd, onClose, session }) {
           <p className="text-sm text-purple-300/70 italic">
             Upload a likeness of the cover and the scribe will read the title and author for you. Anything it can't make out, you can inscribe by hand.
           </p>
-          <div className="relative w-full aspect-[3/2] rounded-sm border-2 border-dashed border-purple-600/50 overflow-hidden bg-purple-950/40">
+          <div className="relative w-full h-44 rounded-sm border-2 border-dashed border-purple-600/50 overflow-hidden bg-purple-950/40">
             <button type="button" onClick={() => fileRef.current?.click()}
               className="w-full h-full flex items-center justify-center hover:border-pink-400/70">
               <CoverImage
@@ -2580,7 +2580,7 @@ function Overlay({ children, onClose, label, wide }) {
       aria-label={label}
       aria-modal="true"
     >
-      <div className={`ht-bg w-full ${wide ? "max-w-2xl" : "max-w-lg"} max-h-[92vh] overflow-y-auto rounded-t-md sm:rounded-md border border-purple-700/40 p-5 ht-body text-purple-100`}>
+      <div className={`ht-bg w-full ${wide ? "max-w-2xl" : "max-w-lg"} max-h-[92vh] overflow-y-auto overscroll-y-contain rounded-t-md sm:rounded-md border border-purple-700/40 p-5 ht-body text-purple-100`}>
         {children}
       </div>
     </div>
