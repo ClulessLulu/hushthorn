@@ -2126,7 +2126,8 @@ function ImageCropModal({ src, onApply, onSkip }) {
           crop={crop}
           zoom={zoom}
           rotation={rotation}
-          aspect={2 / 3}
+          aspect={3 / 4}
+          minZoom={0.3}
           onCropChange={setCrop}
           onZoomChange={setZoom}
           onRotationChange={setRotation}
@@ -2156,7 +2157,7 @@ function ImageCropModal({ src, onApply, onSkip }) {
         {/* zoom slider */}
         <div className="flex items-center gap-3">
           <span className="ht-display text-[9px] uppercase text-purple-400 w-8 flex-shrink-0">Zoom</span>
-          <input type="range" min={1} max={3} step={0.05} value={zoom}
+          <input type="range" min={0.3} max={3} step={0.05} value={zoom}
             onChange={e => setZoom(Number(e.target.value))}
             className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer accent-pink-400"
             style={{ accentColor: '#f472b6' }} />
