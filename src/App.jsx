@@ -267,6 +267,325 @@ function CoverImage({ src, alt, className, fallback }) {
   return <img src={resolved} alt={alt} className={className} />;
 }
 
+/* ── spine colors ──────────────────────────────────────────────
+   Ported from prototype/hushthorn-demo.jsx:204-378, adapted for the
+   Supabase data model (lazy backfill via onPersist).
+─────────────────────────────────────────────────────────────── */
+
+function hashStr(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+const GENRE_SPINE_COLORS = [
+  [/vampire|blood/i, "#5b1f3f"],
+  [/fae|fairy/i, "#33306e"],
+  [/romance|romantasy|lovers/i, "#7c2a5e"],
+  [/witch|magic|occult/i, "#46246b"],
+  [/dark academia|mystery/i, "#3b2f4e"],
+  [/gothic|horror|dark/i, "#2a1f3d"],
+  [/dragon|epic|fantasy/i, "#1f3a5c"],
+];
+
+function genreFallbackColor(book) {
+  for (const g of book.genres || [])
+    for (const [re, c] of GENRE_SPINE_COLORS) if (re.test(g)) return c;
+  return `hsl(${hashStr(book.title || "") % 360} 35% 24%)`;
+}
+
+// Session-level dedupe of sampled colors (DB spine_color dedupes across sessions).
+const spineColorCache = new Map();
+
+// Average the cover's pixels on an 8×12 canvas, darkened to "library light"
+// (brightest channel ≤ 150). Returns 'rgb(r,g,b)'. Rejects on load/draw error.
+function sampleCoverColor(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const c = document.createElement("canvas");
+        c.width = 8; c.height = 12;
+        const ctx = c.getContext("2d");
+        ctx.drawImage(img, 0, 0, 8, 12);
+        const d = ctx.getImageData(0, 0, 8, 12).data;
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+        r /= n; g /= n; b /= n;
+        const f = Math.min(1, 150 / Math.max(r, g, b, 1));
+        resolve(`rgb(${Math.round(r * f)}, ${Math.round(g * f)}, ${Math.round(b * f)})`);
+      } catch (e) { reject(e); }
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+// Resolve a cover URL to a dataURL: pass through data:, reuse the CoverImage
+// coverCache, else fetch → blob → dataURL (and seed the cache). Throws on
+// failure. Shared by useSpineColor and the add/cover-change write points.
+async function coverToDataUrl(url) {
+  if (!url) throw new Error("no cover");
+  if (url.startsWith("data:")) return url;
+  if (coverCache.has(url)) return coverCache.get(url);
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("cover fetch failed");
+  const blob = await r.blob();
+  const dataUrl = await new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = rej;
+    fr.readAsDataURL(blob);
+  });
+  coverCache.set(url, dataUrl);
+  return dataUrl;
+}
+
+// Best-effort cover sampler for the add/cover-change paths: resolves and
+// samples a cover URL, returning a stored spine color or null on any failure.
+async function computeSpineColor(url) {
+  try {
+    const dataUrl = await coverToDataUrl(url);
+    const color = await sampleCoverColor(dataUrl);
+    spineColorCache.set(url, color);
+    return color;
+  } catch { return null; }
+}
+
+function useSpineColor(book, onPersist) {
+  const key = book.coverUrl || "";
+  const [color, setColor] = useState(
+    () => book.spineColor || spineColorCache.get(key) || genreFallbackColor(book)
+  );
+  useEffect(() => {
+    let cancelled = false;
+    // Already persisted: trust the stored color, seed the cache, never resample.
+    if (book.spineColor) {
+      if (key) spineColorCache.set(key, book.spineColor);
+      setColor(book.spineColor);
+      return;
+    }
+    if (key && spineColorCache.has(key)) { setColor(spineColorCache.get(key)); return; }
+    if (!key) { setColor(genreFallbackColor(book)); return; }
+    (async () => {
+      try {
+        const dataUrl = await coverToDataUrl(key);
+        const c = await sampleCoverColor(dataUrl);
+        spineColorCache.set(key, c);
+        if (cancelled) return;
+        setColor(c);
+        // One-shot lazy backfill — only for books whose spineColor is null.
+        if (onPersist) onPersist(c);
+      } catch { /* keep the genre fallback; no DB write */ }
+    })();
+    return () => { cancelled = true; };
+  }, [key, book.spineColor]); // eslint-disable-line react-hooks/exhaustive-deps
+  return color;
+}
+
+/* ── sort + search (pure, unit-testable) ───────────────────── */
+
+// Stable sort over a shallow copy. null overall/smut treated as 0; recent
+// preserves incoming order (books fetch is created_at desc, new books prepend).
+function sortBooks(list, key) {
+  const l = [...list];
+  switch (key) {
+    case "title":
+      return l.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+    case "author":
+      return l.sort((a, b) =>
+        (a.author || "").localeCompare(b.author || "") ||
+        (a.title || "").localeCompare(b.title || ""));
+    case "verdict":
+      return l.sort((a, b) => (b.overall || 0) - (a.overall || 0));
+    case "spice":
+      return l.sort((a, b) => (b.smut || 0) - (a.smut || 0));
+    default:
+      return l; // recent: preserve incoming order (newest first)
+  }
+}
+
+// Case-insensitive substring match on title / author / any genre. Empty or
+// whitespace-only query matches everything.
+function matchesQuery(book, q) {
+  const s = (q || "").trim().toLowerCase();
+  if (!s) return true;
+  return (
+    (book.title || "").toLowerCase().includes(s) ||
+    (book.author || "").toLowerCase().includes(s) ||
+    (book.genres || []).some((g) => g.toLowerCase().includes(s))
+  );
+}
+
+/* ── spine + shelf ─────────────────────────────────────────── */
+
+function Spine({ book, onOpen, dimmed, onPersist }) {
+  const color = useSpineColor(book, onPersist);
+  const h = 122 + (hashStr(book.title || "") % 48);
+  const w = 17 + (hashStr((book.author || "") + (book.title || "")) % 12);
+  const wish = book.shelf === "wishlist";
+  const unread = book.shelf === "owned" && !book.read;
+  const hasAudio = (book.formats || []).includes("audio");
+  return (
+    <button
+      onClick={onOpen}
+      title={`${book.title} — ${book.author}`}
+      className={`relative flex flex-col items-center justify-between rounded-t-[3px] rounded-b-[2px] transition-all duration-200 hover:-translate-y-2 hover:-rotate-3 hover:z-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${
+        dimmed ? "opacity-20" : wish ? "opacity-60" : ""
+      } ${unread ? "-translate-y-1.5" : ""}`}
+      style={{
+        width: w,
+        height: h,
+        background: `linear-gradient(90deg, rgba(0,0,0,0.35), transparent 30%, transparent 70%, rgba(0,0,0,0.45)), ${color}`,
+        boxShadow: "1px 0 2px rgba(0,0,0,0.6)",
+        border: wish ? "1px dashed rgba(240,166,224,0.45)" : "none",
+      }}
+    >
+      {/* verdict gem */}
+      <span
+        className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0"
+        style={{ background: book.overall >= 5 ? "#fbbf24" : book.overall > 0 ? "#a5b4fc" : "rgba(255,255,255,0.15)" }}
+      />
+      {/* audio ring — dormant until books carry a formats array */}
+      {hasAudio && (
+        <span className="mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0 border border-cyan-300/90 bg-transparent" />
+      )}
+      <span
+        className="ht-display text-[8px] leading-none text-pink-50/85 overflow-hidden"
+        style={{ writingMode: "vertical-rl", maxHeight: h - 44, letterSpacing: "0.06em" }}
+      >
+        {(book.title || "").length > 24 ? book.title.slice(0, 23) + "…" : book.title}
+      </span>
+      {/* spice band */}
+      <span
+        className="w-full flex-shrink-0"
+        style={{ height: 5, background: book.smut > 0 ? `rgba(244,114,182,${0.2 + book.smut * 0.16})` : "rgba(255,255,255,0.08)" }}
+      />
+    </button>
+  );
+}
+
+const MAX_SPINE_W = 29;
+const SPINE_GAP = 5;
+const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+
+function SpineShelf({ books, onOpen, query, onPersist }) {
+  const ref = useRef(null);
+  const [perRow, setPerRow] = useState(10);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = (width) => {
+      if (!width) return;
+      setPerRow(clamp(Math.floor(width / (MAX_SPINE_W + SPINE_GAP)), 6, 14));
+    };
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver((entries) => {
+        for (const e of entries) measure(e.contentRect.width);
+      });
+      ro.observe(el);
+      measure(el.clientWidth);
+      return () => ro.disconnect();
+    }
+    // Fallback: clientWidth on mount + window resize listener.
+    const onResize = () => measure(el.clientWidth);
+    measure(el.clientWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // Re-run across the empty<->filled boundary so the observer re-attaches to
+    // the current div (the empty state renders a different element).
+  }, [books.length > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (books.length === 0) {
+    return (
+      <div ref={ref} className="text-center py-20 text-purple-300/60">
+        <p className="ht-display text-xl">This bookcase stands empty.</p>
+        <p className="mt-2 text-[15px] italic">Inscribe a tome to begin the collection.</p>
+      </div>
+    );
+  }
+
+  const readCount = books.filter((b) => b.read).length;
+  const rows = [];
+  for (let i = 0; i < books.length; i += perRow) rows.push(books.slice(i, i + perRow));
+
+  return (
+    <div ref={ref} className="max-w-3xl mx-auto">
+      <p className="ht-display text-center text-[10px] uppercase tracking-widest text-purple-300/60 mb-4">
+        {books.length} tome{books.length > 1 ? "s" : ""} · {readCount} read
+      </p>
+      {rows.map((row, ri) => (
+        <div key={ri}>
+          <div className="flex items-end gap-[5px] px-3 min-h-[178px]">
+            {row.map((b) => (
+              <Spine
+                key={b.id}
+                book={b}
+                onOpen={() => onOpen(b.id)}
+                dimmed={!!query && !matchesQuery(b, query)}
+                onPersist={onPersist ? (c) => onPersist(b.id, c) : undefined}
+              />
+            ))}
+          </div>
+          <div
+            className="h-2.5 rounded-sm mb-6"
+            style={{
+              background: "linear-gradient(180deg, #3a2350, #1c1030)",
+              boxShadow: "0 4px 8px rgba(0,0,0,0.65), inset 0 1px 0 rgba(240,166,224,0.18)",
+            }}
+          />
+        </div>
+      ))}
+      <p className="text-center text-sm text-purple-400/60 italic mt-2">
+        Hover a spine to ease it from the shelf — tap to pull it out. Unread tomes sit proud of the row; wishlist spines are ghosts in dashed glass.
+      </p>
+    </div>
+  );
+}
+
+/* ── controls bar ──────────────────────────────────────────── */
+
+function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery }) {
+  return (
+    <div className="max-w-5xl mx-auto px-5 pb-5 flex flex-wrap items-center justify-center gap-2">
+      <div className="flex rounded-sm overflow-hidden border border-purple-700/50">
+        <button
+          onClick={() => onLayout("grid")}
+          className={`ht-display px-3 py-1.5 text-[10px] uppercase font-semibold transition-colors ${layout === "grid" ? "bg-purple-600/70 text-white" : "bg-purple-950/50 text-purple-300 hover:bg-purple-900/60"}`}
+        >
+          ▦ Covers
+        </button>
+        <button
+          onClick={() => onLayout("spines")}
+          className={`ht-display px-3 py-1.5 text-[10px] uppercase font-semibold transition-colors ${layout === "spines" ? "bg-purple-600/70 text-white" : "bg-purple-950/50 text-purple-300 hover:bg-purple-900/60"}`}
+        >
+          ▤ Spines
+        </button>
+      </div>
+      <select
+        value={sortKey}
+        onChange={(e) => onSort(e.target.value)}
+        className="ht-display bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-1.5 text-[10px] uppercase text-purple-200 focus:outline-none focus:border-pink-400"
+        aria-label="Sort the shelves"
+      >
+        <option value="recent">Recently inscribed</option>
+        <option value="author">By author</option>
+        <option value="title">By title</option>
+        <option value="verdict">By verdict</option>
+        <option value="spice">By spice</option>
+      </select>
+      <input
+        value={query}
+        onChange={(e) => onQuery(e.target.value)}
+        placeholder="Search the shelves…"
+        className="bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400 w-44"
+        aria-label="Search the shelves"
+      />
+    </div>
+  );
+}
+
 /* ── rating meters ─────────────────────────────────────────── */
 
 function Meter({ value, onChange, Icon, label, readOnly = false, size }) {
@@ -318,6 +637,9 @@ export default function Hushthorn() {
     robe_color: '#5b21b6',
   });
   const [avatarOpen, setAvatarOpen] = useState(false);
+  // View preferences, persisted on the avatars row (cross-device). Defaults
+  // apply until an avatar row loads or the first savePrefs creates one.
+  const [prefs, setPrefs] = useState({ pref_layout: 'grid', pref_sort: 'recent' });
 
   useEffect(() => {
     if (!session) { setBooks([]); setDataLoading(false); return; }
@@ -342,12 +664,17 @@ export default function Hushthorn() {
         id: b.id, title: b.title, author: b.author, year: b.year,
         coverUrl: b.cover_url, genres: b.genres || [], shelf: b.shelf,
         read: b.read, overall: b.overall, smut: b.smut,
+        spineColor: b.spine_color,
         notes: notesByBook[b.id] || [],
       })));
       if (avatarData) setAvatar({
         name: avatarData.name, gender: avatarData.gender,
         hair_color: avatarData.hair_color, skin_tone: avatarData.skin_tone,
         robe_color: avatarData.robe_color,
+      });
+      if (avatarData) setPrefs({
+        pref_layout: avatarData.pref_layout ?? 'grid',
+        pref_sort: avatarData.pref_sort ?? 'recent',
       });
     }).catch(err => console.error('data load:', err))
       .finally(() => setDataLoading(false));
@@ -357,6 +684,25 @@ export default function Hushthorn() {
   const [activeId, setActiveId] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
   const [view, setView] = useState("library"); // library | oracle | pair
+
+  // View controls. Initialized from prefs defaults; synced once an avatar row
+  // loads (the effect below runs when prefs change after the data fetch).
+  const [layout, setLayout] = useState(prefs.pref_layout);   // 'grid' | 'spines'
+  const [sortKey, setSortKey] = useState(prefs.pref_sort);   // recent|author|title|verdict|spice
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    setLayout(prefs.pref_layout);
+    setSortKey(prefs.pref_sort);
+  }, [prefs.pref_layout, prefs.pref_sort]);
+
+  // Layout writes immediately; sort writes are debounced ~400ms.
+  const sortSaveTimer = useRef(null);
+  const changeLayout = (next) => { setLayout(next); savePrefs({ pref_layout: next }); };
+  const changeSort = (next) => {
+    setSortKey(next);
+    if (sortSaveTimer.current) clearTimeout(sortSaveTimer.current);
+    sortSaveTimer.current = setTimeout(() => savePrefs({ pref_sort: next }), 400);
+  };
 
   // Smart-merge imported books: update existing entries, add new ones.
   const importBooks = async (items) => {
@@ -435,6 +781,11 @@ export default function Hushthorn() {
     return true;
   });
 
+  // View pipeline: shelf-filtered → sorted. Grid hides non-matches; the spine
+  // shelf dims them (handled per-Spine via the query prop), so it gets `sorted`.
+  const sorted = sortBooks(filtered, sortKey);
+  const gridBooks = sorted.filter((b) => matchesQuery(b, query));
+
   const updateBook = async (id, patch) => {
     // Handle notes diff — detects adds and/or deletes by comparing ID sets
     if ('notes' in patch) {
@@ -463,7 +814,7 @@ export default function Hushthorn() {
       }
     }
     // Handle book field changes
-    const FIELD_MAP = { coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres' };
+    const FIELD_MAP = { coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color' };
     const dbPatch = Object.fromEntries(
       Object.entries(FIELD_MAP).filter(([k]) => k in patch).map(([k, v]) => [v, patch[k]])
     );
@@ -481,6 +832,30 @@ export default function Hushthorn() {
     setActiveId(null);
   };
 
+  // Lazy backfill: persist one book's sampled spine color and mirror it locally
+  // so the useSpineColor hook never re-fires for the same book. Best-effort —
+  // a write failure leaves spine_color null in the DB (retried next session).
+  // The color value is supplied by the caller (Frontend); never computed here.
+  const persistSpineColor = async (id, spine_color) => {
+    setBooks(prev => prev.map(b => b.id === id ? { ...b, spineColor: spine_color } : b));
+    const { error } = await supabase.from('books').update({ spine_color }).eq('id', id);
+    if (error) console.error('persistSpineColor:', error.message);
+  };
+
+  // Partial upsert of view prefs on the avatars row, keyed on user_id. Writes
+  // only pref_layout/pref_sort (+ updated_at) so it never clobbers name/colors.
+  // Updates local prefs state immediately; write failures log and don't block.
+  const savePrefs = async (patch) => {
+    if (!session) return;
+    setPrefs(prev => ({ ...prev, ...patch }));
+    const { error } = await supabase.from('avatars').upsert({
+      user_id: session.user.id,
+      ...patch,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) console.error('savePrefs:', error.message);
+  };
+
   const addBook = async (book) => {
     const id = crypto.randomUUID();
     const { error } = await supabase.from('books').insert({
@@ -495,6 +870,7 @@ export default function Hushthorn() {
       read: book.read,
       overall: book.overall,
       smut: book.smut,
+      spine_color: book.spineColor ?? null,
     });
     if (error) { console.error('addBook:', error.message); return; }
     setBooks(prev => [{ ...book, id, notes: [] }, ...prev]);
@@ -599,6 +975,18 @@ export default function Hushthorn() {
         </button>
       </nav>
 
+      {/* library controls — only in the library view */}
+      {view === "library" && (
+        <ControlsBar
+          layout={layout}
+          onLayout={changeLayout}
+          sortKey={sortKey}
+          onSort={changeSort}
+          query={query}
+          onQuery={setQuery}
+        />
+      )}
+
       {/* library grid / oracle */}
       <main className="max-w-5xl mx-auto px-5 pb-16">
         {view === "oracle" ? (
@@ -609,14 +997,25 @@ export default function Hushthorn() {
           <div className="text-center py-20 text-purple-300/60">
             <p className="ht-display text-xl">The archive stirs…</p>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : layout === "spines" ? (
+          <SpineShelf
+            books={sorted}
+            onOpen={setActiveId}
+            query={query}
+            onPersist={persistSpineColor}
+          />
+        ) : gridBooks.length === 0 ? (
           <div className="text-center py-20 text-purple-300/60">
             <p className="ht-display text-xl">This shelf lies bare.</p>
-            <p className="mt-2 text-[15px] italic">Inscribe a tome to begin the collection.</p>
+            <p className="mt-2 text-[15px] italic">
+              {query.trim()
+                ? "No tome answers to that name. Loose the search to see the shelf."
+                : "Inscribe a tome to begin the collection."}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {filtered.map((b) => (
+            {gridBooks.map((b) => (
               <button
                 key={b.id}
                 onClick={() => setActiveId(b.id)}
@@ -1501,17 +1900,20 @@ function AddBookModal({ onAdd, onClose, session }) {
     return () => { cancelled = true; clearTimeout(timer); };
   }, [query]);
 
-  const pick = (doc, shelf) => {
+  const pick = async (doc, shelf) => {
+    const coverUrl = doc._coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : "");
+    const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
     onAdd({
       title: doc.title,
       author: doc.author_name?.[0] || "Unknown author",
       year: doc.first_publish_year || null,
-      coverUrl: doc._coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : ""),
+      coverUrl,
       genres: cleanGenres(doc.subject),
       shelf,
       read: false,
       overall: 0,
       smut: 0,
+      spineColor,
       notes: [],
     });
   };
@@ -1802,6 +2204,8 @@ function AddBookModal({ onAdd, onClose, session }) {
         }
       } catch { /* fall back to API cover */ }
     }
+    // Best-effort spine color from the resolved cover; null on any failure.
+    const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
     onAdd({
       title: manual.title.trim(),
       author: manual.author.trim() || "Unknown author",
@@ -1812,6 +2216,7 @@ function AddBookModal({ onAdd, onClose, session }) {
       read: false,
       overall: 0,
       smut: 0,
+      spineColor,
       notes: [],
     });
   };
@@ -2272,7 +2677,9 @@ function CoverEditor({ book, onUpdate, session }) {
           coverUrl = publicUrl;
         }
       }
-      await onUpdate({ coverUrl });
+      // Resample the spine color for the new cover; null on any failure.
+      const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
+      await onUpdate({ coverUrl, spineColor });
       setEditing(false);
       setPhotoPreview("");
     } finally { setSaving(false); }
