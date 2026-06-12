@@ -111,22 +111,26 @@ async function getCroppedImg(src, pixelCrop, rotation = 0) {
   const image = await loadImage(src);
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  const maxSize = Math.max(image.width, image.height);
-  const safe = 2 * ((maxSize / 2) * Math.sqrt(2));
-  canvas.width = safe;
-  canvas.height = safe;
-  ctx.translate(safe / 2, safe / 2);
-  ctx.rotate((rotation * Math.PI) / 180);
-  ctx.translate(-safe / 2, -safe / 2);
-  ctx.drawImage(image, safe / 2 - image.width / 2, safe / 2 - image.height / 2);
-  const data = ctx.getImageData(0, 0, safe, safe);
+  const rotRad = (rotation * Math.PI) / 180;
+
+  // Bounding box of the rotated image — croppedAreaPixels is in this space
+  const bBoxW = Math.abs(Math.cos(rotRad) * image.width) + Math.abs(Math.sin(rotRad) * image.height);
+  const bBoxH = Math.abs(Math.sin(rotRad) * image.width) + Math.abs(Math.cos(rotRad) * image.height);
+  canvas.width = bBoxW;
+  canvas.height = bBoxH;
+
+  // Rotate the image around its centre within the bounding box
+  ctx.translate(bBoxW / 2, bBoxH / 2);
+  ctx.rotate(rotRad);
+  ctx.translate(-image.width / 2, -image.height / 2);
+  ctx.drawImage(image, 0, 0);
+
+  // Extract exactly the crop region (coordinates are in rotated-image space)
+  const data = ctx.getImageData(pixelCrop.x, pixelCrop.y, pixelCrop.width, pixelCrop.height);
   canvas.width = pixelCrop.width;
   canvas.height = pixelCrop.height;
-  ctx.putImageData(
-    data,
-    Math.round(0 - safe / 2 + image.width * 0.5 - pixelCrop.x),
-    Math.round(0 - safe / 2 + image.height * 0.5 - pixelCrop.y)
-  );
+  ctx.putImageData(data, 0, 0);
+
   return canvas.toDataURL('image/jpeg', 0.92);
 }
 
