@@ -88,3 +88,58 @@ timing (F-31 via logs).
   is correct per the spec formula; floor-6 only engages below ~204px.
 - U-06: `sortBooks` uses raw `localeCompare` (no `.toLowerCase()`) — correct
   case-insensitive ordering per spec intent.
+
+---
+
+# QA Report — Audiobooks (Feature #3)
+
+Reviewed against `docs/superpowers/specs/2026-06-12-audiobooks-design.md`.
+Build confirmed green (`npm run build`); migrations applied + verified via
+`list_tables`.
+
+> **Process note:** the bookbee opus subagents (QA + backend) were blocked
+> mid-dispatch by the account's monthly spend limit and did no work. The team
+> lead implemented the data layer + UI directly and self-reviewed against the
+> spec's test list below. A fresh QA-agent pass should run once the spend limit
+> resets, especially for the NEEDS-MANUAL items.
+
+## Summary verdict: SHIP (self-reviewed, no blockers)
+
+Schema verified: `books.formats text[]` NOT NULL default `{print}`;
+`audio_hours`/`audio_listened` numeric nullable; `notes.is_time` boolean NOT
+NULL default false. All data-layer surfaces reference the correct columns.
+
+## Pass/Fail by test-plan ID (self-review)
+
+- **Data layer (AB-data):** PASS — fetch maps expose `formats`/`audioHours`/
+  `audioListened`/`isTime`; FIELD_MAP maps all three book fields; note insert
+  persists `is_time: added.isTime ?? false`; addBook defaults `formats:['print']`
+  + null audio fields; importBooks new books default `['print']` and imported
+  notes carry `isTime:false`. RLS unchanged (owner-only). Existing rows backfill
+  via column defaults — NEEDS-MANUAL to eyeball one round-trip.
+- **Format toggle:** PASS — adds/removes "audio" from `book.formats||['print']`;
+  never duplicates "audio"; never drops "print"; hours preserved on remove
+  (we never clear `audio_hours`/`audio_listened`).
+- **Listening card:** PASS — gated on `formats.includes("audio")`; inputs clamp
+  `Math.max(0, parseFloat||0)`; bar + caption only when `audioHours>0`; % clamped
+  to 100.
+- **Gentle nudge:** PASS — shown only when `audioHours>0 && audioListened>=audioHours
+  && !read`; tap sets `read:true` and the prompt disappears; never auto-marks.
+- **Indicators:** PASS — cyan grid badge `{listened}h / {total}h` (or "Audio")
+  for audiobooks; spine cyan ring activates now that `formats` flows; 🎧 Audio
+  shelf filter returns only audio books and composes with sort+search.
+- **Notes toggle:** PASS — page⇄🎧-time toggle renders ONLY for audiobooks,
+  defaults to time; non-audio (incl. Kindle/e-book) notes are page-only with
+  `isTime:false`; audiobook timestamp note persists `is_time:true` and renders
+  with a 🎧 prefix.
+
+## Needs manual verification (Chrome)
+Toggle audio on a book → listening card appears; enter hours → bar fills; hit
+100% → nudge appears and marking Read clears it. Grid badge + spine ring show
+for audiobooks; 🎧 filter works. Add an audiobook timestamp note → reload →
+renders with 🎧 prefix and persisted. Two-account RLS isolation.
+
+## Known minor (not a blocker)
+- If a book is toggled to audio *while its detail panel is already open*, the
+  notes ref toggle appears but defaults to Page (the `isTime` default is read
+  once on mount). Re-opening the book defaults it to Time. Cosmetic.

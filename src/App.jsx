@@ -657,7 +657,7 @@ export default function Hushthorn() {
         if (!notesByBook[n.book_id]) notesByBook[n.book_id] = [];
         notesByBook[n.book_id].push({
           id: n.id, page: n.page, isQuote: n.is_quote,
-          text: n.text, isVoice: n.is_voice, date: n.date,
+          text: n.text, isVoice: n.is_voice, date: n.date, isTime: n.is_time,
         });
       }
       setBooks((booksData || []).map(b => ({
@@ -665,6 +665,7 @@ export default function Hushthorn() {
         coverUrl: b.cover_url, genres: b.genres || [], shelf: b.shelf,
         read: b.read, overall: b.overall, smut: b.smut,
         spineColor: b.spine_color,
+        formats: b.formats || ['print'], audioHours: b.audio_hours, audioListened: b.audio_listened,
         notes: notesByBook[b.id] || [],
       })));
       if (avatarData) setAvatar({
@@ -720,6 +721,7 @@ export default function Hushthorn() {
           isQuote: !!n.isQuote,
           text: n.text,
           isVoice: false,
+          isTime: false,
           date: today,
         }));
         const existing = byTitle.get(key);
@@ -743,6 +745,7 @@ export default function Hushthorn() {
             read: !!item.read,
             overall: item.overall || 0,
             smut: 0,
+            formats: ['print'],
             notes: newNotes,
           });
         }
@@ -765,6 +768,7 @@ export default function Hushthorn() {
           read: b.read,
           overall: b.overall,
           smut: b.smut,
+          formats: b.formats || ['print'],
         }))
       );
     }
@@ -778,6 +782,7 @@ export default function Hushthorn() {
     if (shelfFilter === "wishlist") return b.shelf === "wishlist";
     if (shelfFilter === "read") return b.read;
     if (shelfFilter === "unread") return !b.read;
+    if (shelfFilter === "audio") return (b.formats || []).includes("audio");
     return true;
   });
 
@@ -804,6 +809,7 @@ export default function Hushthorn() {
           is_quote: added.isQuote,
           text: added.text,
           is_voice: added.isVoice,
+          is_time: added.isTime ?? false,
           date: added.date,
         });
         if (error) { console.error('note insert:', error.message); return; }
@@ -814,7 +820,7 @@ export default function Hushthorn() {
       }
     }
     // Handle book field changes
-    const FIELD_MAP = { coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color' };
+    const FIELD_MAP = { coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', audioHours: 'audio_hours', audioListened: 'audio_listened' };
     const dbPatch = Object.fromEntries(
       Object.entries(FIELD_MAP).filter(([k]) => k in patch).map(([k, v]) => [v, patch[k]])
     );
@@ -871,6 +877,9 @@ export default function Hushthorn() {
       overall: book.overall,
       smut: book.smut,
       spine_color: book.spineColor ?? null,
+      formats: book.formats || ['print'],
+      audio_hours: null,
+      audio_listened: null,
     });
     if (error) { console.error('addBook:', error.message); return; }
     setBooks(prev => [{ ...book, id, notes: [] }, ...prev]);
@@ -884,6 +893,7 @@ export default function Hushthorn() {
     { key: "wishlist", label: "Wishlist" },
     { key: "read", label: "Read" },
     { key: "unread", label: "Unread" },
+    { key: "audio", label: "🎧 Audio" },
   ];
 
   if (!authReady) return (
@@ -1046,6 +1056,11 @@ export default function Hushthorn() {
                   {b.notes.length > 0 && (
                     <span className="ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm bg-purple-800/50 text-purple-300">
                       {b.notes.length} note{b.notes.length > 1 ? "s" : ""}
+                    </span>
+                  )}
+                  {(b.formats || []).includes("audio") && (
+                    <span className="ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm bg-cyan-500/20 text-cyan-200">
+                      🎧 {b.audioHours ? `${b.audioListened || 0}h / ${b.audioHours}h` : "Audio"}
                     </span>
                   )}
                 </div>
@@ -2845,6 +2860,16 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session }) {
               action={book.read ? "Mark Unread" : "Mark as Read"}
               onClick={() => onUpdate({ read: !book.read })}
             />
+            <ToggleRow
+              label={(book.formats || []).includes("audio") ? "Audiobook 🎧" : "No audio copy"}
+              action={(book.formats || []).includes("audio") ? "Remove audio" : "I have the audio"}
+              onClick={() => {
+                const fmts = book.formats || ["print"];
+                onUpdate({
+                  formats: fmts.includes("audio") ? fmts.filter((f) => f !== "audio") : [...fmts, "audio"],
+                });
+              }}
+            />
             <button onClick={onRemove} className="mt-1 text-sm text-purple-400/60 hover:text-pink-300 underline underline-offset-2 italic">
               Banish from the archive
             </button>
@@ -2867,6 +2892,53 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session }) {
             </p>
           </div>
 
+          {(book.formats || []).includes("audio") && (
+            <div className="ht-card rounded-md p-4 mt-4 space-y-2">
+              <span className="ht-display text-xs uppercase text-cyan-200 font-semibold">Listening 🎧</span>
+              <div className="flex items-center gap-2 flex-wrap text-sm text-purple-200">
+                <input
+                  type="number" min="0" step="0.1"
+                  value={book.audioListened ?? ""}
+                  onChange={(e) => onUpdate({ audioListened: Math.max(0, parseFloat(e.target.value) || 0) })}
+                  placeholder="0"
+                  className="w-20 bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-cyan-400"
+                  aria-label="Hours listened"
+                />
+                <span className="text-purple-300/70">of</span>
+                <input
+                  type="number" min="0" step="0.1"
+                  value={book.audioHours ?? ""}
+                  onChange={(e) => onUpdate({ audioHours: Math.max(0, parseFloat(e.target.value) || 0) })}
+                  placeholder="?"
+                  className="w-20 bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-cyan-400"
+                  aria-label="Total hours"
+                />
+                <span className="text-purple-300/70">hours</span>
+              </div>
+              {book.audioHours > 0 && (
+                <>
+                  <div className="h-2 rounded-sm bg-purple-950/70 overflow-hidden border border-purple-800/40">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-400/80 to-pink-400/80 transition-all"
+                      style={{ width: `${Math.min(100, ((book.audioListened || 0) / book.audioHours) * 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-purple-400/70 italic">
+                    {Math.round(Math.min(100, ((book.audioListened || 0) / book.audioHours) * 100))}% through the telling
+                  </p>
+                  {(book.audioListened || 0) >= book.audioHours && !book.read && (
+                    <button
+                      onClick={() => onUpdate({ read: true })}
+                      className="ht-display text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-sm bg-gradient-to-r from-cyan-500/70 to-pink-500/70 hover:from-cyan-400 hover:to-pink-400 text-white"
+                    >
+                      ✨ Finished the telling — mark as Read?
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           <NotesSection book={book} onUpdate={onUpdate} />
         </div>
       </div>
@@ -2888,8 +2960,10 @@ function ToggleRow({ label, action, onClick }) {
 /* ── marginalia & voice ────────────────────────────────────── */
 
 function NotesSection({ book, onUpdate }) {
+  const isAudio = (book.formats || []).includes("audio");
   const [page, setPage] = useState("");
   const [isQuote, setIsQuote] = useState(false);
+  const [isTime, setIsTime] = useState(isAudio); // audiobooks default to a timestamp ref
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
   const [voiceError, setVoiceError] = useState("");
@@ -2944,6 +3018,7 @@ function NotesSection({ book, onUpdate }) {
       id: crypto.randomUUID(),
       page: page.trim(),
       isQuote,
+      isTime: isAudio && isTime,
       text: text.trim(),
       isVoice: wasVoiceRef.current,
       date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }),
@@ -2952,6 +3027,7 @@ function NotesSection({ book, onUpdate }) {
     setPage("");
     setText("");
     setIsQuote(false);
+    setIsTime(isAudio);
     wasVoiceRef.current = false;
   };
 
@@ -2963,11 +3039,24 @@ function NotesSection({ book, onUpdate }) {
 
       <div className="ht-card rounded-md p-3 space-y-2">
         <div className="flex gap-2 items-center flex-wrap">
+          {isAudio && (
+            <div className="flex rounded-sm overflow-hidden border border-purple-700/50">
+              <button type="button" onClick={() => setIsTime(false)}
+                className={`ht-display text-[9px] uppercase px-2 py-1.5 transition-colors ${!isTime ? "bg-purple-600/70 text-white" : "bg-purple-950/50 text-purple-300 hover:bg-purple-900/60"}`}>
+                Page
+              </button>
+              <button type="button" onClick={() => setIsTime(true)}
+                className={`ht-display text-[9px] uppercase px-2 py-1.5 transition-colors ${isTime ? "bg-cyan-600/70 text-white" : "bg-purple-950/50 text-purple-300 hover:bg-purple-900/60"}`}>
+                🎧 Time
+              </button>
+            </div>
+          )}
           <input
             value={page}
             onChange={(e) => setPage(e.target.value)}
-            placeholder="Page"
-            className="w-20 bg-purple-950/60 border border-purple-700/50 rounded-sm px-2.5 py-1.5 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400"
+            placeholder={isAudio && isTime ? "3:45:12" : "Page"}
+            className={`w-24 bg-purple-950/60 border border-purple-700/50 rounded-sm px-2.5 py-1.5 text-[15px] placeholder-purple-400/50 focus:outline-none ${isAudio && isTime ? "focus:border-cyan-400" : "focus:border-pink-400"}`}
+            aria-label={isAudio && isTime ? "Timestamp" : "Page"}
           />
           <label className="flex items-center gap-1.5 text-sm text-purple-300 cursor-pointer select-none italic">
             <input type="checkbox" checked={isQuote} onChange={(e) => setIsQuote(e.target.checked)} className="accent-pink-500" />
@@ -3010,7 +3099,11 @@ function NotesSection({ book, onUpdate }) {
         {book.notes.map((n) => (
           <div key={n.id} className="bg-purple-950/40 border border-purple-800/40 rounded-sm p-3">
             <div className="flex items-center gap-2 text-sm text-purple-400/70 mb-1 flex-wrap">
-              {n.page && <span className="ht-display text-[10px] uppercase px-2 py-0.5 rounded-sm bg-purple-800/50 text-purple-200">p. {n.page}</span>}
+              {n.page && (
+                n.isTime
+                  ? <span className="ht-display text-[10px] uppercase px-2 py-0.5 rounded-sm bg-cyan-500/20 text-cyan-200">🎧 {n.page}</span>
+                  : <span className="ht-display text-[10px] uppercase px-2 py-0.5 rounded-sm bg-purple-800/50 text-purple-200">p. {n.page}</span>
+              )}
               {n.isVoice && <span className="flex items-center gap-1 text-pink-300/80 text-xs"><MicIcon size={12} /> voice</span>}
               <span className="text-xs">{n.date}</span>
               <button onClick={() => deleteNote(n.id)} className="ml-auto text-xs hover:text-pink-300 underline underline-offset-2">
