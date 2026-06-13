@@ -133,11 +133,27 @@ NULL default false. All data-layer surfaces reference the correct columns.
   `isTime:false`; audiobook timestamp note persists `is_time:true` and renders
   with a 🎧 prefix.
 
-## Needs manual verification (Chrome)
-Toggle audio on a book → listening card appears; enter hours → bar fills; hit
-100% → nudge appears and marking Read clears it. Grid badge + spine ring show
-for audiobooks; 🎧 filter works. Add an audiobook timestamp note → reload →
-renders with 🎧 prefix and persisted. Two-account RLS isolation.
+## Manual verification — DONE (Playwright, 2026-06-13)
+
+Run end-to-end against the live app + Supabase using a throwaway account
+(created, used, then fully deleted). All PASS:
+
+- App boots with no runtime/React errors (only a harmless favicon 404).
+- Format toggle: "No audio copy" → "Audiobook 🎧"; listening card appears only
+  when audio.
+- Listening card: entered 8 / 8 → "100% through the telling"; the
+  "✨ Finished the telling — mark as Read?" nudge appeared, marked the book Read
+  on tap, and then disappeared.
+- 🎧 grid badge shows "8h / 8h"; spine renders on the shelf; 🎧 Audio filter
+  returns only the audiobook and excludes a print-only book.
+- Notes: page⇄🎧-time toggle present only on the audiobook (a print book showed
+  page-only); timestamp note saved and rendered with a "🎧 3:45:12" prefix.
+- DB round-trip confirmed via SQL: `formats [print,audio]`, `audio_hours 8`,
+  `audio_listened 8`, `read true`, note `is_time true`.
+- Cross-device prefs: reloading restored Spines layout (pref_layout persisted).
+
+Not re-verified (environmental): two-account RLS isolation (single test account
+used) — covered by the unchanged owner-only policies.
 
 ## Known minor (not a blocker)
 - If a book is toggled to audio *while its detail panel is already open*, the
