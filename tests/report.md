@@ -159,3 +159,45 @@ used) — covered by the unchanged owner-only policies.
 - If a book is toggled to audio *while its detail panel is already open*, the
   notes ref toggle appears but defaults to Page (the `isTime` default is read
   once on mount). Re-opening the book defaults it to Time. Cosmetic.
+
+---
+
+# QA Report — Scanner Fix + Unified Scan/Upload + Multi-Book
+
+Reviewed against `docs/superpowers/specs/2026-06-12-scanner-unified-capture-design.md`.
+Build green; `@zxing/browser` added and **code-split into its own chunk** (lazy
+import — not in the main bundle's critical path).
+
+> **Process note:** bookbee subagents stayed spend-limited; this feature has no
+> migration and is frontend-only, so the lead implemented + self-reviewed it and
+> ran a headless Playwright smoke. Live camera + barcode decoding require a real
+> device and were NOT auto-tested.
+
+## Summary verdict: SHIP for non-camera paths; camera/barcode needs device test
+
+## Verified headless (Playwright, throwaway account, 2026-06-13)
+- App boots; Inscribe modal opens with **two tabs** ("Scour the grimoire",
+  "Scan or upload"); desktop defaults to Search (correct — fine pointer).
+- Scan tab renders with no runtime error and **degrades gracefully with no
+  camera**: camera-preview placeholder, Open camera, Capture cover (disabled),
+  Upload a photo (enabled), helper text.
+- **Scan multiple** toggle works: hides the single-book Capture/Upload buttons
+  and shows the batch queue ("0 queued · Point at a barcode…").
+- No console errors beyond the favicon 404.
+
+## Self-reviewed (code) — PASS
+- Native-first decode (`BarcodeDetector`) with **lazy `@zxing/browser` fallback**
+  (dynamic import); shared `/^97[89]\d{10}$/` ISBN gate.
+- Camera constraints upgraded (1280×720 ideal + best-effort `focusMode:
+  continuous`).
+- `lookupIsbn` split into pure `fetchByIsbn` + single (→review) / batch (→queue)
+  consumers.
+- Stale-closure safety: scan loop reads `scanMultiple`/`queue`/`books` via refs.
+- Batch: de-dupe (cooldown + queue check), in-archive flag (title match),
+  "Add N to Owned/Wishlist" via `onAddMany` (importBooks), camera frees on upload.
+
+## Needs real-device verification (no camera in headless)
+- Barcode actually decodes on iOS Safari (ZXing) and Android/desktop (native).
+- Barcode → single review, and → batch queue accumulation / dedupe / in-archive.
+- "Add N to shelf" inserts the batch and they appear in the library.
+- Autofocus/resolution improves real-world read rate.

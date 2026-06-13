@@ -1070,7 +1070,7 @@ export default function Hushthorn() {
         )}
       </main>
 
-      {addOpen && <AddBookModal onAdd={addBook} onClose={() => setAddOpen(false)} session={session} />}
+      {addOpen && <AddBookModal onAdd={addBook} onAddMany={importBooks} onClose={() => setAddOpen(false)} session={session} books={books} />}
       {avatarOpen && (
         <AvatarPage
           avatar={avatar}
@@ -1830,8 +1830,17 @@ function AuthPage() {
 
 /* ── add book modal ────────────────────────────────────────── */
 
-function AddBookModal({ onAdd, onClose, session }) {
-  const [mode, setMode] = useState("search"); // search | photo
+function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
+  const [mode, setMode] = useState(() => {
+    // Mobile (coarse pointer + narrow viewport) defaults to Scan; web to Search.
+    if (typeof window !== "undefined" && window.matchMedia &&
+        window.matchMedia("(pointer: coarse)").matches &&
+        window.matchMedia("(max-width: 640px)").matches) return "scan";
+    return "search";
+  }); // search | scan
+  const [scanView, setScanView] = useState("capture"); // capture | review
+  const [scanMultiple, setScanMultiple] = useState(false);
+  const [queue, setQueue] = useState([]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1845,9 +1854,21 @@ function AddBookModal({ onAdd, onClose, session }) {
   // live scan
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const scanLoopRef = useRef(null);
+  const scanLoopRef = useRef(null);      // native BarcodeDetector interval id
+  const zxingStopRef = useRef(null);     // ZXing reader controls (stop fn)
+  const lastScanRef = useRef({ isbn: "", ts: 0 }); // batch cooldown/de-dupe
+  const cameraTriedRef = useRef(false);  // avoid re-prompting after a camera error
   const [liveActive, setLiveActive] = useState(false);
   const [liveStatus, setLiveStatus] = useState("");
+  const [batchShelf, setBatchShelf] = useState("owned");
+  // Refs mirror state so the scan loop's captured closures read live values
+  // (avoids stale-closure bugs when scanMultiple/queue/books change mid-scan).
+  const scanMultipleRef = useRef(scanMultiple);
+  const queueRef = useRef(queue);
+  const booksRef = useRef(books);
+  useEffect(() => { scanMultipleRef.current = scanMultiple; }, [scanMultiple]);
+  useEffect(() => { queueRef.current = queue; }, [queue]);
+  useEffect(() => { booksRef.current = books; }, [books]);
   const [photoPreview, setPhotoPreview] = useState("");
   const [coverChoice, setCoverChoice] = useState("api"); // "api" | "photo"
   const [cropSrc, setCropSrc] = useState("");
@@ -2076,6 +2097,7 @@ function AddBookModal({ onAdd, onClose, session }) {
   const handlePhoto = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    stopCamera(); // free the camera if it was live (no-op otherwise)
     const reader = new FileReader();
     reader.onload = () => { setOriginalPhotoSrc(reader.result); setCropSrc(reader.result); };
     reader.readAsDataURL(file);
@@ -2086,6 +2108,7 @@ function AddBookModal({ onAdd, onClose, session }) {
     setPhotoPreview(dataUrl);
     setCoverChoice("photo");
     setCropSrc("");
+    setScanView("review");
     if (!hadTitle) scanCover(dataUrl);
   };
 
@@ -2093,86 +2116,157 @@ function AddBookModal({ onAdd, onClose, session }) {
 
   const stopCamera = () => {
     clearInterval(scanLoopRef.current);
+    try { zxingStopRef.current?.stop?.(); } catch { /* ignore */ }
+    zxingStopRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setLiveActive(false);
   };
 
   useEffect(() => () => stopCamera(), []); // cleanup on close
-  useEffect(() => { if (mode !== "live") stopCamera(); }, [mode]);
+  useEffect(() => { if (mode !== "scan") stopCamera(); }, [mode]);
+  // Auto-open the camera when entering the capture view (one attempt; the
+  // cameraTried guard stops a permission-denied loop). "Scan another" resets it.
+  useEffect(() => {
+    if (mode === "scan" && scanView === "capture" && !liveActive && !cameraTriedRef.current) {
+      startCamera();
+    }
+  }, [mode, scanView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startCamera = async () => {
     setLiveStatus("");
+    cameraTriedRef.current = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
       streamRef.current = stream;
+      // Best-effort continuous autofocus so small barcodes stay sharp.
+      try {
+        const track = stream.getVideoTracks()[0];
+        if (track?.applyConstraints) await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+      } catch { /* unsupported — ignore */ }
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
       setLiveActive(true);
-      startBarcodeLoop();
+      startBarcodeScan();
     } catch {
-      setLiveStatus("The camera couldn't be opened — embedded demos often block camera access, and it needs permission. Use \"Add with a photo\" instead; in the mobile app this is the native camera.");
+      setLiveStatus("The camera couldn't be opened — grant permission, or upload a photo instead.");
     }
   };
 
-  const startBarcodeLoop = () => {
-    if (!("BarcodeDetector" in window)) {
-      setLiveStatus("Live barcode reading isn't supported in this browser — point at the cover and tap Capture instead.");
-      return;
+  // Native BarcodeDetector when available (fast); else lazy-load ZXing.
+  const startBarcodeScan = async () => {
+    if ("BarcodeDetector" in window) {
+      let detector = null;
+      try { detector = new window.BarcodeDetector({ formats: ["ean_13"] }); } catch { detector = null; }
+      if (detector) {
+        setLiveStatus("Point at the barcode…");
+        scanLoopRef.current = setInterval(async () => {
+          try {
+            if (!videoRef.current || videoRef.current.readyState < 2) return;
+            const codes = await detector.detect(videoRef.current);
+            const isbn = codes.map((c) => c.rawValue).find((v) => /^97[89]\d{10}$/.test(v));
+            if (isbn) handleDetectedIsbn(isbn);
+          } catch { /* keep watching */ }
+        }, 500);
+        return;
+      }
     }
-    let detector;
+    // Fallback: ZXing (iOS Safari, unsupported desktops) — only fetched now.
     try {
-      detector = new window.BarcodeDetector({ formats: ["ean_13"] });
+      const { BrowserMultiFormatReader } = await import("@zxing/browser");
+      const reader = new BrowserMultiFormatReader();
+      setLiveStatus("Point at the barcode…");
+      zxingStopRef.current = await reader.decodeFromVideoElement(videoRef.current, (result) => {
+        const v = result?.getText?.();
+        if (v && /^97[89]\d{10}$/.test(v)) handleDetectedIsbn(v);
+      });
     } catch {
-      setLiveStatus("Live barcode reading isn't supported here — point at the cover and tap Capture instead.");
-      return;
+      setLiveStatus("Live barcode reading isn't available here — tap Capture cover or upload a photo.");
     }
-    setLiveStatus("Watching for a barcode… or point at the cover and tap Capture.");
-    scanLoopRef.current = setInterval(async () => {
-      try {
-        if (!videoRef.current || videoRef.current.readyState < 2) return;
-        const codes = await detector.detect(videoRef.current);
-        const isbn = codes.map((c) => c.rawValue).find((v) => /^97[89]\d{10}$/.test(v));
-        if (isbn) {
-          clearInterval(scanLoopRef.current);
-          lookupIsbn(isbn);
-        }
-      } catch { /* keep watching */ }
-    }, 600);
   };
 
-  const lookupIsbn = async (isbn) => {
-    setLiveStatus(`Found ISBN ${isbn} — consulting the archives…`);
-    stopCamera();
+  // Open Library lookup by ISBN — pure fetch, returns book data or null.
+  const fetchByIsbn = async (isbn) => {
     try {
       const res = await fetch(
         `https://openlibrary.org/search.json?q=isbn:${isbn}&limit=1&fields=title,author_name,cover_i,subject`
       );
       const d = await res.json();
       const doc = d.docs?.[0];
-      if (doc?.title) {
-        const genres = cleanGenres(doc.subject);
+      if (!doc?.title) return null;
+      return {
+        isbn,
+        title: doc.title,
+        author: doc.author_name?.[0] || "",
+        coverUrl: doc.cover_i
+          ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`
+          : `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg`,
+        genres: cleanGenres(doc.subject),
+      };
+    } catch { return null; }
+  };
+
+  // Shared barcode handler. Reads live values via refs to dodge stale closures.
+  const handleDetectedIsbn = async (isbn) => {
+    if (scanMultipleRef.current) {
+      const now = Date.now();
+      if (lastScanRef.current.isbn === isbn && now - lastScanRef.current.ts < 2000) return;
+      lastScanRef.current = { isbn, ts: now };
+      if (queueRef.current.some((q) => q.isbn === isbn)) { setLiveStatus("Already scanned — keep going…"); return; }
+      const data = await fetchByIsbn(isbn);
+      if (!data) { setLiveStatus(`ISBN ${isbn} not in the archives — keep scanning…`); return; }
+      const inArchive = booksRef.current.some((b) => (b.title || "").toLowerCase() === data.title.toLowerCase());
+      setQueue((q) => [...q, { ...data, inArchive }]);
+      setLiveStatus(inArchive ? `"${data.title}" is already in your archive` : `📖 Added "${data.title}"`);
+    } else {
+      clearInterval(scanLoopRef.current);
+      try { zxingStopRef.current?.stop?.(); } catch { /* ignore */ }
+      setLiveStatus(`Found ISBN ${isbn} — consulting the archives…`);
+      const data = await fetchByIsbn(isbn);
+      stopCamera();
+      if (data) {
         setManual((m) => ({
           ...m,
-          title: doc.title,
-          author: doc.author_name?.[0] || m.author,
-          coverUrl: doc.cover_i
-            ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`
-            : `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg`,
-          genres: genres.length ? genres : m.genres,
+          title: data.title,
+          author: data.author || m.author,
+          coverUrl: data.coverUrl,
+          genres: data.genres.length ? data.genres : m.genres,
         }));
-        setMode("photo");
         setScanNotice("Matched from the barcode — confirm the details, then inscribe.");
-        if (genres.length === 0) divineDetails(doc.title, doc.author_name?.[0] || "");
+        if (data.genres.length === 0) divineDetails(data.title, data.author || "");
+        setScanView("review");
       } else {
         setLiveStatus("That barcode wasn't in the archives. Try capturing the cover instead.");
         startCamera();
       }
-    } catch {
-      setLiveStatus("The archives are unreachable. Check your connection and try again.");
     }
+  };
+
+  const removeFromQueue = (isbn) => setQueue((q) => q.filter((b) => b.isbn !== isbn));
+
+  const addBatch = () => {
+    const items = queue.filter((q) => !q.inArchive).map((q) => ({
+      title: q.title,
+      author: q.author || "Unknown author",
+      coverUrl: q.coverUrl,
+      genres: q.genres,
+      shelf: batchShelf,
+      read: false,
+    }));
+    if (items.length && onAddMany) onAddMany(items);
+    onClose();
+  };
+
+  const scanAnother = () => {
+    setManual({ title: "", author: "", coverUrl: "", genres: [] });
+    setPhotoPreview(""); setOriginalPhotoSrc(""); setCoverChoice("api");
+    setScanNotice("");
+    cameraTriedRef.current = false;
+    setScanView("capture");
   };
 
   const captureCover = () => {
@@ -2186,7 +2280,7 @@ function AddBookModal({ onAdd, onClose, session }) {
     stopCamera();
     setPhotoPreview(dataUrl);
     setCoverChoice("photo");
-    setMode("photo");
+    setScanView("review");
     scanCover(dataUrl);
   };
 
@@ -2249,8 +2343,7 @@ function AddBookModal({ onAdd, onClose, session }) {
 
       <div className="flex gap-2 mb-4 flex-wrap">
         <ModeTab active={mode === "search"} onClick={() => setMode("search")}>Scour the grimoire</ModeTab>
-        <ModeTab active={mode === "photo"} onClick={() => setMode("photo")}>Add with a photo</ModeTab>
-        <ModeTab active={mode === "live"} onClick={() => setMode("live")}>Live scan</ModeTab>
+        <ModeTab active={mode === "scan"} onClick={() => setMode("scan")}>Scan or upload</ModeTab>
       </div>
 
       {mode === "search" ? (
@@ -2296,10 +2389,14 @@ function AddBookModal({ onAdd, onClose, session }) {
             ))}
           </div>
         </>
-      ) : mode === "photo" ? (
+      ) : mode === "scan" && scanView === "review" ? (
         <div className="space-y-3">
+          <button type="button" onClick={scanAnother}
+            className="ht-display text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300">
+            ↻ Scan another
+          </button>
           <p className="text-sm text-purple-300/70 italic">
-            Upload a likeness of the cover and the scribe will read the title and author for you. Anything it can't make out, you can inscribe by hand.
+            Confirm the details the scribe gathered — anything it couldn't make out, inscribe by hand.
           </p>
           <div className="relative w-full h-64 rounded-sm border-2 border-dashed border-purple-600/50 overflow-hidden bg-purple-950/40">
             <button type="button" onClick={() => fileRef.current?.click()}
@@ -2462,10 +2559,7 @@ function AddBookModal({ onAdd, onClose, session }) {
         </div>
       ) : (
         <div className="space-y-3">
-          <p className="text-sm text-purple-300/70 italic">
-            Point the camera at the barcode for an instant match from the archives — or at the cover, then Capture, and the scribe will read it.
-          </p>
-          <div className="relative w-full aspect-[3/2] rounded-sm overflow-hidden bg-purple-950/60 border border-purple-700/40 flex items-center justify-center">
+          <div className="relative w-full aspect-[3/4] rounded-sm overflow-hidden bg-purple-950/60 border border-purple-700/40 flex items-center justify-center">
             <video ref={videoRef} playsInline muted className={`w-full h-full object-cover ${liveActive ? "" : "hidden"}`} />
             {!liveActive && <span className="text-[15px] text-purple-300/70">📷 Camera preview</span>}
             {liveActive && (
@@ -2473,24 +2567,74 @@ function AddBookModal({ onAdd, onClose, session }) {
             )}
           </div>
           {liveStatus && <p className="text-sm text-pink-200/90 italic">{liveStatus}</p>}
-          <div className="flex gap-2">
+
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input type="checkbox" checked={scanMultiple} onChange={(e) => setScanMultiple(e.target.checked)} className="accent-pink-500" />
+            <span className="ht-display text-[10px] uppercase tracking-widest text-purple-200">Scan multiple</span>
+            <span className="text-xs text-purple-400/60 italic">— queue barcodes, add them all at once</span>
+          </label>
+
+          <div className="flex gap-2 flex-wrap">
             {!liveActive ? (
               <button onClick={startCamera} className="ht-display flex-1 py-2 rounded-sm bg-indigo-500/70 hover:bg-indigo-500 text-white text-xs font-semibold uppercase">
                 Open the camera
               </button>
             ) : (
+              <button onClick={stopCamera} className="ht-display px-4 py-2 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100 text-xs font-semibold uppercase">
+                Stop camera
+              </button>
+            )}
+            {!scanMultiple && (
               <>
-                <button onClick={captureCover} className="ht-display flex-1 py-2 rounded-sm bg-pink-500/80 hover:bg-pink-400 text-white text-xs font-semibold uppercase">
+                <button onClick={captureCover} disabled={!liveActive} className="ht-display flex-1 py-2 rounded-sm bg-pink-500/80 hover:bg-pink-400 disabled:opacity-40 text-white text-xs font-semibold uppercase">
                   📸 Capture cover
                 </button>
-                <button onClick={stopCamera} className="ht-display px-4 py-2 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100 text-xs font-semibold uppercase">
-                  Stop
+                <button onClick={() => fileRef.current?.click()} className="ht-display flex-1 py-2 rounded-sm bg-purple-700/60 hover:bg-purple-600 text-white text-xs font-semibold uppercase">
+                  ⬆ Upload a photo
                 </button>
               </>
             )}
           </div>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+
+          {scanMultiple && (
+            <div className="ht-card rounded-md p-3 space-y-2">
+              <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300">{queue.length} queued</p>
+              {queue.length === 0 ? (
+                <p className="text-sm text-purple-400/60 italic">Point at a barcode — matches drop in here.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {queue.map((b) => (
+                    <div key={b.isbn} className={`flex items-center gap-2 rounded-sm p-1.5 border ${b.inArchive ? "border-purple-800/40 opacity-50" : "border-purple-700/40 bg-purple-950/40"}`}>
+                      <div className="w-7 h-10 rounded-sm overflow-hidden bg-purple-900/60 flex-shrink-0">
+                        <CoverImage src={b.coverUrl} alt="" className="w-full h-full object-cover" fallback={<span className="text-purple-500 text-xs flex items-center justify-center h-full">♛</span>} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] text-pink-100 truncate">{b.title}</p>
+                        <p className="text-[11px] text-purple-400 truncate italic">{b.author || "Unknown"}{b.inArchive ? " · already in archive" : ""}</p>
+                      </div>
+                      <button onClick={() => removeFromQueue(b.isbn)} aria-label="Remove from queue" className="text-purple-400 hover:text-pink-300 px-1">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {queue.some((q) => !q.inArchive) && (
+                <div className="flex gap-2 items-center">
+                  <button onClick={addBatch} className="ht-display flex-1 py-2 rounded-sm bg-gradient-to-r from-indigo-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 text-white text-xs font-semibold uppercase">
+                    Add {queue.filter((q) => !q.inArchive).length} to
+                  </button>
+                  <select value={batchShelf} onChange={(e) => setBatchShelf(e.target.value)}
+                    className="bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-2 text-sm text-purple-100 focus:outline-none focus:border-pink-400">
+                    <option value="owned">Owned</option>
+                    <option value="wishlist">Wishlist</option>
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
           <p className="text-xs text-purple-400/60 italic">
-            Barcode matches use the book's ISBN against Open Library. In the mobile app this is the native camera with instant scanning.
+            Barcode matches use the book's ISBN against Open Library. Camera blocked? Upload a cover photo instead.
           </p>
         </div>
       )}
