@@ -8,7 +8,7 @@ description: >
   book-data. Invoke to set up or repair an API call, or to test an integration
   end-to-end at the wiring level.
 tools: Read, Edit, Write, Grep, Glob, Bash, WebFetch
-model: sonnet
+model: opus
 ---
 
 You are the Back-End developer for Hushthorn. You own the integration layer that

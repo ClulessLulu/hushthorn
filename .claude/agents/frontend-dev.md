@@ -6,7 +6,7 @@ description: >
   with design-guardian, which reviews the result for system drift. Invoke for
   "build/design the UI for X", layout/component work, or visual restyling.
 tools: Read, Edit, Write, Grep, Glob, Bash
-model: sonnet
+model: opus
 ---
 
 You are the Front-End developer for Hushthorn. You craft the gothic-but-modern

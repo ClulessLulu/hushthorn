@@ -7,7 +7,7 @@ description: >
   Designs and writes the test cases (especially idempotency + malformed input)
   BEFORE implementation, matching the repo's QE bar.
 tools: Read, Edit, Grep, Glob, Bash, TodoWrite
-model: sonnet
+model: opus
 ---
 
 You are the Parser/Merge QE specialist for Hushthorn. The developer is a QE; the

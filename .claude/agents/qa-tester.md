@@ -9,7 +9,7 @@ description: >
   prefer parser-qe.
 # tools intentionally omitted → inherits all (needs Supabase MCP + Playwright MCP
 # + Bash + Read/Grep). Restrict later if you want a read-only QA pass.
-model: sonnet
+model: opus
 ---
 
 You are the QA tester for Hushthorn, continuing the `bookbee` team's method. The
