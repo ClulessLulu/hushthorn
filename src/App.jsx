@@ -1740,7 +1740,7 @@ function AuthPage() {
           setError('That email is already registered. Sign in instead, or use a different one.');
           return;
         }
-        if (!data.session) {
+        if (!data?.session) {
           setError('Check your inbox to confirm your email before signing in.');
           return;
         }
