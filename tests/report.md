@@ -201,3 +201,111 @@ import — not in the main bundle's critical path).
 - Barcode → single review, and → batch queue accumulation / dedupe / in-archive.
 - "Add N to shelf" inserts the batch and they appear in the library.
 - Autofocus/resolution improves real-world read rate.
+
+---
+
+# Report — Duplicate-Email Signup Error Handling (commit `de93eb4`)
+
+**Plan:** `tests/auth-duplicate-email-test-plan.md`
+**Scope:** `AuthPage.submit` in `src/App.jsx` (~:1720–1759). Client-side React auth
+logic only — no migration, no schema, no RLS. Verified by code inspection + a pure
+predicate extracted byte-for-byte from the source and exercised under Node (ESM,
+no runner/deps added), plus `npm run build`.
+
+**Verdict: GO.** 13/13 unit assertions PASS, all 20 inspected IDs PASS, build green.
+The fix is correct and the `Array.isArray` guard plus the `mode === 'signup'` catch
+gate are exactly what prevents the two false-positive traps (malformed shapes and
+re-themed login errors).
+
+## Result summary
+
+| Bucket | Pass | Fail |
+|---|---|---|
+| B- (Supabase contract) | 3 | 0 |
+| F- (branch order / routing) | 10 | 0 |
+| U- (unit predicate) | 7 | 0 |
+| E- (edge / malformed) | 7 | 0 (1 informational note) |
+| **Total** | **27** | **0** |
+
+## Build
+
+`npm run build` → exit 0, `✓ 300 modules transformed`, `✓ built in 466ms`. No errors/warnings.
+
+## Unit predicate run (mirrors :1738–1755)
+
+Extracted `classifyResolved(data)` (try-branch) and `classifyThrown(err, mode)`
+(catch) verbatim; ran 13 assertions — all PASS:
+
+```
+PASS U-01 confirm-email   new user + confirmations ON      → "Check your inbox…"
+PASS U-02 duplicate       empty identities (THE FIX)       → "…already registered…"
+PASS U-03 ok              new user + confirmations OFF     → logs in (no message)
+PASS U-04 duplicate       thrown "User already registered" + signup
+PASS U-05 verbatim        thrown "User already registered" + LOGIN (gate holds)
+PASS U-06 verbatim        thrown "Invalid login credentials" + login (unchanged)
+PASS U-07 duplicate       empty identities even w/ session → dup branch ordered first
+PASS E-01 confirm-email   data.user === null               → NO false duplicate
+PASS E-02 confirm-email   identities key absent (undefined)→ NO false duplicate
+PASS E-03 confirm-email   identities === null (non-array)  → NO false duplicate
+PASS E-04 verbatim        thrown error with no .message    → no crash, no mislabel
+PASS E-05 duplicate       thrown "Email already exists"    → both vocab variants covered
+PASS E-06 verbatim        "Password should be at least 6…" → NOT mislabeled duplicate
+INFO E-07 no-throw        data without session key → data.session===undefined→falsy→inbox
+13/13 unit assertions passed.
+```
+
+## Per-ID detail (the 8 author cases + edges)
+
+- **B-01/B-02/B-03 PASS** — `git show de93eb4 --stat`: only `src/App.jsx` changed
+  (+15/-1). No migration, no new column, no key/secret. Code keys exactly on the
+  documented enumeration-protection shape (`identities: []`, `session: null`).
+- **F-01 PASS (#6)** — `:1723-1726` mismatch check sets "Passwords do not match." and
+  `return`s **before** `setLoading(true)` / any `signUp`. Short-circuits first. ✔
+- **F-02 PASS (#1)** — new email + confirmations ON: non-empty identities → falls to
+  `!data.session` → "Check your inbox…". Path untouched by the fix.
+- **F-03 PASS (#2, THE FIX)** — empty identities → "That email is already registered…"
+  and `return`. Confirmed by U-02.
+- **F-04 PASS** — duplicate block (`:1739`) is physically **above** the inbox block
+  (`:1743`); since both have `session:null`, ordering is what stops the duplicate
+  from being mislabeled "check your inbox". Confirmed by U-07.
+- **F-05 PASS (#3)** — new email + confirmations OFF: non-empty identities + truthy
+  `data.session` → neither branch fires → app signs in. Confirmed by U-03.
+- **F-06 PASS (#4)** — confirmations OFF duplicate throws "User already registered";
+  regex + signup gate → friendly message. Confirmed by U-04.
+- **F-07 PASS (#5)** — Google-OAuth email then email signup (confirmations ON) returns
+  empty identities → same friendly duplicate path as F-03/U-02.
+- **F-08 PASS (#7)** — LOGIN tab: `mode === 'signup'` gate is false, so even an
+  "already…" message would pass through verbatim; real "Invalid login credentials"
+  is unmodified. Confirmed by U-05/U-06.
+- **F-09 PASS** — `setError('')` at `:1722` (submit) and `:1782` (tab switch) clears
+  stale messages between attempts/tabs.
+- **F-10 PASS** — `setLoading(false)` in `finally` (`:1756`) runs for every early
+  `return` and thrown error; button never stuck on "Opening the archive…".
+- **E-01/E-02/E-03 PASS (#8)** — the `Array.isArray(identities)` guard makes
+  `user: null`, missing `identities`, and `identities: null` all fall through to the
+  inbox/ok path — **no false "already registered"**. This is the core correctness
+  win of the guard over a bare `identities.length === 0`.
+- **E-04 PASS** — `/.../.test(err.message || '')` tolerates a message-less error; no
+  throw on `.test`. (Verbatim `setError` receives `undefined`; if such an error ever
+  surfaces, the UI would show a blank message rather than "undefined" since React
+  renders `undefined` as nothing — acceptable, not a regression.)
+- **E-05/E-06 PASS** — regex covers "exists" as well as "registered"; benign signup
+  errors (weak password) are not swallowed into the duplicate message.
+- **E-07 INFO (not a failure)** — `if (!data.session)` at `:1743` reads `data.session`
+  **without** optional chaining. Safe because `signUp` resolving with `error: null`
+  always returns a `data` object (verified: `data.session === undefined` is falsy →
+  inbox copy, no throw). Latent fragility *only* if Supabase could resolve with a
+  null `data` on a non-error path, which it does not. Noted for awareness; no change
+  required.
+
+## Not auto-run (documented manual step, not faked)
+
+- **E-08 / live Chrome flows** — exercising the real `signUp` against the project's
+  actual confirm setting needs a running dev server + a real Supabase project +
+  knowledge of whether confirmations are ON/OFF. Not feasible autonomously here. The
+  4-step Chrome procedure is in the plan under "Manual (Chrome) steps". The logic it
+  would exercise is fully covered deterministically by the unit + code IDs above.
+
+## Go / No-Go
+
+**GO** — releasable. No defects found; nothing to route back to frontend-dev.
