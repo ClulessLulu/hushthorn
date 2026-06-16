@@ -2203,6 +2203,17 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
     }
   };
 
+  // Google Books cover by ISBN — better art coverage than Open Library for
+  // indie/romantasy titles. Returns an https cover URL or "" (never throws).
+  const fetchGoogleCover = async (isbn) => {
+    try {
+      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1&printType=books`);
+      const d = await res.json();
+      const links = d.items?.[0]?.volumeInfo?.imageLinks;
+      return (links?.thumbnail || links?.smallThumbnail || "").replace("http://", "https://");
+    } catch { return ""; }
+  };
+
   // Open Library lookup by ISBN — pure fetch, returns book data or null.
   const fetchByIsbn = async (isbn) => {
     try {
@@ -2212,13 +2223,17 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
       const d = await res.json();
       const doc = d.docs?.[0];
       if (!doc?.title) return null;
+      // Cover: prefer OL's cover_i; when OL has no art (common for indie /
+      // romantasy), fall back to Google Books. Never the bare OL ISBN endpoint —
+      // it serves a blank 200 placeholder for missing covers. Empty string means
+      // "no cover found", and the user can capture or upload one.
+      let coverUrl = doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : "";
+      if (!coverUrl) coverUrl = await fetchGoogleCover(isbn);
       return {
         isbn,
         title: doc.title,
         author: doc.author_name?.[0] || "",
-        coverUrl: doc.cover_i
-          ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`
-          : `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg`,
+        coverUrl,
         genres: cleanGenres(doc.subject),
       };
     } catch { return null; }
