@@ -1870,6 +1870,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
   const streamRef = useRef(null);
   const scanLoopRef = useRef(null);      // native BarcodeDetector interval id
   const zxingStopRef = useRef(null);     // ZXing reader controls (stop fn)
+  const startingRef = useRef(false);     // a startCamera() is in flight (StrictMode-safe guard)
   const lastScanRef = useRef({ isbn: "", ts: 0 }); // batch cooldown/de-dupe
   const cameraTriedRef = useRef(false);  // avoid re-prompting after a camera error
   const [liveActive, setLiveActive] = useState(false);
@@ -2129,7 +2130,9 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
   /* ── live scanning ── */
 
   const stopCamera = () => {
+    startingRef.current = false;
     clearInterval(scanLoopRef.current);
+    scanLoopRef.current = null;
     try { zxingStopRef.current?.stop?.(); } catch { /* ignore */ }
     zxingStopRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -2141,19 +2144,32 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
   useEffect(() => { if (mode !== "scan") stopCamera(); }, [mode]);
   // Auto-open the camera when entering the capture view (one attempt; the
   // cameraTried guard stops a permission-denied loop). "Scan another" resets it.
+  // Cleanup tears the camera down so StrictMode's mount→unmount→mount can't leave
+  // a second stream/reader running on the same <video> element.
   useEffect(() => {
     if (mode === "scan" && scanView === "capture" && !liveActive && !cameraTriedRef.current) {
       startCamera();
     }
+    return () => stopCamera();
   }, [mode, scanView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startCamera = async () => {
+    // Idempotent: a stream is already live, or a start is mid-flight. Without
+    // this, StrictMode's double-invoke (and rapid re-renders) open two streams.
+    if (streamRef.current || startingRef.current) return;
+    startingRef.current = true;
     setLiveStatus("");
     cameraTriedRef.current = true;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
       });
+      // The effect cleanup may have run while getUserMedia was awaiting (StrictMode
+      // unmount). If so, this start was cancelled — drop the orphan stream.
+      if (!startingRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
       // Best-effort continuous autofocus so small barcodes stay sharp.
       try {
@@ -2168,11 +2184,16 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
       startBarcodeScan();
     } catch {
       setLiveStatus("The camera couldn't be opened — grant permission, or upload a photo instead.");
+    } finally {
+      startingRef.current = false;
     }
   };
 
   // Native BarcodeDetector when available (fast); else lazy-load ZXing.
   const startBarcodeScan = async () => {
+    // Idempotent: never run two decoders on one <video>. Bail if either the
+    // native interval or a ZXing reader is already active.
+    if (scanLoopRef.current || zxingStopRef.current) return;
     if ("BarcodeDetector" in window) {
       let detector = null;
       try { detector = new window.BarcodeDetector({ formats: ["ean_13"] }); } catch { detector = null; }
@@ -2194,10 +2215,15 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
       const { BrowserMultiFormatReader } = await import("@zxing/browser");
       const reader = new BrowserMultiFormatReader();
       setLiveStatus("Point at the barcode…");
-      zxingStopRef.current = await reader.decodeFromVideoElement(videoRef.current, (result) => {
+      const controls = await reader.decodeFromVideoElement(videoRef.current, (result) => {
         const v = result?.getText?.();
         if (v && /^97[89]\d{10}$/.test(v)) handleDetectedIsbn(v);
       });
+      // The camera may have been torn down (StrictMode unmount, modal close)
+      // while the dynamic import / decode setup was awaiting. If so, this reader
+      // is an orphan — stop it immediately instead of leaking it.
+      if (streamRef.current) zxingStopRef.current = controls;
+      else { try { controls?.stop?.(); } catch { /* ignore */ } }
     } catch {
       setLiveStatus("Live barcode reading isn't available here — tap Capture cover or upload a photo.");
     }
