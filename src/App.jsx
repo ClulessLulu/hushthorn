@@ -1732,13 +1732,27 @@ function AuthPage() {
       } else {
         const { data, error: authError } = await supabase.auth.signUp({ email, password });
         if (authError) throw authError;
+        // Supabase obfuscates duplicate signups to block email enumeration: when
+        // confirmations are ON, re-using a registered email returns no error and a
+        // fake user with an EMPTY identities array (a real new user has one).
+        const identities = data?.user?.identities;
+        if (Array.isArray(identities) && identities.length === 0) {
+          setError('That email is already registered. Sign in instead, or use a different one.');
+          return;
+        }
         if (!data.session) {
           setError('Check your inbox to confirm your email before signing in.');
           return;
         }
       }
     } catch (err) {
-      setError(err.message);
+      // When email confirmations are OFF, a duplicate signup throws a real error
+      // instead of the obfuscated path above — theme it to match.
+      if (mode === 'signup' && /already\s*(registered|exists)/i.test(err.message || '')) {
+        setError('That email is already registered. Sign in instead, or use a different one.');
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
