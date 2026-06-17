@@ -32,7 +32,7 @@ async function callClaude(body) {
 /* ───────────────────────── Hushthorn ─────────────────────────
    Gothic century book archive · demo build
    Shelves: Owned / Wishlist · Read / Unread
-   Dual ratings: Verdict (swords) + Spicy (chili peppers)
+   Dual ratings: Verdict (swords) + Smoulder (candles)
    Marginalia with page refs & quotes · voice transcription
 ─────────────────────────────────────────────────────────────── */
 
@@ -157,18 +157,26 @@ function Sword({ filled, size = 20 }) {
   );
 }
 
-function Chili({ filled, size = 20 }) {
+function Candle({ filled, size = 20 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-      {/* stem */}
-      <path d="M12.5 6 C 12.2 4.6, 13 3.2, 15 2.8"
-        stroke={filled ? "#86efac" : "#4b3a63"} strokeWidth="1.6" fill="none" strokeLinecap="round" />
-      {/* pepper body, curved crescent */}
-      <path d="M12.5 6 C 8 6.5, 5.8 10, 6.8 14 C 7.8 18, 11.5 21.3, 16.8 19.6 C 17.9 19.2, 18 18, 17 17.6 C 13.2 16.2, 11 13.2, 10.8 9.6 C 10.7 8.1, 11.3 6.8, 12.5 6 Z"
-        fill={filled ? "#fb7185" : "transparent"}
-        stroke={filled ? "#fda4af" : "#5b4a78"} strokeWidth="1.4" strokeLinejoin="round" />
-      {/* sheen */}
-      {filled && <path d="M9 9.5 C 8.6 11.5, 9.2 13.6, 10.5 15.4" stroke="#fecdd3" strokeWidth="1" fill="none" strokeLinecap="round" opacity="0.7" />}
+      {/* flame — lit only */}
+      {filled && (
+        <>
+          <path d="M12 2.5 C 14 5, 14.5 7.2, 12 9 C 9.5 7.2, 10 5, 12 2.5 Z"
+            fill="#fb7185" stroke="#fda4af" strokeWidth="0.8" strokeLinejoin="round" />
+          <path d="M12 5 C 12.9 6.2, 13 7.4, 12 8.4 C 11.3 7.6, 11.2 6.4, 12 5 Z"
+            fill="#fecdd3" opacity="0.85" />
+        </>
+      )}
+      {/* wick */}
+      <path d="M12 9 L12 10.6" stroke={filled ? "#7c5a4e" : "#5b4a78"} strokeWidth="1.1" strokeLinecap="round" />
+      {/* candle body */}
+      <rect x="9" y="10.5" width="6" height="10.5" rx="1.4"
+        fill={filled ? "#fbcfe8" : "transparent"}
+        stroke={filled ? "#fda4af" : "#5b4a78"} strokeWidth="1.3" />
+      {/* wax sheen — lit only */}
+      {filled && <path d="M10.7 12.5 L10.7 19" stroke="#fff1f5" strokeWidth="0.9" strokeLinecap="round" opacity="0.6" />}
     </svg>
   );
 }
@@ -573,7 +581,7 @@ function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery }) {
         <option value="author">By author</option>
         <option value="title">By title</option>
         <option value="verdict">By verdict</option>
-        <option value="spice">By spice</option>
+        <option value="spice">By Smoulder</option>
       </select>
       <input
         value={query}
@@ -1044,7 +1052,7 @@ export default function Hushthorn() {
                 <GenreChips genres={b.genres} max={2} className="mt-1" />
                 <div className="mt-1.5 flex flex-col gap-0.5">
                   <Meter value={b.overall} Icon={Sword} label="Verdict" readOnly size={13} />
-                  <Meter value={b.smut} Icon={Chili} label="Spicy" readOnly size={13} />
+                  <Meter value={b.smut} Icon={Candle} label="Smoulder" readOnly size={13} />
                 </div>
                 <div className="mt-1.5 flex gap-1.5 flex-wrap">
                   <span className={`ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm ${b.shelf === "owned" ? "bg-indigo-500/30 text-indigo-200" : "bg-pink-500/20 text-pink-200"}`}>
@@ -1423,7 +1431,7 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
       <div className="text-center mb-6">
         <h2 className="ht-display text-2xl text-indigo-200">The Oracle</h2>
         <p className="mt-2 text-[15px] text-purple-300/75 italic">
-          The Oracle reads your shelves — what you own, what you covet, what you rated worthy of swords and peppers — and divines what you should read next.
+          The Oracle reads your shelves — what you own, what you covet, what you rated worthy of swords and candles — and divines what you should read next.
         </p>
         <button
           onClick={consult}
@@ -1468,8 +1476,8 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
                 <p className="mt-1.5 text-sm text-purple-200/90">{r.reason}</p>
                 <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-1.5">
-                    <span className="ht-display text-[9px] uppercase text-pink-300/80">Spicy</span>
-                    <Meter value={Math.max(0, Math.min(5, r.spice || 0))} Icon={Chili} label="Predicted spice" readOnly size={13} />
+                    <span className="ht-display text-[9px] uppercase text-pink-300/80">Smoulder</span>
+                    <Meter value={Math.max(0, Math.min(5, r.spice || 0))} Icon={Candle} label="Predicted smoulder" readOnly size={13} />
                   </div>
                   <button
                     onClick={() => addRec(r, idx)}
@@ -1487,7 +1495,7 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
 
       {consulted && recs.length > 0 && (
         <p className="mt-5 text-center text-sm text-purple-400/60 italic">
-          The Oracle estimates each pepper rating — your own judgment, as always, is final.
+          The Oracle estimates each Smoulder rating — your own judgment, as always, is final.
         </p>
       )}
     </div>
@@ -3083,11 +3091,11 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session }) {
             </div>
             <div className="ht-rule" aria-hidden="true" />
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <span className="ht-display text-xs uppercase text-pink-200 font-semibold">Spicy 🌶</span>
-              <Meter value={book.smut} onChange={(v) => onUpdate({ smut: v })} Icon={Chili} label="Spicy" />
+              <span className="ht-display text-xs uppercase text-pink-200 font-semibold">Smoulder 🕯️</span>
+              <Meter value={book.smut} onChange={(v) => onUpdate({ smut: v })} Icon={Candle} label="Smoulder" />
             </div>
             <p className="text-sm text-purple-400/60 italic">
-              One sword: barely worth its steel. Five: a masterwork. One pepper: a longing glance. Five: do not read in the chapel.
+              One sword: barely worth its steel. Five: a masterwork. One candle: a faint flicker. Five: do not read in the chapel.
             </p>
           </div>
 

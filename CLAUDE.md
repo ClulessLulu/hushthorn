@@ -41,8 +41,8 @@ living alongside the developer's other app, Kindled.
   EB Garamond (body). Gothic-but-modern; no blackletter.
 - Voice: themed copy ("Inscribe", "tome", "marginalia", "The Oracle",
   "The Binding") but error messages always state clearly what to do next.
-- Ratings: Verdict = 5 swords (overall), Spicy = 5 chili peppers. Tap the same
-  icon again to clear to 0.
+- Ratings: Verdict = 5 swords (overall), Smoulder = 5 candles (spice/heat). Tap
+  the same icon again to clear to 0.
 
 ## Conventions
 
