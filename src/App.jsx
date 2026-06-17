@@ -3340,7 +3340,7 @@ function Overlay({ children, onClose, label, wide }) {
       aria-label={label}
       aria-modal="true"
     >
-      <div className={`ht-bg w-full ${wide ? "max-w-3xl" : "max-w-lg"} max-h-[92dvh] overflow-y-auto overscroll-y-contain rounded-t-md sm:rounded-md border border-purple-700/40 p-5 ht-body text-purple-100`}>
+      <div className={`ht-bg !min-h-0 w-full ${wide ? "max-w-3xl" : "max-w-lg"} max-h-[92dvh] overflow-y-auto overscroll-y-contain rounded-t-md sm:rounded-md border border-purple-700/40 p-5 ht-body text-purple-100`}>
         {children}
       </div>
     </div>
