@@ -75,3 +75,56 @@ living alongside the developer's other app, Kindled.
 - Quality bar: the developer is a QE — when adding parsers or merge logic,
   list the test cases (especially idempotency and malformed input) in the PR
   or alongside the code.
+
+## Features to add
+
+Designed and working in `prototype/hushthorn-demo.jsx` — port from there.
+(Already shipped in the repo: The Oracle, The Binding, audiobooks — don't rebuild.)
+
+- **Spine shelf view** — a toggleable library layout (alongside the cover grid)
+  rendering books as vertical spines on wooden shelves, for browsing 100+ titles
+  without endless scroll. Procedural spines: width/height from a stable hash of
+  title+author; color sampled from cover pixels (averaged, darkened, cached) with
+  a genre-palette fallback, else a title-hash hue. Verdict gem at the head, spice
+  band at the foot, hollow cyan ring = has audio. Unread spines sit proud of the
+  row; wishlist spines are ghosted + dashed. Controls bar: Covers/Spines toggle,
+  sort (recent/author/title/verdict/smoulder), and search that *dims* non-matches
+  rather than reflowing. Prototype refs: `Spine`, `SpineShelf`, `useSpineColor`,
+  `sampleCoverColor`, `genreFallbackColor`, `matchesQuery`.
+  - Real-app TODOs deferred from the prototype: A–Z jump rail for author sort at
+    100+ books; row virtualization; precompute + persist spine colors at add-time
+    (a `spine_color` column) instead of sampling client-side every render.
+
+- **Per-format reading progress** — progress tracked separately per format on a
+  `book.progress` object keyed by format: `print {page, pages}`, `ebook {percent}`,
+  `audio {listened, hours}`. So one book read in print AND audio keeps two
+  independent bars. `formatPercent(book, fmt)` → 0-100 per format; `maxPercent`
+  for furthest overall; `activeProgress(book)` returns the furthest *unfinished*
+  format `{fmt, pct}` — this is what spines/cards surface, so a half-finished
+  audiobook still shows even when the print copy is done (do NOT gate the spine
+  fill on `book.read`). Any format hitting 100% auto-marks the book Read
+  (centralize in the book-update path so every progress source triggers it).
+  Progress bars colored by format (violet print / indigo ebook / cyan audio) on
+  cards, in the detail panel, and as a rising edge-glow on spines. Detail-panel
+  editor has number fields + quick bump buttons + a 0-100 slider per format.
+  Prototype refs: `formatPercent`, `maxPercent`, `activeProgress`, `FORMAT_META`,
+  `ProgressEditor`. DB: add `progress jsonb` to `books`.
+  - Decided: 100% auto-marks Read (no confirm). Schema migration via Supabase MCP.
+
+- **Snap-to-update progress (AI capture)** — reuses the vision pipeline: user
+  snaps a photo/screenshot of their Kindle, Libby, or audiobook player; Claude
+  reads it and writes into that format's progress. Per-format prompt (hours for
+  audio; percent-preferred-else-page for reading), strict-JSON parse with the
+  standard defensive slice, manual-entry fallback when unreadable. Frame it
+  honestly as "Snap to update," never "sync" — there is no sanctioned Kindle/
+  Libby progress API (verified June 2026; camera capture is the state of the art).
+  Prototype refs: `readProgressShot`, `handleSnap` inside `ProgressEditor`.
+  - Out of scope (and why): automatic Kindle/Libby/Audible progress sync — no
+    public API; browser-extension scraping of read.amazon.com breaks constantly
+    and risks ToS. Don't promise it in UI.
+
+## Naming note
+
+The prototype calls the heat rating **Spicy** with chili-pepper icons; the repo
+renamed it to **Smoulder** with candle icons (`smut` column unchanged). When
+porting prototype code, translate Spicy/chili → Smoulder/candle.

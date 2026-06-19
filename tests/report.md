@@ -309,3 +309,108 @@ INFO E-07 no-throw        data without session key → data.session===undefined�
 ## Go / No-Go
 
 **GO** — releasable. No defects found; nothing to route back to frontend-dev.
+
+---
+
+# QA Report — Per-Format Reading Progress
+
+**Plan:** `tests/per-format-progress-test-plan.md`
+**Scope:** `book.progress` (jsonb) per-format progress + helpers (`num`,
+`formatPercent`, `maxPercent`, `activeProgress`), `CardProgress`, `ProgressEditor`,
+spine edge-glow (`SPINE_GLOW`), and centralized auto-Read in `updateBook`.
+**Owners under test:** supabase-migrator (migration `add_progress_jsonb_expand`),
+frontend-dev (helpers + UI). Both reported `completed`.
+**Method:** Supabase MCP for schema/RLS/persistence; pure-fn unit snippet
+(`tests/_progress_unit.mjs`, functions copied verbatim from `src/App.jsx`) under
+Node ESM; read-only code inspection; `npm run build`.
+
+**Verdict: GO.** 34/34 unit+edge assertions PASS, all backend/frontend inspection
+IDs PASS, schema/RLS/persistence verified live, build green. The divide-by-zero
+guards hold, auto-Read is genuinely single-sourced in `updateBook`, and the audio
+surfacing is not gated on `book.read`.
+
+## Result summary
+
+| Bucket | Pass | Fail |
+|---|---|---|
+| B- (schema / RLS / persistence / code) | 8 | 0 |
+| F- (auto-Read sources / audio-when-done / merge) | 9 | 0 |
+| U- (formatPercent / maxPercent / activeProgress) | 18 | 0 |
+| E- (empty / null / malformed / build) | 6 | 0 |
+| **Total** | **41 IDs** | **0** |
+
+(Unit harness counts 34 discrete assertions across the U-/E-/F-unit IDs — `PASS 34  FAIL 0`.)
+
+## Backend (B) — MCP + Code, project `ujxsrcxbhcbihhdluzyl`
+
+- **B-01 PASS** — `list_migrations`: `add_progress_jsonb_expand` (20260618033055) present.
+- **B-02 PASS** — `information_schema.columns`: `progress` `data_type=jsonb`,
+  `is_nullable=NO`, `column_default='{}'::jsonb`. Exactly as specified.
+- **B-03 PASS** — all sampled existing rows read `progress = {}` (default applied;
+  no migrate-time error).
+- **B-04 PASS** — wrote `{"print":{"page":150,"pages":300},"audio":{"listened":2,"hours":10}}`
+  to a real row; read-back returned the nested jsonb intact (`page=150`, `hours=10`);
+  **row then restored to `{}`** (no test residue left).
+- **B-05 PASS** — `pg_class.relrowsecurity=true` on `books`; sole policy
+  "users manage own books" cmd=ALL, `qual = (auth.uid() = user_id)`,
+  `with_check = (auth.uid() = user_id)`. Owner-only isolation holds for the new column.
+- **B-06 PASS** — `get_advisors(security)`: only the two pre-existing warnings
+  (`covers` public-bucket listing, leaked-password protection). No new advisor from
+  this feature.
+- **B-07 PASS** — grep for `audio_hours|audio_listened|audioHours|audioListened` in
+  `src/App.jsx` → ZERO matches. The later contract migration that drops the legacy
+  `audio_*` columns is safe from the app's side. (Columns still exist in DB as
+  expected — `audio_hours`/`audio_listened` numeric nullable.)
+- **B-08 PASS** — `FIELD_MAP` (:1153) maps `progress: 'progress'`; editor patches
+  reach the DB column via `supabase.from('books').update(dbPatch)`.
+
+## Frontend (F) — Code + unit equivalence
+
+- **F-01/F-02/F-03 PASS** — number field, quick-bump "Done", and slider-to-100 all
+  call `writeFmt → onUpdate({ progress }) → updateBook`. The `deriveRead` unit
+  (mirroring :1146-1149) flips `read` true for print 300/300, ebook 100%, and audio
+  10/10h respectively. Single path, three sources.
+- **F-04 PASS** — `ProgressEditor` (:562-713) never writes `read`; only `updateBook`
+  :1149 derives it from `maxPercent(merged) >= 100`. No duplicated auto-Read logic.
+- **F-05 PASS** — a sub-100% patch leaves `read` unchanged (`deriveRead` returns false
+  for print 60/100).
+- **F-06 PASS** — on a print+audio book, print reaching 100% flips `read` even with
+  audio at 10% (`maxPercent` takes the max across formats).
+- **F-07 PASS** — `CardProgress book={b}` is rendered unconditionally at :1396; the
+  component filters rows by `pct>0` only, with no `book.read` gate. A print-100% +
+  audio-40% book shows both bars on its card.
+- **F-08 PASS** — `activeProgress` (:510) skips the 100% print and returns the audio
+  format; the spine edge-glow (:733-762) consumes it and is explicitly **not** gated
+  on `book.read` (comment + code confirm). Half-read audiobook glows when print is done.
+- **F-09 PASS** — `writeFmt` (:567-570) spreads `...prog` then overrides a single
+  format key, so editing one format leaves siblings untouched (merge, not replace).
+
+## Units (U) + Edges (E) — `tests/_progress_unit.mjs` → `PASS 34  FAIL 0`
+
+- **formatPercent (U-01..U-10):** print/ebook/audio ratios correct; rounds (1/3→33);
+  clamps high to 100 (page>pages, ebook 150); negatives→0; string-numeric coerces.
+  **pages=0 → 0 and hours=0 → 0 with no NaN/Infinity** (the divide-by-zero guards at
+  :491 and :496 hold).
+- **maxPercent (U-11..U-13):** max across formats; defaults to `["print"]` when
+  `formats` absent; all-zero → 0.
+- **activeProgress (U-14..U-18):** returns furthest *unfinished*; a 100% format is
+  skipped (print-done + audio-40% → `{fmt:"audio",pct:40}`); all-zero → `null`;
+  all-100% → `null`; malformed entry → `null`, no throw.
+- **Edges (E-01..E-05):** `progress = {}`, `null`, absent key, null book, and
+  non-object format entries (string / number / null) all read 0% and never throw;
+  `CardProgress` returns null (renders nothing) for each.
+- **E-06 (build) PASS** — `npm run build` → exit 0, `✓ 300 modules transformed`,
+  `✓ built in 462ms`. No errors/warnings.
+
+## Not auto-run (documented manual step, not faked)
+
+- Live Playwright drag of the actual `<input type=range>` slider and on-screen
+  visual of the spine glow / card bars were not driven in a browser. The underlying
+  logic (slider/quick-bump both route through `writeFmt` → `updateBook`, and the
+  render predicates) is covered deterministically by the unit + code IDs above.
+
+## Go / No-Go
+
+**GO** — releasable. No defects found. Nothing to route back to frontend-dev or
+supabase-migrator. The legacy `audio_*` DB columns remain (by design) until the
+follow-up contract migration; B-07 confirms dropping them will not break the app.

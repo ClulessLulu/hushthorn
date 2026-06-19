@@ -94,6 +94,36 @@ const FONT_CSS = `
 }
 .ht-recording { animation: ht-pulse 1.4s ease infinite; }
 @media (prefers-reduced-motion: reduce) { .ht-recording { animation: none; } .ht-card { transition: none; } }
+
+/* per-format progress sliders — sanctioned accents: violet print, indigo
+   ebook, cyan audio (cyan is reserved for audio). Sharp 2px track + thumb. */
+.ht-progress-range {
+  -webkit-appearance: none; appearance: none;
+  height: 16px; background: transparent; cursor: pointer;
+}
+.ht-progress-range::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px;
+  background: rgba(40,24,64,0.85);
+}
+.ht-progress-range::-moz-range-track {
+  height: 4px; border-radius: 2px;
+  background: rgba(40,24,64,0.85);
+}
+.ht-progress-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; margin-top: -4px; border-radius: 2px;
+  border: 1px solid rgba(12,7,20,0.9);
+}
+.ht-progress-range::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 2px;
+  border: 1px solid rgba(12,7,20,0.9);
+}
+.ht-range-violet::-webkit-slider-thumb { background: #a78bfa; }
+.ht-range-violet::-moz-range-thumb { background: #a78bfa; }
+.ht-range-indigo::-webkit-slider-thumb { background: #818cf8; }
+.ht-range-indigo::-moz-range-thumb { background: #818cf8; }
+.ht-range-cyan::-webkit-slider-thumb { background: #22d3ee; }
+.ht-range-cyan::-moz-range-thumb { background: #22d3ee; }
 `;
 
 /* ── image crop utility ─────────────────────────────────────── */
@@ -425,7 +455,271 @@ function matchesQuery(book, q) {
   );
 }
 
+/* ── per-format reading progress ───────────────────────────────
+   Progress lives on `book.progress` (jsonb, default {}), keyed by format:
+     print  → { page, pages }
+     ebook  → { percent }
+     audio  → { listened, hours }   (cyan-accented: audio is the only feature
+                                      allowed to wear cyan)
+   All readers tolerate a missing/empty/malformed object — they coerce to 0
+   and never throw, so an old book with `progress: {}` (or null) just reads 0%.
+─────────────────────────────────────────────────────────────── */
+
+// Format display metadata. `bar`/`text` are the sanctioned accents:
+// violet print, indigo ebook, cyan audio (cyan reserved for audio).
+const FORMAT_META = {
+  print: { label: "Print", glyph: "📖", bar: "bg-violet-400/85", text: "text-violet-200", ring: "focus:border-violet-400" },
+  ebook: { label: "Ebook", glyph: "📱", bar: "bg-indigo-400/85", text: "text-indigo-200", ring: "focus:border-indigo-400" },
+  audio: { label: "Audio", glyph: "🎧", bar: "bg-cyan-400/85", text: "text-cyan-200", ring: "focus:border-cyan-400" },
+};
+const FORMAT_ORDER = ["print", "ebook", "audio"];
+
+// Coerce any value to a finite number >= 0 (null/NaN/strings → 0).
+function num(v) {
+  const n = typeof v === "number" ? v : parseFloat(v);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+// Percent (0-100) through a single format, defensively. Unknown/empty → 0.
+function formatPercent(book, fmt) {
+  const p = (book && book.progress) || {};
+  const d = p[fmt];
+  if (!d || typeof d !== "object") return 0;
+  let pct = 0;
+  if (fmt === "print") {
+    const pages = num(d.pages);
+    pct = pages > 0 ? (num(d.page) / pages) * 100 : 0;
+  } else if (fmt === "ebook") {
+    pct = num(d.percent);
+  } else if (fmt === "audio") {
+    const hours = num(d.hours);
+    pct = hours > 0 ? (num(d.listened) / hours) * 100 : 0;
+  }
+  return Math.max(0, Math.min(100, Math.round(pct)));
+}
+
+// Furthest percent across every format the book carries (0 if none tracked).
+function maxPercent(book) {
+  const fmts = (book && book.formats) || ["print"];
+  return fmts.reduce((m, f) => Math.max(m, formatPercent(book, f)), 0);
+}
+
+// Furthest *unfinished* format → { fmt, pct }, or null when nothing is in
+// progress. A finished format (100%) is skipped so a half-read audiobook still
+// surfaces even when the print copy is done.
+function activeProgress(book) {
+  const fmts = (book && book.formats) || ["print"];
+  let best = null;
+  for (const f of fmts) {
+    const pct = formatPercent(book, f);
+    if (pct <= 0 || pct >= 100) continue;
+    if (!best || pct > best.pct) best = { fmt: f, pct };
+  }
+  return best;
+}
+
+/* ── per-format progress bars (cards + detail) ─────────────── */
+
+// Compact stack of per-format bars for grid cards. Renders nothing until at
+// least one tracked format has motion, so unread/untracked tomes stay clean.
+function CardProgress({ book }) {
+  const fmts = (book && book.formats) || ["print"];
+  const rows = fmts
+    .map((f) => ({ fmt: f, pct: formatPercent(book, f) }))
+    .filter((r) => r.pct > 0);
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-col gap-1">
+      {rows.map(({ fmt, pct }) => {
+        const meta = FORMAT_META[fmt] || FORMAT_META.print;
+        return (
+          <div key={fmt} className="flex items-center gap-1.5">
+            <span className="text-[10px] leading-none flex-shrink-0" aria-hidden="true">{meta.glyph}</span>
+            <span
+              className="h-1.5 flex-1 rounded-sm bg-purple-950/70 overflow-hidden border border-purple-800/40"
+              role="progressbar"
+              aria-valuenow={pct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label={`${meta.label} progress`}
+            >
+              <span className={`block h-full rounded-sm ${meta.bar} transition-all`} style={{ width: `${pct}%` }} />
+            </span>
+            <span className={`ht-display text-[9px] tabular-nums flex-shrink-0 ${meta.text}`}>{pct}%</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Per-format reading-progress editor for the DetailPanel. Edits live on
+// `book.progress` ({ print:{page,pages}, ebook:{percent}, audio:{listened,hours} })
+// and persist through onUpdate({ progress }). Defensive: a missing/empty/
+// malformed `progress` reads as zeros and never throws. Auto-Read is handled
+// centrally in updateBook (maxPercent >= 100 → read), so the editor only writes
+// the numbers. Cyan stays reserved for the audio format.
+function ProgressEditor({ book, onUpdate }) {
+  const fmts = (book && book.formats) || ["print"];
+  const prog = (book && book.progress && typeof book.progress === "object") ? book.progress : {};
+
+  // Merge a partial change into one format, leaving the others untouched.
+  const writeFmt = (fmt, partial) => {
+    const prev = (prog[fmt] && typeof prog[fmt] === "object") ? prog[fmt] : {};
+    onUpdate({ progress: { ...prog, [fmt]: { ...prev, ...partial } } });
+  };
+
+  return (
+    <div className="ht-card rounded-md p-4 mt-4 space-y-3">
+      <span className="ht-display text-xs uppercase text-indigo-200 font-semibold">The Reading 📖</span>
+      {fmts.map((fmt) => {
+        const meta = FORMAT_META[fmt] || FORMAT_META.print;
+        const d = (prog[fmt] && typeof prog[fmt] === "object") ? prog[fmt] : {};
+        const pct = formatPercent(book, fmt);
+        const accent = fmt === "audio" ? "cyan" : fmt === "ebook" ? "indigo" : "violet";
+        return (
+          <div key={fmt} className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className={`ht-display text-[11px] uppercase tracking-wide ${meta.text}`}>
+                {meta.glyph} {meta.label}
+              </span>
+              <span className={`ht-display text-[11px] tabular-nums ${meta.text}`}>{pct}%</span>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap text-sm text-purple-200">
+              {fmt === "print" && (
+                <>
+                  <input
+                    type="number" min="0" step="1"
+                    value={num(d.page) || ""}
+                    onChange={(e) => writeFmt("print", { page: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                    placeholder="0"
+                    className={`w-20 bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-1 text-sm focus:outline-none ${meta.ring}`}
+                    aria-label="Current page"
+                  />
+                  <span className="text-purple-300/70">of</span>
+                  <input
+                    type="number" min="0" step="1"
+                    value={num(d.pages) || ""}
+                    onChange={(e) => writeFmt("print", { pages: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                    placeholder="?"
+                    className={`w-20 bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-1 text-sm focus:outline-none ${meta.ring}`}
+                    aria-label="Total pages"
+                  />
+                  <span className="text-purple-300/70">pages</span>
+                </>
+              )}
+
+              {fmt === "ebook" && (
+                <>
+                  <input
+                    type="number" min="0" max="100" step="1"
+                    value={num(d.percent) || ""}
+                    onChange={(e) => writeFmt("ebook", { percent: Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0)) })}
+                    placeholder="0"
+                    className={`w-20 bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-1 text-sm focus:outline-none ${meta.ring}`}
+                    aria-label="Percent read"
+                  />
+                  <span className="text-purple-300/70">% read</span>
+                </>
+              )}
+
+              {fmt === "audio" && (
+                <>
+                  <input
+                    type="number" min="0" step="0.1"
+                    value={num(d.listened) || ""}
+                    onChange={(e) => writeFmt("audio", { listened: Math.max(0, parseFloat(e.target.value) || 0) })}
+                    placeholder="0"
+                    className={`w-20 bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-1 text-sm focus:outline-none ${meta.ring}`}
+                    aria-label="Hours listened"
+                  />
+                  <span className="text-purple-300/70">of</span>
+                  <input
+                    type="number" min="0" step="0.1"
+                    value={num(d.hours) || ""}
+                    onChange={(e) => writeFmt("audio", { hours: Math.max(0, parseFloat(e.target.value) || 0) })}
+                    placeholder="?"
+                    className={`w-20 bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-1 text-sm focus:outline-none ${meta.ring}`}
+                    aria-label="Total hours"
+                  />
+                  <span className="text-purple-300/70">hours</span>
+                </>
+              )}
+
+              {/* quick bump buttons — nudge progress without the keyboard */}
+              <div className="flex gap-1">
+                {fmt === "ebook" || fmt === "audio" ? (
+                  [25, 50, 100].map((q) => (
+                    <button
+                      key={q}
+                      onClick={() =>
+                        fmt === "ebook"
+                          ? writeFmt("ebook", { percent: q })
+                          : writeFmt("audio", { listened: Math.round(num(d.hours) * (q / 100) * 10) / 10 })
+                      }
+                      disabled={fmt === "audio" && num(d.hours) <= 0}
+                      className="ht-display text-[9px] uppercase px-2 py-1 rounded-sm bg-purple-800/50 hover:bg-purple-700/70 text-purple-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {q === 100 ? "Done" : `${q}%`}
+                    </button>
+                  ))
+                ) : (
+                  [25, 50, 100].map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => writeFmt("print", { page: Math.round(num(d.pages) * (q / 100)) })}
+                      disabled={num(d.pages) <= 0}
+                      className="ht-display text-[9px] uppercase px-2 py-1 rounded-sm bg-purple-800/50 hover:bg-purple-700/70 text-purple-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {q === 100 ? "Done" : `${q}%`}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* 0-100 slider — drags map back onto the format's own fields */}
+            <input
+              type="range" min="0" max="100" step="1"
+              value={pct}
+              onChange={(e) => {
+                const v = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+                if (fmt === "print") writeFmt("print", { page: Math.round(num(d.pages) * (v / 100)) });
+                else if (fmt === "ebook") writeFmt("ebook", { percent: v });
+                else writeFmt("audio", { listened: Math.round(num(d.hours) * (v / 100) * 10) / 10 });
+              }}
+              disabled={(fmt === "print" && num(d.pages) <= 0) || (fmt === "audio" && num(d.hours) <= 0)}
+              aria-label={`${meta.label} progress slider`}
+              className={`w-full ht-progress-range ht-range-${accent} disabled:opacity-40 disabled:cursor-not-allowed`}
+            />
+
+            <div className="h-1.5 rounded-sm bg-purple-950/70 overflow-hidden border border-purple-800/40">
+              <div className={`h-full rounded-sm ${meta.bar} transition-all`} style={{ width: `${pct}%` }} />
+            </div>
+            {pct >= 100 && (
+              <p className={`text-[11px] italic ${meta.text}`}>
+                The telling is complete — this tome reads as finished.
+              </p>
+            )}
+          </div>
+        );
+      })}
+      <p className="text-xs text-purple-400/60 italic">
+        Track each format on its own. When any copy reaches the final page, the tome marks itself Read.
+      </p>
+    </div>
+  );
+}
+
 /* ── spine + shelf ─────────────────────────────────────────── */
+
+// Edge-glow tint per format — violet print / indigo ebook / cyan audio.
+const SPINE_GLOW = {
+  print: "rgba(167,139,250,0.9)",
+  ebook: "rgba(129,140,248,0.9)",
+  audio: "rgba(34,211,238,0.95)",
+};
 
 function Spine({ book, onOpen, dimmed, onPersist }) {
   const color = useSpineColor(book, onPersist);
@@ -434,10 +728,14 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
   const wish = book.shelf === "wishlist";
   const unread = book.shelf === "owned" && !book.read;
   const hasAudio = (book.formats || []).includes("audio");
+  // Furthest unfinished format drives a rising edge-glow up the spine. Not
+  // gated on book.read — a half-read audiobook still glows when print is done.
+  const active = activeProgress(book);
+  const glowColor = active ? SPINE_GLOW[active.fmt] : null;
   return (
     <button
       onClick={onOpen}
-      title={`${book.title} — ${book.author}`}
+      title={`${book.title} — ${book.author}${active ? ` · ${active.pct}% ${FORMAT_META[active.fmt].label}` : ""}`}
       className={`relative flex flex-col items-center justify-between rounded-t-[3px] rounded-b-[2px] transition-all duration-200 hover:-translate-y-2 hover:-rotate-3 hover:z-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${
         dimmed ? "opacity-20" : wish ? "opacity-60" : ""
       } ${unread ? "-translate-y-1.5" : ""}`}
@@ -449,6 +747,19 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
         border: wish ? "1px dashed rgba(240,166,224,0.45)" : "none",
       }}
     >
+      {/* progress edge-glow — rises from the foot of the spine to `pct` height */}
+      {glowColor && (
+        <span
+          className="absolute left-0 right-0 bottom-0 pointer-events-none rounded-b-[2px]"
+          aria-hidden="true"
+          style={{
+            height: `${active.pct}%`,
+            background: `linear-gradient(0deg, ${glowColor}, transparent)`,
+            boxShadow: `inset 0 -2px 6px ${glowColor}`,
+            opacity: 0.55,
+          }}
+        />
+      )}
       {/* verdict gem */}
       <span
         className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0"
@@ -673,7 +984,8 @@ export default function Hushthorn() {
         coverUrl: b.cover_url, genres: b.genres || [], shelf: b.shelf,
         read: b.read, overall: b.overall, smut: b.smut,
         spineColor: b.spine_color,
-        formats: b.formats || ['print'], audioHours: b.audio_hours, audioListened: b.audio_listened,
+        formats: b.formats || ['print'],
+        progress: (b.progress && typeof b.progress === 'object') ? b.progress : {},
         notes: notesByBook[b.id] || [],
       })));
       if (avatarData) setAvatar({
@@ -827,8 +1139,18 @@ export default function Hushthorn() {
         if (error) { console.error('note delete:', error.message); return; }
       }
     }
+    // Auto-Read: any format reaching 100% marks the book Read. Centralized here
+    // so every progress source (editor, quick-bumps, slider) triggers it — no
+    // confirm dialog. We project the patch onto the current book first, then
+    // re-derive `read` from the merged result.
+    const current = books.find(b => b.id === id);
+    if (current && 'progress' in patch && !patch.read && !current.read) {
+      const merged = { ...current, ...patch };
+      if (maxPercent(merged) >= 100) patch = { ...patch, read: true };
+    }
+
     // Handle book field changes
-    const FIELD_MAP = { coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', audioHours: 'audio_hours', audioListened: 'audio_listened' };
+    const FIELD_MAP = { coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', progress: 'progress' };
     const dbPatch = Object.fromEntries(
       Object.entries(FIELD_MAP).filter(([k]) => k in patch).map(([k, v]) => [v, patch[k]])
     );
@@ -886,11 +1208,10 @@ export default function Hushthorn() {
       smut: book.smut,
       spine_color: book.spineColor ?? null,
       formats: book.formats || ['print'],
-      audio_hours: null,
-      audio_listened: null,
+      progress: book.progress || {},
     });
     if (error) { console.error('addBook:', error.message); return; }
-    setBooks(prev => [{ ...book, id, notes: [] }, ...prev]);
+    setBooks(prev => [{ ...book, id, progress: book.progress || {}, notes: [] }, ...prev]);
     setAddOpen(false);
     if (book.shelf === 'owned') setActiveId(id);
   };
@@ -1068,10 +1389,11 @@ export default function Hushthorn() {
                   )}
                   {(b.formats || []).includes("audio") && (
                     <span className="ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm bg-cyan-500/20 text-cyan-200">
-                      🎧 {b.audioHours ? `${b.audioListened || 0}h / ${b.audioHours}h` : "Audio"}
+                      🎧 Audio
                     </span>
                   )}
                 </div>
+                <CardProgress book={b} />
               </button>
             ))}
           </div>
@@ -3099,52 +3421,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session }) {
             </p>
           </div>
 
-          {(book.formats || []).includes("audio") && (
-            <div className="ht-card rounded-md p-4 mt-4 space-y-2">
-              <span className="ht-display text-xs uppercase text-cyan-200 font-semibold">Listening 🎧</span>
-              <div className="flex items-center gap-2 flex-wrap text-sm text-purple-200">
-                <input
-                  type="number" min="0" step="0.1"
-                  value={book.audioListened ?? ""}
-                  onChange={(e) => onUpdate({ audioListened: Math.max(0, parseFloat(e.target.value) || 0) })}
-                  placeholder="0"
-                  className="w-20 bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-cyan-400"
-                  aria-label="Hours listened"
-                />
-                <span className="text-purple-300/70">of</span>
-                <input
-                  type="number" min="0" step="0.1"
-                  value={book.audioHours ?? ""}
-                  onChange={(e) => onUpdate({ audioHours: Math.max(0, parseFloat(e.target.value) || 0) })}
-                  placeholder="?"
-                  className="w-20 bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-cyan-400"
-                  aria-label="Total hours"
-                />
-                <span className="text-purple-300/70">hours</span>
-              </div>
-              {book.audioHours > 0 && (
-                <>
-                  <div className="h-2 rounded-sm bg-purple-950/70 overflow-hidden border border-purple-800/40">
-                    <div
-                      className="h-full bg-gradient-to-r from-cyan-400/80 to-pink-400/80 transition-all"
-                      style={{ width: `${Math.min(100, ((book.audioListened || 0) / book.audioHours) * 100)}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-purple-400/70 italic">
-                    {Math.round(Math.min(100, ((book.audioListened || 0) / book.audioHours) * 100))}% through the telling
-                  </p>
-                  {(book.audioListened || 0) >= book.audioHours && !book.read && (
-                    <button
-                      onClick={() => onUpdate({ read: true })}
-                      className="ht-display text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-sm bg-gradient-to-r from-cyan-500/70 to-pink-500/70 hover:from-cyan-400 hover:to-pink-400 text-white"
-                    >
-                      ✨ Finished the telling — mark as Read?
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          )}
+          <ProgressEditor book={book} onUpdate={onUpdate} />
 
           <NotesSection book={book} onUpdate={onUpdate} />
         </div>
