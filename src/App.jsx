@@ -518,6 +518,103 @@ function activeProgress(book) {
   return best;
 }
 
+/* ── Snap-to-update: Claude-vision progress reader ─────────────
+   Reads a photo/screenshot of a Kindle, Libby, or audiobook player and
+   pulls the native progress shape for that format. Mirrors `scanCover`:
+   split the dataUrl → base64 + media_type, ask Claude (via the single
+   `callClaude` helper) for ONLY a JSON object, then parse defensively.
+
+   Pure-ish: in = (dataUrl, fmt), out = parsed object | null. The UI owns
+   confirm/apply. This NEVER throws — any failure (network, HTTP error,
+   empty content, ```-fenced JSON, trailing prose, total garbage, missing
+   fields) degrades to `null` so the snap UI can fall back to manual entry.
+─────────────────────────────────────────────────────────────── */
+
+// Format-specific prompts. We always know `fmt`, so each is precise and
+// demands ONLY a JSON object in the native progress shape for that format.
+const PROGRESS_SHOT_PROMPTS = {
+  print:
+    'This is a photo of a printed book page or an e-reader showing a print-style page count. ' +
+    'Read the current page number and the total page count. Respond with ONLY a valid JSON ' +
+    'object, nothing else: {"page": number or null, "pages": number or null}. ' +
+    '"page" is the current page; "pages" is the total. Use null for anything you cannot read confidently.',
+  ebook:
+    'This is a screenshot of an e-reader (e.g. Kindle, Libby, Kobo) showing reading progress. ' +
+    'Read the percent complete. Respond with ONLY a valid JSON object, nothing else: ' +
+    '{"percent": number or null}. "percent" is 0 to 100 (the portion of the book completed). ' +
+    'Use null if you cannot read it confidently.',
+  audio:
+    'This is a screenshot of an audiobook player (e.g. Audible, Libby) showing listening progress. ' +
+    'Respond with ONLY a valid JSON object, nothing else: {"listened": number or null, "hours": number or null}. ' +
+    '"listened" is the time listened so far and "hours" is the total length, BOTH in DECIMAL hours ' +
+    '(convert hours and minutes, e.g. 2h15m is 2.25, 45m is 0.75). Use null for anything you cannot read confidently.',
+};
+
+// Coerce a vision value to a finite number, or null. Unlike the display-side
+// `num()` (which floors to 0), an unreadable field stays null here so the
+// confirm strip can show "couldn't read this one" rather than a false 0.
+function coerceShotNum(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string") {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+// Reduce a parsed object to only the fields the format expects, coerced.
+function shapeProgressShot(parsed, fmt) {
+  if (!parsed || typeof parsed !== "object") return null;
+  if (fmt === "print") {
+    return { page: coerceShotNum(parsed.page), pages: coerceShotNum(parsed.pages) };
+  }
+  if (fmt === "ebook") {
+    return { percent: coerceShotNum(parsed.percent) };
+  }
+  if (fmt === "audio") {
+    return { listened: coerceShotNum(parsed.listened), hours: coerceShotNum(parsed.hours) };
+  }
+  return null;
+}
+
+async function readProgressShot(dataUrl, fmt) {
+  const prompt = PROGRESS_SHOT_PROMPTS[fmt];
+  // Unknown format or no image → nothing to read.
+  if (!prompt || typeof dataUrl !== "string" || !dataUrl.includes(",")) return null;
+  try {
+    const [prefix, b64] = dataUrl.split(",");
+    if (!b64) return null;
+    const mediaType = (prefix.match(/data:(.*?);/) || [])[1] || "image/jpeg";
+    const data = await callClaude({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1000,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: mediaType, data: b64 } },
+          { type: "text", text: prompt },
+        ],
+      }],
+    });
+    // Defensive parse, same contract as scanCover: pull text from content,
+    // strip ``` / ```json fences, slice to the outermost { … }, parse.
+    const text = (data && data.content || [])
+      .filter((c) => c && c.type === "text")
+      .map((c) => c.text)
+      .join("\n");
+    const clean = text.replace(/```json|```/g, "").trim();
+    const start = clean.indexOf("{");
+    const end = clean.lastIndexOf("}");
+    if (start === -1 || end === -1 || end < start) return null;
+    const parsed = JSON.parse(clean.slice(start, end + 1));
+    return shapeProgressShot(parsed, fmt);
+  } catch {
+    // Network error, non-2xx (callClaude throws), non-JSON, empty content —
+    // any failure degrades to null. The UI owns the manual fallback.
+    return null;
+  }
+}
+
 /* ── per-format progress bars (cards + detail) ─────────────── */
 
 // Compact stack of per-format bars for grid cards. Renders nothing until at
@@ -569,6 +666,64 @@ function ProgressEditor({ book, onUpdate }) {
     onUpdate({ progress: { ...prog, [fmt]: { ...prev, ...partial } } });
   };
 
+  /* ── Snap to update: read a photo/screenshot, confirm, then write ──
+     One control per format. Hidden file input (capture="environment" so
+     mobile opens the camera; desktop opens the screenshot picker — the same
+     input is the upload fallback when the camera is blocked). Nothing touches
+     `progress` until the user taps Apply: handleSnap only sets local state
+     (loading → confirm | error). cyan stays reserved for audio. */
+  const snapRefs = useRef({});                 // { [fmt]: <input> }
+  const [snapState, setSnapState] = useState({}); // { [fmt]: 'loading' }
+  const [snapResult, setSnapResult] = useState({}); // { [fmt]: parsed | null }
+
+  const openSnap = (fmt) => { snapRefs.current[fmt]?.click(); };
+
+  const handleSnap = (e, fmt) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file (Retry)
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      setSnapState((s) => ({ ...s, [fmt]: "loading" }));
+      setSnapResult((r) => ({ ...r, [fmt]: undefined }));
+      const parsed = await readProgressShot(reader.result, fmt);
+      if (!parsed) {
+        // Unreadable / network / garbage AI → manual fallback, no write.
+        setSnapState((s) => ({ ...s, [fmt]: "error" }));
+        setSnapResult((r) => ({ ...r, [fmt]: null }));
+      } else {
+        setSnapState((s) => ({ ...s, [fmt]: "confirm" }));
+        setSnapResult((r) => ({ ...r, [fmt]: parsed }));
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Apply the confirmed snap into progress[fmt] (idempotent: same parsed →
+  // same write). Routes through onUpdate so auto-Read at 100% still fires.
+  const applySnap = (fmt) => {
+    const parsed = snapResult[fmt];
+    if (parsed) onUpdate({ progress: { ...prog, [fmt]: parsed } });
+    clearSnap(fmt);
+  };
+
+  const clearSnap = (fmt) => {
+    setSnapState((s) => ({ ...s, [fmt]: undefined }));
+    setSnapResult((r) => ({ ...r, [fmt]: undefined }));
+  };
+
+  // Format the parsed snap for the confirm strip; "—" for any unread field.
+  const fmtSnapField = (v) => (typeof v === "number" && Number.isFinite(v) ? v : "—");
+  const snapSummary = (fmt, p) => {
+    if (!p) return "";
+    if (fmt === "print") {
+      const pct = formatPercent({ progress: { print: p } }, "print");
+      return `${fmtSnapField(p.page)} / ${fmtSnapField(p.pages)} (${pct}%)`;
+    }
+    if (fmt === "ebook") return `${fmtSnapField(p.percent)}%`;
+    return `${fmtSnapField(p.listened)}h / ${fmtSnapField(p.hours)}h`;
+  };
+
   return (
     <div className="ht-card rounded-md p-4 mt-4 space-y-3">
       <span className="ht-display text-xs uppercase text-indigo-200 font-semibold">The Reading 📖</span>
@@ -584,6 +739,76 @@ function ProgressEditor({ book, onUpdate }) {
                 {meta.glyph} {meta.label}
               </span>
               <span className={`ht-display text-[11px] tabular-nums ${meta.text}`}>{pct}%</span>
+            </div>
+
+            {/* ── Snap to update ── camera (mobile) / screenshot picker (desktop).
+                The same hidden input is the upload fallback when the camera is
+                blocked. Themed; cyan only on the audio row via meta.text. */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  ref={(el) => { snapRefs.current[fmt] = el; }}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => handleSnap(e, fmt)}
+                  aria-label={`Snap a ${meta.label} progress screen`}
+                />
+                <button
+                  onClick={() => openSnap(fmt)}
+                  disabled={snapState[fmt] === "loading"}
+                  className={`ht-display text-[10px] uppercase tracking-wide px-2.5 py-1 rounded-sm border border-purple-700/50 bg-purple-900/50 hover:bg-purple-800/70 ${meta.text} disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  📸 Snap to update
+                </button>
+                {snapState[fmt] === "loading" && (
+                  <span className="text-[11px] italic text-purple-300/80">Reading the screen…</span>
+                )}
+              </div>
+
+              {snapState[fmt] !== "confirm" && (
+                <p className="text-[10px] italic text-purple-400/60">
+                  Reads the screen you show it — Hushthorn can't sync from Kindle or Libby.
+                </p>
+              )}
+
+              {/* Unreadable → clear next step, no write; manual fields stay below. */}
+              {snapState[fmt] === "error" && (
+                <p className="text-[11px] text-pink-300/90">
+                  Couldn't read that screen — enter it by hand below.
+                </p>
+              )}
+
+              {/* Confirm strip — confirm-first: nothing writes until Apply. */}
+              {snapState[fmt] === "confirm" && (
+                <div className="flex items-center gap-2 flex-wrap rounded-sm border border-purple-700/50 bg-purple-950/60 px-2.5 py-2">
+                  <span className="ht-display text-[10px] uppercase tracking-wide text-purple-300/70">Snapped</span>
+                  <span className={`ht-display text-[12px] tabular-nums ${meta.text}`}>
+                    {snapSummary(fmt, snapResult[fmt])}
+                  </span>
+                  <div className="flex gap-1.5 ml-auto">
+                    <button
+                      onClick={() => applySnap(fmt)}
+                      className="ht-display text-[10px] uppercase px-2.5 py-1 rounded-sm bg-pink-600/80 hover:bg-pink-500/90 text-pink-50"
+                    >
+                      Apply
+                    </button>
+                    <button
+                      onClick={() => openSnap(fmt)}
+                      className="ht-display text-[10px] uppercase px-2.5 py-1 rounded-sm bg-purple-800/60 hover:bg-purple-700/80 text-purple-100"
+                    >
+                      Retry
+                    </button>
+                    <button
+                      onClick={() => clearSnap(fmt)}
+                      className="ht-display text-[10px] uppercase px-2.5 py-1 rounded-sm bg-purple-900/50 hover:bg-purple-800/70 text-purple-200"
+                    >
+                      Enter by hand
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2 flex-wrap text-sm text-purple-200">
