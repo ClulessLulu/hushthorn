@@ -728,14 +728,26 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
   const wish = book.shelf === "wishlist";
   const unread = book.shelf === "owned" && !book.read;
   const hasAudio = (book.formats || []).includes("audio");
-  // Furthest unfinished format drives a rising edge-glow up the spine. Not
-  // gated on book.read — a half-read audiobook still glows when print is done.
-  const active = activeProgress(book);
-  const glowColor = active ? SPINE_GLOW[active.fmt] : null;
+  // Two thin vertical EDGE RAILS rise from the foot of the spine — NEITHER is
+  // gated on book.read, so a tome finished in audio still shows its partial
+  // print rail. Defensive `formatPercent` coerces missing/malformed progress
+  // to 0, so a rail simply doesn't render rather than throwing.
+  //   Left rail  = READING, always violet. Print & ebook share the page concept,
+  //                so the furthest of the two drives it.
+  //   Right rail = AUDIO, always cyan (cyan is reserved for audio).
+  const printPct = formatPercent(book, "print");
+  const ebookPct = formatPercent(book, "ebook");
+  const readPct = Math.max(printPct, ebookPct);
+  const readFmt = ebookPct > printPct ? "ebook" : "print"; // label by the driver
+  const audioPct = formatPercent(book, "audio");
+  const tip =
+    `${book.title} — ${book.author}` +
+    (readPct > 0 ? ` · ${readPct}% ${FORMAT_META[readFmt].label}` : "") +
+    (audioPct > 0 ? ` · ${audioPct}% ${FORMAT_META.audio.label}` : "");
   return (
     <button
       onClick={onOpen}
-      title={`${book.title} — ${book.author}${active ? ` · ${active.pct}% ${FORMAT_META[active.fmt].label}` : ""}`}
+      title={tip}
       className={`relative flex flex-col items-center justify-between rounded-t-[3px] rounded-b-[2px] transition-all duration-200 hover:-translate-y-2 hover:-rotate-3 hover:z-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${
         dimmed ? "opacity-20" : wish ? "opacity-60" : ""
       } ${unread ? "-translate-y-1.5" : ""}`}
@@ -747,16 +759,29 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
         border: wish ? "1px dashed rgba(240,166,224,0.45)" : "none",
       }}
     >
-      {/* progress edge-glow — rises from the foot of the spine to `pct` height */}
-      {glowColor && (
+      {/* progress edge rails — thin vertical bars rising from the foot to
+          `pct` height. Left = reading (violet), right = audio (cyan). They sit
+          on the spine's vertical edges and start just above the 5px spice band
+          so they never muddy it. Sharp corners. */}
+      {readPct > 0 && (
         <span
-          className="absolute left-0 right-0 bottom-0 pointer-events-none rounded-b-[2px]"
+          className="absolute left-0 bottom-[5px] w-[2px] pointer-events-none"
           aria-hidden="true"
           style={{
-            height: `${active.pct}%`,
-            background: `linear-gradient(0deg, ${glowColor}, transparent)`,
-            boxShadow: `inset 0 -2px 6px ${glowColor}`,
-            opacity: 0.55,
+            height: `calc(${readPct}% - 5px)`,
+            background: SPINE_GLOW.print,
+            boxShadow: `0 0 4px ${SPINE_GLOW.print}`,
+          }}
+        />
+      )}
+      {audioPct > 0 && (
+        <span
+          className="absolute right-0 bottom-[5px] w-[2px] pointer-events-none"
+          aria-hidden="true"
+          style={{
+            height: `calc(${audioPct}% - 5px)`,
+            background: SPINE_GLOW.audio,
+            boxShadow: `0 0 4px ${SPINE_GLOW.audio}`,
           }}
         />
       )}
