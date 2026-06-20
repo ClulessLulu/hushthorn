@@ -81,20 +81,6 @@ living alongside the developer's other app, Kindled.
 Designed and working in `prototype/hushthorn-demo.jsx` — port from there.
 (Already shipped in the repo: The Oracle, The Binding, audiobooks — don't rebuild.)
 
-- **Spine shelf view** — a toggleable library layout (alongside the cover grid)
-  rendering books as vertical spines on wooden shelves, for browsing 100+ titles
-  without endless scroll. Procedural spines: width/height from a stable hash of
-  title+author; color sampled from cover pixels (averaged, darkened, cached) with
-  a genre-palette fallback, else a title-hash hue. Verdict gem at the head, spice
-  band at the foot, hollow cyan ring = has audio. Unread spines sit proud of the
-  row; wishlist spines are ghosted + dashed. Controls bar: Covers/Spines toggle,
-  sort (recent/author/title/verdict/smoulder), and search that *dims* non-matches
-  rather than reflowing. Prototype refs: `Spine`, `SpineShelf`, `useSpineColor`,
-  `sampleCoverColor`, `genreFallbackColor`, `matchesQuery`.
-  - Real-app TODOs deferred from the prototype: A–Z jump rail for author sort at
-    100+ books; row virtualization; precompute + persist spine colors at add-time
-    (a `spine_color` column) instead of sampling client-side every render.
-
 - **Per-format reading progress** — progress tracked separately per format on a
   `book.progress` object keyed by format: `print {page, pages}`, `ebook {percent}`,
   `audio {listened, hours}`. So one book read in print AND audio keeps two
