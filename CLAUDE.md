@@ -76,39 +76,6 @@ living alongside the developer's other app, Kindled.
   list the test cases (especially idempotency and malformed input) in the PR
   or alongside the code.
 
-## Features to add
-
-Designed and working in `prototype/hushthorn-demo.jsx` — port from there.
-(Already shipped in the repo: The Oracle, The Binding, audiobooks — don't rebuild.)
-
-- **Per-format reading progress** — progress tracked separately per format on a
-  `book.progress` object keyed by format: `print {page, pages}`, `ebook {percent}`,
-  `audio {listened, hours}`. So one book read in print AND audio keeps two
-  independent bars. `formatPercent(book, fmt)` → 0-100 per format; `maxPercent`
-  for furthest overall; `activeProgress(book)` returns the furthest *unfinished*
-  format `{fmt, pct}` — this is what spines/cards surface, so a half-finished
-  audiobook still shows even when the print copy is done (do NOT gate the spine
-  fill on `book.read`). Any format hitting 100% auto-marks the book Read
-  (centralize in the book-update path so every progress source triggers it).
-  Progress bars colored by format (violet print / indigo ebook / cyan audio) on
-  cards, in the detail panel, and as a rising edge-glow on spines. Detail-panel
-  editor has number fields + quick bump buttons + a 0-100 slider per format.
-  Prototype refs: `formatPercent`, `maxPercent`, `activeProgress`, `FORMAT_META`,
-  `ProgressEditor`. DB: add `progress jsonb` to `books`.
-  - Decided: 100% auto-marks Read (no confirm). Schema migration via Supabase MCP.
-
-- **Snap-to-update progress (AI capture)** — reuses the vision pipeline: user
-  snaps a photo/screenshot of their Kindle, Libby, or audiobook player; Claude
-  reads it and writes into that format's progress. Per-format prompt (hours for
-  audio; percent-preferred-else-page for reading), strict-JSON parse with the
-  standard defensive slice, manual-entry fallback when unreadable. Frame it
-  honestly as "Snap to update," never "sync" — there is no sanctioned Kindle/
-  Libby progress API (verified June 2026; camera capture is the state of the art).
-  Prototype refs: `readProgressShot`, `handleSnap` inside `ProgressEditor`.
-  - Out of scope (and why): automatic Kindle/Libby/Audible progress sync — no
-    public API; browser-extension scraping of read.amazon.com breaks constantly
-    and risks ToS. Don't promise it in UI.
-
 ## Naming note
 
 The prototype calls the heat rating **Spicy** with chili-pepper icons; the repo
