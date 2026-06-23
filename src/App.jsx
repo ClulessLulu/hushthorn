@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import Papa from "papaparse";
 import { supabase } from './lib/supabase';
-import Cropper from 'react-easy-crop';
+import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
+import 'react-image-crop/dist/ReactCrop.css';
 
 /* ── Claude API configuration ───────────────────────────────
    Option A (recommended): point CLAUDE_API_URL at your own proxy
@@ -128,38 +129,45 @@ const FONT_CSS = `
 
 /* ── image crop utility ─────────────────────────────────────── */
 
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.addEventListener('load', () => resolve(img));
-    img.addEventListener('error', reject);
-    img.src = src;
-  });
-}
-
-async function getCroppedImg(src, pixelCrop, rotation = 0) {
-  const image = await loadImage(src);
+/* Canvas extraction for react-image-crop. Accounts for the displayed
+   scale + rotate, drawing the source image around its centre and
+   reading out exactly the completed crop region. Returns a JPEG dataURL.
+   Adapted from react-image-crop's documented canvasPreview pattern. */
+function getCroppedDataUrl(image, crop, scale = 1, rotate = 0) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  const rotRad = (rotation * Math.PI) / 180;
+  if (!ctx) return null;
 
-  // Bounding box of the rotated image — croppedAreaPixels is in this space
-  const bBoxW = Math.abs(Math.cos(rotRad) * image.width) + Math.abs(Math.sin(rotRad) * image.height);
-  const bBoxH = Math.abs(Math.sin(rotRad) * image.width) + Math.abs(Math.cos(rotRad) * image.height);
-  canvas.width = bBoxW;
-  canvas.height = bBoxH;
+  // crop is in the displayed-image space; map to natural pixels.
+  const scaleX = image.naturalWidth / image.width;
+  const scaleY = image.naturalHeight / image.height;
+  const pixelRatio = window.devicePixelRatio || 1;
 
-  // Rotate the image around its centre within the bounding box
-  ctx.translate(bBoxW / 2, bBoxH / 2);
-  ctx.rotate(rotRad);
-  ctx.translate(-image.width / 2, -image.height / 2);
-  ctx.drawImage(image, 0, 0);
+  canvas.width = Math.floor(crop.width * scaleX * pixelRatio);
+  canvas.height = Math.floor(crop.height * scaleY * pixelRatio);
 
-  // Extract exactly the crop region (coordinates are in rotated-image space)
-  const data = ctx.getImageData(pixelCrop.x, pixelCrop.y, pixelCrop.width, pixelCrop.height);
-  canvas.width = pixelCrop.width;
-  canvas.height = pixelCrop.height;
-  ctx.putImageData(data, 0, 0);
+  ctx.scale(pixelRatio, pixelRatio);
+  ctx.imageSmoothingQuality = 'high';
+
+  const cropX = crop.x * scaleX;
+  const cropY = crop.y * scaleY;
+  const rotateRads = (rotate * Math.PI) / 180;
+  const centerX = image.naturalWidth / 2;
+  const centerY = image.naturalHeight / 2;
+
+  ctx.save();
+  // Move the crop origin to the canvas origin (0,0).
+  ctx.translate(-cropX, -cropY);
+  // Move the image centre to the origin so rotate/scale pivot there.
+  ctx.translate(centerX, centerY);
+  ctx.rotate(rotateRads);
+  ctx.scale(scale, scale);
+  ctx.translate(-centerX, -centerY);
+  ctx.drawImage(
+    image, 0, 0, image.naturalWidth, image.naturalHeight,
+    0, 0, image.naturalWidth, image.naturalHeight,
+  );
+  ctx.restore();
 
   return canvas.toDataURL('image/jpeg', 0.92);
 }
@@ -2966,7 +2974,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
   };
 
   if (cropSrc) {
-    return <ImageCropModal src={cropSrc} onApply={applyPhoto} onSkip={() => applyPhoto(cropSrc)} />;
+    return <ImageCropModal src={cropSrc} onApply={applyPhoto} onSkip={() => applyPhoto(cropSrc)} onReplace={(dataUrl) => setOriginalPhotoSrc(dataUrl)} />;
   }
 
   return (
@@ -3292,26 +3300,97 @@ function ModeTab({ active, onClick, children }) {
 
 /* ── image crop modal ──────────────────────────────────────── */
 
-function ImageCropModal({ src, onApply, onSkip }) {
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [rotation, setRotation] = useState(0);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+/* Pink crop chrome — react-image-crop's default selection/handles are
+   blue/white; restyle to the Hushthorn pink accent. (Cyan stays audio-only.) */
+const CROP_CSS = `
+.ht-crop .ReactCrop__crop-selection {
+  border: 1px solid #f472b6;
+  box-shadow: 0 0 0 9999em rgba(7,4,14,0.72);
+}
+.ht-crop .ReactCrop__drag-handle::after {
+  background-color: #f472b6;
+  border: 1px solid rgba(12,7,20,0.9);
+}
+.ht-crop .ReactCrop__drag-bar { background-color: rgba(244,114,182,0.55); }
+.ht-crop .ReactCrop__rule-of-thirds-vt::before,
+.ht-crop .ReactCrop__rule-of-thirds-vt::after,
+.ht-crop .ReactCrop__rule-of-thirds-hz::before,
+.ht-crop .ReactCrop__rule-of-thirds-hz::after { background-color: rgba(244,114,182,0.4); }
+`;
+
+const CROP_ASPECTS = [
+  { label: 'Portrait', value: 3 / 4 },
+  { label: 'Landscape', value: 4 / 3 },
+  { label: 'Square', value: 1 },
+  { label: 'Free', value: undefined },
+];
+
+function centeredCrop(width, height, aspect) {
+  return centerCrop(
+    makeAspectCrop({ unit: '%', width: 90 }, aspect, width, height),
+    width, height,
+  );
+}
+
+function ImageCropModal({ src, onApply, onSkip, onReplace }) {
+  const [imgSrc, setImgSrc] = useState(src);
+  const [crop, setCrop] = useState();
+  const [completedCrop, setCompletedCrop] = useState(null);
+  const [aspect, setAspect] = useState(3 / 4);
+  const [scale, setScale] = useState(1);
+  const [rotate, setRotate] = useState(0);
   const [applying, setApplying] = useState(false);
+  const imgRef = useRef(null);
+  const replaceRef = useRef(null);
 
-  const onCropComplete = useCallback((_, pixels) => setCroppedAreaPixels(pixels), []);
+  const onImageLoad = (e) => {
+    if (typeof aspect === 'number') {
+      const { width, height } = e.currentTarget;
+      setCrop(centeredCrop(width, height, aspect));
+    }
+  };
 
-  const apply = async () => {
-    if (!croppedAreaPixels) return;
+  const chooseAspect = (value) => {
+    setAspect(value);
+    if (typeof value === 'number' && imgRef.current) {
+      const { width, height } = imgRef.current;
+      setCrop(centeredCrop(width, height, value));
+    }
+    // Free → leave the current crop for the user to draw/resize.
+  };
+
+  const handleReplace = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result;
+      setImgSrc(url);
+      setCrop(undefined);
+      setCompletedCrop(null);
+      setScale(1);
+      setRotate(0);
+      onReplace?.(url);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const apply = () => {
+    if (!completedCrop?.width || !imgRef.current) return;
     setApplying(true);
     try {
-      onApply(await getCroppedImg(src, croppedAreaPixels, rotation));
+      const dataUrl = getCroppedDataUrl(imgRef.current, completedCrop, scale, rotate);
+      if (dataUrl) onApply(dataUrl);
     } finally { setApplying(false); }
   };
+
+  const canApply = !!completedCrop && completedCrop.width > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#07040e' }}>
       <style>{FONT_CSS}</style>
+      <style>{CROP_CSS}</style>
 
       {/* top bar */}
       <div className="flex items-center justify-between px-4 py-3 flex-shrink-0 border-b border-purple-900/60">
@@ -3323,35 +3402,52 @@ function ImageCropModal({ src, onApply, onSkip }) {
       </div>
 
       {/* cropper area */}
-      <div className="relative flex-1">
-        <Cropper
-          image={src}
+      <div className="relative flex-1 min-h-0 flex items-center justify-center overflow-auto p-3">
+        <ReactCrop
+          className="ht-crop"
           crop={crop}
-          zoom={zoom}
-          rotation={rotation}
-          aspect={3 / 4}
-          minZoom={0.3}
-          onCropChange={setCrop}
-          onZoomChange={setZoom}
-          onRotationChange={setRotation}
-          onCropComplete={onCropComplete}
-          style={{
-            containerStyle: { background: '#07040e' },
-            cropAreaStyle: { border: '2px solid rgba(244,114,182,0.7)', boxShadow: '0 0 0 9999px rgba(7,4,14,0.75)' },
-          }}
-        />
+          onChange={(_, percentCrop) => setCrop(percentCrop)}
+          onComplete={setCompletedCrop}
+          aspect={aspect}
+          minWidth={40}
+        >
+          <img
+            ref={imgRef}
+            src={imgSrc}
+            alt=""
+            style={{ transform: `scale(${scale}) rotate(${rotate}deg)`, maxHeight: '70vh' }}
+            onLoad={onImageLoad}
+          />
+        </ReactCrop>
       </div>
 
       {/* controls */}
       <div className="flex-shrink-0 px-4 py-4 space-y-3 border-t border-purple-900/60" style={{ background: '#0c0714' }}>
+        {/* aspect presets */}
+        <div className="flex items-center justify-center gap-2 flex-wrap">
+          {CROP_ASPECTS.map(({ label, value }) => {
+            const active = aspect === value;
+            return (
+              <button key={label} onClick={() => chooseAspect(value)}
+                className={`ht-display px-3 py-1.5 rounded-sm text-[9px] font-semibold uppercase tracking-widest transition-colors border ${
+                  active
+                    ? "bg-pink-600/70 text-white border-pink-400/50"
+                    : "bg-purple-950/50 text-purple-300 hover:bg-purple-800/50 border-purple-700/40"
+                }`}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
         {/* rotation buttons */}
         <div className="flex items-center justify-center gap-3">
-          <button onClick={() => setRotation(r => r - 90)}
+          <button onClick={() => setRotate(r => r - 90)}
             className="ht-display text-[10px] uppercase px-4 py-2 rounded-sm bg-purple-900/70 hover:bg-purple-800 text-purple-100 border border-purple-700/40">
             ↺ Left 90°
           </button>
-          <span className="ht-display text-[10px] text-purple-400/60 w-10 text-center">{((rotation % 360) + 360) % 360}°</span>
-          <button onClick={() => setRotation(r => r + 90)}
+          <span className="ht-display text-[10px] text-purple-400/60 w-10 text-center">{((rotate % 360) + 360) % 360}°</span>
+          <button onClick={() => setRotate(r => r + 90)}
             className="ht-display text-[10px] uppercase px-4 py-2 rounded-sm bg-purple-900/70 hover:bg-purple-800 text-purple-100 border border-purple-700/40">
             ↻ Right 90°
           </button>
@@ -3360,18 +3456,25 @@ function ImageCropModal({ src, onApply, onSkip }) {
         {/* zoom slider */}
         <div className="flex items-center gap-3">
           <span className="ht-display text-[9px] uppercase text-purple-400 w-8 flex-shrink-0">Zoom</span>
-          <input type="range" min={0.3} max={3} step={0.05} value={zoom}
-            onChange={e => setZoom(Number(e.target.value))}
-            className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer accent-pink-400"
+          <input type="range" min={1} max={3} step={0.05} value={scale}
+            onChange={e => setScale(Number(e.target.value))}
+            className="flex-1 h-1.5 rounded-sm appearance-none cursor-pointer accent-pink-400"
             style={{ accentColor: '#f472b6' }} />
-          <span className="ht-display text-[9px] text-purple-400/60 w-8 text-right">{zoom.toFixed(1)}×</span>
+          <span className="ht-display text-[9px] text-purple-400/60 w-8 text-right">{scale.toFixed(1)}×</span>
         </div>
 
-        {/* apply */}
-        <button onClick={apply} disabled={applying}
-          className="ht-display w-full py-3 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest">
-          {applying ? 'Cropping…' : '✦ Crop & use this cover'}
-        </button>
+        {/* replace + apply */}
+        <div className="flex items-center gap-3">
+          <button onClick={() => replaceRef.current?.click()}
+            className="ht-display flex-shrink-0 text-[10px] uppercase px-4 py-3 rounded-sm bg-purple-900/70 hover:bg-purple-800 text-purple-100 border border-purple-700/40 tracking-widest">
+            ⟳ Replace photo
+          </button>
+          <input ref={replaceRef} type="file" accept="image/*" onChange={handleReplace} className="hidden" />
+          <button onClick={apply} disabled={applying || !canApply}
+            className="ht-display flex-1 py-3 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest">
+            {applying ? 'Cropping…' : '✦ Crop & use this cover'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -3484,7 +3587,7 @@ function CoverEditor({ book, onUpdate, session }) {
   const previewSrc = coverChoice === "photo" ? photoPreview : (apiCoverUrl || book.coverUrl);
 
   if (cropSrc) {
-    return <ImageCropModal src={cropSrc} onApply={applyPhoto} onSkip={() => applyPhoto(cropSrc)} />;
+    return <ImageCropModal src={cropSrc} onApply={applyPhoto} onSkip={() => applyPhoto(cropSrc)} onReplace={(dataUrl) => setOriginalPhotoSrc(dataUrl)} />;
   }
 
   if (!editing) {
