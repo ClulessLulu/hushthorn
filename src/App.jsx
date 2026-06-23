@@ -343,6 +343,11 @@ function genreFallbackColor(book) {
 // Session-level dedupe of sampled colors (DB spine_color dedupes across sessions).
 const spineColorCache = new Map();
 
+// Session-level dedupe for page-count backfill. Holds book ids that have been
+// attempted this session (whether or not OL/GB returned a result). Prevents
+// repeat network calls when a panel is opened, closed, and re-opened.
+const pageCountTriedIds = new Set();
+
 // Average the cover's pixels on an 8×12 canvas, darkened to "library light"
 // (brightest channel ≤ 150). Returns 'rgb(r,g,b)'. Rejects on load/draw error.
 function sampleCoverColor(dataUrl) {
@@ -395,6 +400,46 @@ async function computeSpineColor(url) {
     const color = await sampleCoverColor(dataUrl);
     spineColorCache.set(url, color);
     return color;
+  } catch { return null; }
+}
+
+// Lazy page-count resolver for existing print books that have no page count.
+// Primary: Open Library search.json (no quota). Fallback: Google Books.
+// Always returns a positive integer or null — NEVER throws.
+//
+// Failure modes handled:
+//   • Network error / non-OK HTTP response → null
+//   • Missing docs / empty docs array → falls through to GB fallback
+//   • number_of_pages_median is 0, negative, non-integer, or absent → falls through
+//   • GB items absent or pageCount absent/non-positive → null
+//   • Malformed JSON from either endpoint → null
+async function fetchPageCount(title, author) {
+  try {
+    const t = encodeURIComponent((title || "").trim());
+    const a = encodeURIComponent((author || "").trim());
+    // --- Open Library (primary) ---
+    try {
+      const olRes = await fetch(
+        `https://openlibrary.org/search.json?title=${t}&author=${a}&limit=1&fields=number_of_pages_median`
+      );
+      if (olRes.ok) {
+        const olData = await olRes.json();
+        const med = olData.docs?.[0]?.number_of_pages_median;
+        if (typeof med === "number" && Number.isInteger(med) && med > 0) return med;
+      }
+    } catch { /* OL unreachable — fall through to GB */ }
+    // --- Google Books (fallback) ---
+    try {
+      const gbRes = await fetch(
+        `https://www.googleapis.com/books/v1/volumes?q=intitle:${t}+inauthor:${a}&maxResults=1&printType=books`
+      );
+      if (gbRes.ok) {
+        const gbData = await gbRes.json();
+        const pc = gbData.items?.[0]?.volumeInfo?.pageCount;
+        if (typeof pc === "number" && Number.isInteger(pc) && pc > 0) return pc;
+      }
+    } catch { /* GB unreachable — fall through to null */ }
+    return null;
   } catch { return null; }
 }
 
@@ -1437,6 +1482,38 @@ export default function Hushthorn() {
     const { error } = await supabase.from('books').update({ spine_color }).eq('id', id);
     if (error) console.error('persistSpineColor:', error.message);
   };
+
+  // Lazy page-count backfill: fires once per session per book when the detail
+  // panel opens. Conditions to attempt:
+  //   1. A book is active (activeId is set).
+  //   2. The book carries the 'print' format.
+  //   3. progress.print.pages is falsy (no count stored yet).
+  //   4. This book id has not been tried this session (pageCountTriedIds).
+  // On success: patches ONLY `pages` via updateBook — never `page` — so
+  // maxPercent stays 0 and the auto-Read guard in updateBook is not triggered.
+  // On miss or error: marks tried and does nothing; field stays empty.
+  useEffect(() => {
+    if (!activeId) return;
+    const book = books.find((b) => b.id === activeId);
+    if (!book) return;
+    if (!(book.formats || ["print"]).includes("print")) return;
+    if (book.progress?.print?.pages) return; // already has a page count
+    if (pageCountTriedIds.has(activeId)) return; // already attempted this session
+    pageCountTriedIds.add(activeId);
+    (async () => {
+      try {
+        const count = await fetchPageCount(book.title, book.author);
+        if (typeof count === "number" && Number.isInteger(count) && count > 0) {
+          await updateBook(activeId, {
+            progress: {
+              ...book.progress,
+              print: { ...(book.progress?.print || {}), pages: count },
+            },
+          });
+        }
+      } catch { /* defensive: updateBook should never throw, but guard anyway */ }
+    })();
+  }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Partial upsert of view prefs on the avatars row, keyed on user_id. Writes
   // only pref_layout/pref_sort (+ updated_at) so it never clobbers name/colors.
