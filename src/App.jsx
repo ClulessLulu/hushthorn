@@ -3456,7 +3456,7 @@ function ImageCropModal({ src, onApply, onSkip, onReplace }) {
         {/* zoom slider */}
         <div className="flex items-center gap-3">
           <span className="ht-display text-[9px] uppercase text-purple-400 w-8 flex-shrink-0">Zoom</span>
-          <input type="range" min={1} max={3} step={0.05} value={scale}
+          <input type="range" min={0.3} max={4} step={0.05} value={scale}
             onChange={e => setScale(Number(e.target.value))}
             className="flex-1 h-1.5 rounded-sm appearance-none cursor-pointer accent-pink-400"
             style={{ accentColor: '#f472b6' }} />
