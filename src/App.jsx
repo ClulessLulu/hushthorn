@@ -1324,6 +1324,7 @@ export default function Hushthorn() {
             overall: item.overall || 0,
             smut: 0,
             formats: ['print'],
+            progress: item.progress || {},
             notes: newNotes,
           });
         }
@@ -1347,6 +1348,7 @@ export default function Hushthorn() {
           overall: b.overall,
           smut: b.smut,
           formats: b.formats || ['print'],
+          progress: b.progress || {},
         }))
       );
     }
@@ -2447,7 +2449,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [manual, setManual] = useState({ title: "", author: "", coverUrl: "", genres: [] });
+  const [manual, setManual] = useState({ title: "", author: "", coverUrl: "", genres: [], pageCount: null });
   const [genreInput, setGenreInput] = useState("");
   const [scanning, setScanning] = useState(false);
   const [scanNotice, setScanNotice] = useState("");
@@ -2497,7 +2499,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
     setLoading(true);
     let cancelled = false;
 
-    const OL_FIELDS = "key,title,author_name,first_publish_year,cover_i,subject";
+    const OL_FIELDS = "key,title,author_name,first_publish_year,cover_i,subject,number_of_pages_median";
     const JUNK = /(study guide|workbook|summary of|analysis of|reader'?s? guide|sparknotes|cliffsnotes)/i;
 
     const fromGoogleBooks = async (q) => {
@@ -2511,6 +2513,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
         first_publish_year: item.volumeInfo.publishedDate ? parseInt(item.volumeInfo.publishedDate) : null,
         _coverUrl: (item.volumeInfo.imageLinks?.thumbnail || item.volumeInfo.imageLinks?.smallThumbnail || "").replace("http://", "https://"),
         subject: item.volumeInfo.categories || [],
+        pageCount: item.volumeInfo.pageCount || null,
       }));
     };
 
@@ -2526,7 +2529,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
         if (!doc.title || JUNK.test(doc.title) || seen.has(doc.key)) continue;
         if (!q.includes("/") && doc.title.includes(" / ")) continue;
         seen.add(doc.key);
-        out.push(doc);
+        out.push({ ...doc, pageCount: doc.number_of_pages_median || null });
       }
       return out.slice(0, 12);
     };
@@ -2554,6 +2557,8 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
   const pick = async (doc, shelf) => {
     const coverUrl = doc._coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : "");
     const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
+    const rawPageCount = doc.pageCount;
+    const pageCount = (typeof rawPageCount === "number" && Number.isInteger(rawPageCount) && rawPageCount > 0) ? rawPageCount : null;
     const book = {
       title: doc.title,
       author: doc.author_name?.[0] || "Unknown author",
@@ -2566,6 +2571,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
       smut: 0,
       spineColor,
       notes: [],
+      progress: pageCount ? { print: { pages: pageCount } } : {},
     };
     // Already in the archive? Confirm before adding a separate copy.
     if (existingByTitle(doc.title)) {
@@ -2654,6 +2660,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
             first_publish_year: item.volumeInfo.publishedDate ? parseInt(item.volumeInfo.publishedDate) : null,
             _coverUrl: (item.volumeInfo.imageLinks?.thumbnail || "").replace("http://", "https://"),
             subject: item.volumeInfo.categories || [],
+            pageCount: item.volumeInfo.pageCount || null,
           }))
           .filter(d => d.title && !JUNK.test(d.title))
           .slice(0, 6));
@@ -2850,7 +2857,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
   const fetchByIsbn = async (isbn) => {
     try {
       const res = await fetch(
-        `https://openlibrary.org/search.json?q=isbn:${isbn}&limit=1&fields=title,author_name,cover_i,subject`
+        `https://openlibrary.org/search.json?q=isbn:${isbn}&limit=1&fields=title,author_name,cover_i,subject,number_of_pages_median`
       );
       const d = await res.json();
       const doc = d.docs?.[0];
@@ -2861,12 +2868,15 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
       // "no cover found", and the user can capture or upload one.
       let coverUrl = doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : "";
       if (!coverUrl) coverUrl = await fetchGoogleCover(isbn);
+      const rawPageCount = doc.number_of_pages_median;
+      const pageCount = (typeof rawPageCount === "number" && Number.isInteger(rawPageCount) && rawPageCount > 0) ? rawPageCount : null;
       return {
         isbn,
         title: doc.title,
         author: doc.author_name?.[0] || "",
         coverUrl,
         genres: cleanGenres(doc.subject),
+        pageCount,
       };
     } catch { return null; }
   };
@@ -2896,6 +2906,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
           author: data.author || m.author,
           coverUrl: data.coverUrl,
           genres: data.genres.length ? data.genres : m.genres,
+          pageCount: data.pageCount ?? null,
         }));
         setScanNotice("Matched from the barcode — confirm the details, then inscribe.");
         if (data.genres.length === 0) divineDetails(data.title, data.author || "");
@@ -2910,20 +2921,25 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
   const removeFromQueue = (isbn) => setQueue((q) => q.filter((b) => b.isbn !== isbn));
 
   const addBatch = () => {
-    const items = queue.filter((q) => !q.inArchive).map((q) => ({
-      title: q.title,
-      author: q.author || "Unknown author",
-      coverUrl: q.coverUrl,
-      genres: q.genres,
-      shelf: batchShelf,
-      read: false,
-    }));
+    const items = queue.filter((q) => !q.inArchive).map((q) => {
+      const pc = q.pageCount;
+      const validPageCount = (typeof pc === "number" && Number.isInteger(pc) && pc > 0) ? pc : null;
+      return {
+        title: q.title,
+        author: q.author || "Unknown author",
+        coverUrl: q.coverUrl,
+        genres: q.genres,
+        shelf: batchShelf,
+        read: false,
+        progress: validPageCount ? { print: { pages: validPageCount } } : {},
+      };
+    });
     if (items.length && onAddMany) onAddMany(items);
     onClose();
   };
 
   const scanAnother = () => {
-    setManual({ title: "", author: "", coverUrl: "", genres: [] });
+    setManual({ title: "", author: "", coverUrl: "", genres: [], pageCount: null });
     setPhotoPreview(""); setOriginalPhotoSrc(""); setCoverChoice("api");
     setScanNotice("");
     cameraTriedRef.current = false;
@@ -2978,6 +2994,8 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
     }
     // Best-effort spine color from the resolved cover; null on any failure.
     const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
+    const pc = manual.pageCount;
+    const validPageCount = (typeof pc === "number" && Number.isInteger(pc) && pc > 0) ? pc : null;
     onAdd({
       title: manual.title.trim(),
       author: manual.author.trim() || "Unknown author",
@@ -2990,6 +3008,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
       smut: 0,
       spineColor,
       notes: [],
+      progress: validPageCount ? { print: { pages: validPageCount } } : {},
     });
   };
 
