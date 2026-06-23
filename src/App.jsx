@@ -2478,6 +2478,18 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
   const [originalPhotoSrc, setOriginalPhotoSrc] = useState("");
   const [titleSuggs, setTitleSuggs] = useState([]);
   const [authorSuggs, setAuthorSuggs] = useState([]);
+  // Duplicate-title confirmation. When a single-add targets a title already in
+  // the archive we stash the pending action here and surface a confirm instead
+  // of adding silently. { title, run } — run() commits the add as a separate copy.
+  const [pendingDup, setPendingDup] = useState(null);
+
+  // First book in the archive whose title matches `title` (case-insensitive,
+  // whitespace-trimmed) — same dedup key the rest of the app uses.
+  const existingByTitle = (title) => {
+    const key = (title || "").trim().toLowerCase();
+    if (!key) return null;
+    return books.find((b) => (b.title || "").trim().toLowerCase() === key) || null;
+  };
 
   useEffect(() => {
     const q = query.trim();
@@ -2542,7 +2554,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
   const pick = async (doc, shelf) => {
     const coverUrl = doc._coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : "");
     const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
-    onAdd({
+    const book = {
       title: doc.title,
       author: doc.author_name?.[0] || "Unknown author",
       year: doc.first_publish_year || null,
@@ -2554,7 +2566,13 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
       smut: 0,
       spineColor,
       notes: [],
-    });
+    };
+    // Already in the archive? Confirm before adding a separate copy.
+    if (existingByTitle(doc.title)) {
+      setPendingDup({ title: doc.title, run: () => onAdd(book) });
+      return;
+    }
+    onAdd(book);
   };
 
   // Fetch a Google Books cover for a title — runs regardless of whether Claude succeeds.
@@ -2940,8 +2958,10 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
   const removeGenre = (g) =>
     setManual((m) => ({ ...m, genres: m.genres.filter((x) => x !== g) }));
 
-  const addManual = async (shelf) => {
-    if (!manual.title.trim()) return;
+  // Real commit for manual/upload/single-scan: uploads the cover photo (if any),
+  // derives the spine color, then onAdd. Runs only once the user is past any
+  // duplicate confirm — so a cancelled add never uploads a cover.
+  const commitManual = async (shelf) => {
     let coverUrl = manual.coverUrl;
     if (coverChoice === "photo" && photoPreview && session) {
       try {
@@ -2973,11 +2993,23 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
     });
   };
 
+  const addManual = async (shelf) => {
+    if (!manual.title.trim()) return;
+    // Check for an existing title BEFORE uploading a cover — a cancelled add
+    // must not touch storage. On confirm, commitManual does the real work.
+    if (existingByTitle(manual.title)) {
+      setPendingDup({ title: manual.title.trim(), run: () => commitManual(shelf) });
+      return;
+    }
+    await commitManual(shelf);
+  };
+
   if (cropSrc) {
     return <ImageCropModal src={cropSrc} onApply={applyPhoto} onSkip={() => applyPhoto(cropSrc)} onReplace={(dataUrl) => setOriginalPhotoSrc(dataUrl)} />;
   }
 
   return (
+    <>
     <Overlay onClose={onClose} label="Inscribe">
       <div className="flex items-center justify-between mb-4">
         <h2 className="ht-display text-xl text-pink-200">Inscribe</h2>
@@ -3282,6 +3314,35 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
         </div>
       )}
     </Overlay>
+
+    {/* Duplicate-title confirm — this tome already lives in the archive.
+        Confirm adds a SEPARATE copy; cancel leaves nothing and keeps the add flow. */}
+    {pendingDup && (
+      <Overlay onClose={() => setPendingDup(null)} label="Already in your archive">
+        <h2 className="ht-display text-lg uppercase text-pink-200 mb-2">Already in your archive</h2>
+        <p className="text-[15px] text-purple-100 mb-1">
+          <span className="text-pink-200 italic">“{pendingDup.title}”</span> is already in your archive.
+        </p>
+        <p className="text-sm text-purple-300/80 mb-5">
+          Add it anyway and a second, separate copy will be inscribed.
+        </p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setPendingDup(null)}
+            className="ht-display flex-1 py-2 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100 text-xs font-semibold uppercase"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => { const dup = pendingDup; setPendingDup(null); dup.run(); }}
+            className="ht-display flex-1 py-2 rounded-sm bg-pink-500/80 hover:bg-pink-400 text-white text-xs font-semibold uppercase"
+          >
+            Add anyway
+          </button>
+        </div>
+      </Overlay>
+    )}
+    </>
   );
 }
 
