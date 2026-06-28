@@ -1004,7 +1004,6 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
   const h = 122 + (hashStr(book.title || "") % 48);
   const w = 17 + (hashStr((book.author || "") + (book.title || "")) % 12);
   const wish = book.shelf === "wishlist";
-  const unread = book.shelf === "owned" && !book.read;
   const hasAudio = (book.formats || []).includes("audio");
   // Two thin vertical EDGE RAILS rise from the foot of the spine — NEITHER is
   // gated on book.read, so a tome finished in audio still shows its partial
@@ -1028,7 +1027,7 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
       title={tip}
       className={`relative flex flex-col items-center justify-between rounded-t-[3px] rounded-b-[2px] transition-all duration-200 hover:-translate-y-2 hover:-rotate-3 hover:z-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${
         dimmed ? "opacity-20" : wish ? "opacity-60" : ""
-      } ${unread ? "-translate-y-1.5" : ""}`}
+      }`}
       style={{
         width: w,
         height: h,
@@ -1160,7 +1159,7 @@ function SpineShelf({ books, onOpen, query, onPersist }) {
         </div>
       ))}
       <p className="text-center text-sm text-purple-400/60 italic mt-2">
-        Hover a spine to ease it from the shelf — tap to pull it out. Unread tomes sit proud of the row; wishlist spines are ghosts in dashed glass.
+        Hover a spine to ease it from the shelf — tap to pull it out. Wishlist spines are ghosts in dashed glass.
       </p>
     </div>
   );
