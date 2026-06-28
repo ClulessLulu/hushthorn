@@ -3817,9 +3817,9 @@ function CoverEditor({ book, onUpdate, session }) {
         <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
           onKeyDown={e => e.key === "Enter" && searchCovers(searchQuery)}
           placeholder="Search covers by title…"
-          className="flex-1 bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400" />
+          className="flex-1 min-w-0 bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400" />
         <button onClick={() => searchCovers(searchQuery)} disabled={searching}
-          className="ht-display text-[10px] uppercase px-3 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100">
+          className="ht-display text-[10px] uppercase px-3 py-1.5 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100 flex-shrink-0 whitespace-nowrap">
           {searching ? "…" : "Search"}
         </button>
       </div>
