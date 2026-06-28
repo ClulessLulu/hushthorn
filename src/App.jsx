@@ -1135,7 +1135,7 @@ function SpineShelf({ books, onOpen, query, onPersist }) {
   return (
     <div ref={ref} className="max-w-3xl mx-auto">
       <p className="ht-display text-center text-[10px] uppercase tracking-widest text-purple-300/60 mb-4">
-        {books.length} tome{books.length > 1 ? "s" : ""} · {readCount} read
+        {books.length} tome{books.length === 1 ? "" : "s"} · {readCount} read
       </p>
       {rows.map((row, ri) => (
         <div key={ri}>
@@ -2327,10 +2327,14 @@ function AvatarPage({ avatar, books, session, onSave, onClose }) {
 
       {/* stats */}
       <h3 className="ht-display text-xs uppercase tracking-widest text-purple-300/70 mb-2">Reading Chronicle</h3>
+      <div className="ht-card rounded-md p-3 mb-2 text-center">
+        <div className="ht-display text-3xl text-pink-200">{books.length}</div>
+        <div className="text-xs text-purple-400/70 italic">tome{books.length === 1 ? '' : 's'} in your archive</div>
+      </div>
       <div className="grid grid-cols-2 gap-2 mb-5">
         {[
           { n: owned.length,    label: 'tomes owned',    color: 'text-pink-200' },
-          { n: readCount,       label: 'scrolls read',   color: 'text-purple-300' },
+          { n: readCount,       label: 'tomes read',     color: 'text-purple-300' },
           { n: wishlistCount,   label: 'on the wishlist',color: 'text-indigo-300' },
           { n: avgRating || 0,  label: avgRating ? `avg · ${'⚔'.repeat(avgRating)}` : 'avg verdict', color: 'text-pink-200' },
         ].map(({ n, label, color }) => (

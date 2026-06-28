@@ -414,3 +414,89 @@ surfacing is not gated on `book.read`.
 **GO** — releasable. No defects found. Nothing to route back to frontend-dev or
 supabase-migrator. The legacy `audio_*` DB columns remain (by design) until the
 follow-up contract migration; B-07 confirms dropping them will not break the app.
+
+---
+
+# QA Report — Profile TOTAL Stat (Library/Profile Reconciliation)
+
+Reviewed against [tests/profile-total-test-plan.md](profile-total-test-plan.md).
+Pure display change in `AvatarPage` (`src/App.jsx`), no DB change. Builder:
+frontend-dev (`completed`). MCP on project `ujxsrcxbhcbihhdluzyl`.
+
+## Summary verdict: GO (no blockers)
+
+The fix lands its goal. The profile's new headline TOTAL tile (`:2331`,
+`{books.length}`) and the library/spine-shelf header (`:1138`, `{books.length}`)
+read the same count whenever the library is in its default (unfiltered) state,
+which is the state that produced the original "library 22 vs profile owned 15"
+confusion. The 2×2 subset stats are untouched and remain proper subsets of the
+total. Real data reconciles cleanly and no user has an unknown-shelf book.
+
+**Counts:** 9 PASS · 0 FAIL · 2 documented observations (non-blocking, E-01 +
+the n=0 plurality nuance below).
+
+## Pass/Fail by ID
+
+### Frontend behavior (F)
+- **F-01 PASS** — Profile TOTAL tile `:2331` renders `{books.length}` on the
+  `books` prop wired at `:1744` (`books={books}`).
+- **F-02 PASS (with E-01 caveat)** — Library header `:1138` renders
+  `{books.length}` of `sorted`. Pipeline: `filtered = books.filter(shelfFilter)`
+  (`:1404`) → `sorted = sortBooks(filtered, sortKey)` (`:1416`). `shelfFilter`
+  defaults to `"all"` (`:1307`) so `filtered.length === books.length`, and
+  `sortBooks` is a pure permutation (`[...list].sort`, never drops a row, `:481`)
+  so `sorted.length === books.length`. At the default filter the two sites are
+  provably equal. NOTE: they are equal *expressions on the same count*, but NOT
+  literally "the same array" — the header counts `sorted` (derived from
+  `filtered`), the tile counts raw `books`. They agree because filter is `all`
+  by default and sort preserves length. See E-01 for the non-default case.
+- **F-03 PASS** — Reconciliation `owned.length + wishlistCount === books.length`
+  holds for every input where `other = 0` (unit snippet: 15/7/0→22, 0/0/0→0,
+  1/0/0→1 all true).
+- **F-04 PASS** — 2×2 subset stats unchanged: `:2336` still `owned.length`,
+  `:2338` still `wishlistCount`, both filtered from the same `books`; each ≤
+  `books.length`. Only the new TOTAL tile was added above the grid; read/avg
+  untouched.
+
+### Backend / data (B) — MCP, project `ujxsrcxbhcbihhdluzyl`
+- **B-01 PASS** — User `07b8c396-…-300000`: `{total:22, owned:15, wishlist:7,
+  other:0}`. `15 + 7 = 22 = total`, `other = 0`. This is exactly the case that
+  produced the reported confusion — the new tile now shows 22, matching the
+  library's 22.
+- **B-02 PASS** — All-users sweep: only one other user
+  (`703e9c11-…`) with `{total:1, owned:1, wishlist:0, other:0}`. `other = 0`
+  for **every** user. No unknown-shelf / latent-bug rows in `books`.
+
+### Unit (U) — `node` ESM snippet
+- **U-01 PASS** — 0 books → tile number `0`.
+- **U-02 PASS** — 1 book → "tome … " (singular; `1 === 1` true).
+- **U-03 PASS** — 2+ books → "tomes …" (plural).
+
+### Edge / observations (E)
+- **E-01 (by design, documented)** — When the user activates a shelf filter
+  (`shelfFilter !== "all"`: owned / wishlist / read / unread / audio), the
+  spine-shelf header shows the **filtered** count while the profile tile keeps
+  the full `books.length`. This is correct behavior (the header reflects the
+  active view), but it means the "they can never disagree" framing only holds at
+  the default filter. Not a regression; the fix targets the default-state
+  mismatch and resolves it.
+- **n=0 plurality (cosmetic, pre-existing, non-blocking)** — At zero books the
+  two sites disagree on the *word*, not the number: the profile tile renders
+  "**tomes** in your archive" (`0 === 1` false → plural) while the library header
+  renders "**0 tome**" (`0 > 1` false → singular). English convention favors
+  plural at zero, so the profile tile is the more correct of the two. Both render
+  "0", so the count the fix is about matches. The "0 tome" quirk lives in the
+  pre-existing library header (`:1138`), not in this change — flag for a future
+  copy tidy if desired, not a blocker.
+
+## Build
+`npm run build` → exit 0 (`✓ built in 744ms`, 296 modules).
+
+## Go / No-Go
+
+**GO** — releasable. The fix achieves its stated goal: profile TOTAL matches the
+library total in the default state, real data reconciles (other = 0 for all
+users), subset stats are intact, and the build is green. No FAILs. Two
+non-blocking notes (filtered-header divergence is by-design; the "0 tome"
+singular at zero is a pre-existing library-header copy quirk, not this change).
+Nothing to route back to frontend-dev.
