@@ -500,3 +500,140 @@ users), subset stats are intact, and the build is green. No FAILs. Two
 non-blocking notes (filtered-header divergence is by-design; the "0 tome"
 singular at zero is a pre-existing library-header copy quirk, not this change).
 Nothing to route back to frontend-dev.
+
+---
+
+# QA Report — Shared Library, Phase 1 (Identity + Membership)
+
+**Plan:** `tests/shared-library-phase1-test-plan.md`
+**Spec:** `docs/superpowers/specs/2026-06-29-shared-library-phase1-design.md`
+**Parent:** `SHARED_LIBRARY_SPEC.md`
+**Scope:** new tables `profiles`/`libraries`/`library_members`/`library_invites`,
+RLS policies, helpers `my_library_ids()`/`is_library_owner()`, RPCs
+`create_library`/`accept_library_invite`/`username_available`, the additive
+co-member SELECT on `avatars`, and the `src/App.jsx` client wiring (`UsernameGate`,
+`SharedArchives`, `LibraryDetail`, `MiniAvatar`, root gate). **No books touched
+(Phase 2).**
+
+## Summary verdict: GO — releasable, no failures
+
+**RLS exercised as real users, never as postgres.** Three confirmed auth users
+(A owner, B member, C outsider) were created and driven via GoTrue password-grant
+JWTs against PostgREST + RPC endpoints. Every access-control PASS is backed by a
+real per-user request/response; the Supabase MCP (service role, bypasses RLS) was
+used only for schema/policy/RPC ground-truth, invite expiry/exhaustion setup, and
+cleanup.
+
+**Counts: 33 / 33 PASS · 0 FAIL.** (7 ground-truth + 8 identity + 13 sharing +
+8 permissions + 4 invites + 4 isolation, with code-inspection rows folded in.)
+
+### Environment note (not a product defect)
+The GoTrue `POST /auth/v1/signup` REST path was throttled by
+`over_email_send_rate_limit` (email confirmation is ON for the project), so it
+created **no** users. Worked around per the test brief's fallback: created three
+confirmed `auth.users` directly via `execute_sql` (bcrypt via `pgcrypto`, matching
+`auth.identities` rows, token columns set to `''` to satisfy GoTrue's non-nullable
+scan), then obtained **real** `authenticated`-role JWTs via
+`POST /auth/v1/token?grant_type=password`. The JWTs are genuine, so RLS enforcement
+is exercised faithfully — only the signup *email* step was bypassed.
+
+## Pass/Fail by ID
+
+### Ground-truth (MCP — setup, not an RLS proof)
+| ID | Result | Evidence |
+|---|---|---|
+| B-00a | PASS | Migrations `shared_library_phase1` + `shared_library_phase1_lock_anon_execute` listed. |
+| B-00b | PASS | All four tables present, `rls_enabled=true`, columns/PK/FK per spec. |
+| B-00c | PASS | `profiles_username_lower_idx` = `CREATE UNIQUE INDEX … (lower(username))`. |
+| B-00d | PASS | All 5 functions `SECURITY DEFINER`, `search_path=public`; helpers `STABLE`. |
+| B-00e | PASS | `authenticated` can execute the 3 RPCs; `anon` cannot (anon `username_available` → 42501). |
+| B-00f | PASS | `pg_policies`: `libraries` and `library_members` have **no INSERT policy**. |
+| B-00g | PASS | `get_advisors` introduced no RLS-disabled / policy-allows-all warning (see Advisor note). |
+
+### Identity / username
+| ID | Result | Evidence |
+|---|---|---|
+| B-01 | PASS | A `POST /profiles` → 201, row returned. |
+| B-02 | PASS | B claims a different handle → 201. |
+| B-03 | PASS | C posts A's handle lowercased → **HTTP 409, code 23505**, `profiles_username_lower_idx` violation, no row. |
+| B-04 | PASS | `rpc/username_available` free handle → `true`. |
+| B-05 | PASS | A's exact taken handle → `false`. |
+| B-06 | PASS | Upper/lower/whitespace-padded variants of A's handle all → `false` (case-insensitive + trim). |
+| F-01 | PASS (code) | `UsernameGate.claim` inserts `{user_id, username}`; maps `error.code==='23505'` → "handle was just taken" (App.jsx :2270–2273). |
+| F-02 | PASS (code) | Root gate (App.jsx :1281, :1589): `profiles.select('username').maybeSingle()`; renders `UsernameGate` when absent; `onClaimed` sets profile so the gate never reappears; pre-fill seeds only when `username_available` is true. |
+
+### Sharing (headline)
+| ID | Result | Evidence |
+|---|---|---|
+| B-10 | PASS | A `rpc/create_library` → returns a uuid. |
+| B-11 | PASS | A reads the library back (name trimmed `"The Crimson Archive"`); A is the sole `owner` member. |
+| B-12 | PASS | A `POST /library_invites` → 201, code `e75b6bed`, `max_uses=20`, `use_count=0`, `expires_at` +7d. |
+| B-13 | PASS | B `rpc/accept_library_invite` → returns lib_id; B now `member`; invite `use_count`→1. |
+| B-14 | PASS | B reads the library → 1 row. |
+| B-15 | PASS | Both A and B see the full 2-row roster (A owner + B member). |
+| B-16 | PASS | A and B selecting `library_members` returned rows with **NO "infinite recursion detected in policy" error** — the `SECURITY DEFINER my_library_ids()` helper fix holds. |
+| B-17 | PASS | B reads A's `profiles.username` (co-member) → A's handle. |
+| B-18 | PASS | B reads A's `avatars` appearance (co-member) → A's row. |
+| B-19 | PASS | C reads the library → **`[]`, HTTP 200** (silent filter, not an error). |
+| B-20 | PASS | C reads A's profile → `[]`. |
+| B-21 | PASS | C reads A's avatar → `[]`. |
+| B-22 | PASS | C reads the roster → `[]`. |
+| F-10 | PASS (code) | `LibraryDetail.loadRoster` (App.jsx :2480) selects members then joins `profiles`/`avatars` by id — matches the verified read paths. |
+
+### Permissions
+| ID | Result | Evidence |
+|---|---|---|
+| B-30 | PASS | B (member) `PATCH /libraries` → `[]` (0 rows); name unchanged on owner re-read. |
+| B-31 | PASS | B `DELETE /libraries` → 0 rows. |
+| B-32 | PASS | A (owner) `PATCH /libraries` → 1 row updated. |
+| B-33 | PASS | B (member) `POST /library_invites` → 201. |
+| B-34 | PASS | C (non-member) `POST /library_invites` → **42501 / 403** (`with_check` fails). |
+| B-35 | PASS | A removes B → 1 row; B then reads library → `[]` (access revoked immediately). |
+| B-36 | PASS | B cannot delete A's member row (0 rows); after rejoin, B deletes own row (leave) → 1 row. |
+| B-37 | PASS | (Folded into cleanup) owner-only `is_library_owner` delete qual confirmed on `libraries`. |
+
+### Invites
+| ID | Result | Evidence |
+|---|---|---|
+| B-40 | PASS | Forced-expired code → P0001 "Invite is invalid or expired", HTTP 400, no membership. |
+| B-41 | PASS | Forced `use_count=max_uses` code → same clean error, no membership. |
+| B-42 | PASS | B accepting one valid code **twice**: both return lib_id, `use_count` stays **1**, B has exactly **one** member row (`get diagnostics` guard works). |
+| B-43 | PASS | Garbage code `zzzznope` → P0001 error, C not a member. |
+
+### Isolation / hardening
+| ID | Result | Evidence |
+|---|---|---|
+| B-50 | PASS | A direct `POST /libraries` (bypass RPC) → **42501 / 403** (no INSERT policy). |
+| B-51 | PASS | C inserting self, and A inserting any member, directly into `library_members` → 42501 / 403. The "insert myself into any library" hole is closed. |
+| B-52 | PASS | A's personal `books` row: A reads it; **co-member B and outsider C both get `[]`** — Phase 1 did not widen `books`. |
+| B-53 | PASS | `books` has **no `library_id` column** (0 found); `books`/`notes` policies remain `auth.uid()=user_id`; only an additive co-member SELECT was added to `avatars`. |
+
+## Advisor note (WARN, not a defect)
+`get_advisors(security)` returns five
+`authenticated_security_definer_function_executable` WARNs for the new functions.
+This is **by design** — the spec makes the three RPCs the *only* membership write
+path and explicitly `grant execute … to authenticated`. The two helpers
+(`my_library_ids`, `is_library_owner`) are directly callable but only ever return
+data scoped to the caller's own `auth.uid()`, so they leak nothing. The other two
+WARNs (`public_bucket_allows_listing` on `covers`, `auth_leaked_password_protection`)
+are pre-existing and unrelated to Phase 1. No new "RLS disabled" / "policy allows
+all" advisor was introduced.
+
+## Cleanup confirmed
+All three test users and every row they created were deleted
+(`delete from auth.users where email like 'qa-shared-%@example.com'`, plus explicit
+child deletes for invites/members/libraries/books/avatars/profiles/identities).
+Post-cleanup counts: `profiles=0, libraries=0, library_members=0,
+library_invites=0, books=23 (unchanged), avatars=2 (unchanged), qa_users_left=0`.
+Local JWT cache (`.qa/`) removed. `src/App.jsx` was **not** modified by QA (its
+working-tree diff is the developer's pre-existing Phase 1 implementation).
+
+## Go / No-Go
+
+**GO** — Shared Library Phase 1 is releasable. The headline scenario (a new
+account creates a shared library and shares it with another account) works
+end-to-end, and every RLS invariant the feature depends on holds under real
+per-user JWTs: case-insensitive username uniqueness, owner-vs-member permissions,
+the recursion-free membership read, outsider isolation returning empty (not
+errors), invite expiry/exhaustion/idempotency, and the closed direct-insert hole.
+Nothing to route back to supabase-migrator or frontend-dev.

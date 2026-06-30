@@ -1234,6 +1234,10 @@ function Meter({ value, onChange, Icon, label, readOnly = false, size }) {
 export default function Hushthorn() {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
+  // Identity. `profile` is the user's claimed username row (or null until claimed).
+  // `profileReady` gates the UsernameGate so the app never flashes before we know.
+  const [profile, setProfile] = useState(null);
+  const [profileReady, setProfileReady] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession()
@@ -1263,14 +1267,19 @@ export default function Hushthorn() {
   const [prefs, setPrefs] = useState({ pref_layout: 'grid', pref_sort: 'recent' });
 
   useEffect(() => {
-    if (!session) { setBooks([]); setDataLoading(false); return; }
+    if (!session) {
+      setBooks([]); setDataLoading(false);
+      setProfile(null); setProfileReady(false);
+      return;
+    }
     setDataLoading(true);
     const uid = session.user.id;
     Promise.all([
       supabase.from('books').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
       supabase.from('notes').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
       supabase.from('avatars').select('*').eq('user_id', uid).maybeSingle(),
-    ]).then(([{ data: booksData, error: bErr }, { data: notesData, error: nErr }, { data: avatarData }]) => {
+      supabase.from('profiles').select('username').eq('user_id', uid).maybeSingle(),
+    ]).then(([{ data: booksData, error: bErr }, { data: notesData, error: nErr }, { data: avatarData }, { data: profileData }]) => {
       if (bErr) console.error('books fetch:', bErr.message);
       if (nErr) console.error('notes fetch:', nErr.message);
       const notesByBook = {};
@@ -1299,8 +1308,9 @@ export default function Hushthorn() {
         pref_layout: avatarData.pref_layout ?? 'grid',
         pref_sort: avatarData.pref_sort ?? 'recent',
       });
+      setProfile(profileData || null);
     }).catch(err => console.error('data load:', err))
-      .finally(() => setDataLoading(false));
+      .finally(() => { setDataLoading(false); setProfileReady(true); });
   }, [session]);
 
   const [shelfFilter, setShelfFilter] = useState("all");
@@ -1569,6 +1579,20 @@ export default function Hushthorn() {
     </div>
   );
   if (!session) return <AuthPage />;
+  if (!profileReady) return (
+    <div className="ht-bg ht-body" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <style>{FONT_CSS}</style>
+      <div className="ht-frame" aria-hidden="true" />
+      <p className="ht-display text-purple-300/60 text-sm uppercase tracking-widest">Opening the archive…</p>
+    </div>
+  );
+  if (!profile?.username) return (
+    <UsernameGate
+      session={session}
+      suggested={avatar?.name}
+      onClaimed={(username) => setProfile({ username })}
+    />
+  );
 
   return (
     <div className="ht-bg ht-body text-purple-100">
@@ -1740,6 +1764,7 @@ export default function Hushthorn() {
       {avatarOpen && (
         <AvatarPage
           avatar={avatar}
+          username={profile?.username}
           books={books}
           session={session}
           onSave={(updated) => { setAvatar(updated); setAvatarOpen(false); }}
@@ -2193,7 +2218,395 @@ const SKIN_SWATCHES = ['#fde68a','#c4956a','#a0522d','#7c4c2a','#4a2c17','#d4a5a
 const ROBE_SWATCHES = ['#5b21b6','#831843','#1e3a5f','#064e3b','#1c1c1c','#9333ea'];
 const AVATAR_EMOJI  = { female: '🧝‍♀️', male: '🧝‍♂️', nonbinary: '🧝' };
 
-function AvatarPage({ avatar, books, session, onSave, onClose }) {
+/* ── shared library: identity + membership (Phase 1) ───────── */
+
+// Handle rules: 3–20 chars, letters/numbers/_/- . Matches the DB unique index
+// on lower(username); the index + insert are the real guard, this is for UX.
+const USERNAME_RE = /^[A-Za-z0-9_-]{3,20}$/;
+function sanitizeUsernameSeed(s) {
+  return (s || '').normalize('NFKD').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 20);
+}
+
+// One-time gate: claim a username. Shown to any signed-in user without a profile
+// row (new sign-ups AND existing accounts on first login after this shipped).
+function UsernameGate({ session, suggested, onClaimed }) {
+  const [value, setValue] = useState('');
+  const [status, setStatus] = useState('idle'); // idle|invalid|checking|available|taken
+  const [claiming, setClaiming] = useState(false);
+  const [err, setErr] = useState('');
+
+  // Pre-fill from the old avatar name only if it sanitises to a valid, free handle.
+  useEffect(() => {
+    const seed = sanitizeUsernameSeed(suggested);
+    if (!USERNAME_RE.test(seed)) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.rpc('username_available', { p_username: seed });
+      if (!cancelled && data === true) setValue(seed);
+    })();
+    return () => { cancelled = true; };
+  }, [suggested]);
+
+  // Live availability check (debounced).
+  useEffect(() => {
+    const u = value.trim();
+    if (!u) { setStatus('idle'); return; }
+    if (!USERNAME_RE.test(u)) { setStatus('invalid'); return; }
+    setStatus('checking');
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const { data, error } = await supabase.rpc('username_available', { p_username: u });
+      if (cancelled) return;
+      if (error) { setStatus('idle'); return; }
+      setStatus(data ? 'available' : 'taken');
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [value]);
+
+  const claim = async () => {
+    const u = value.trim();
+    if (status !== 'available') return;
+    setClaiming(true); setErr('');
+    const { error } = await supabase.from('profiles').insert({ user_id: session.user.id, username: u });
+    if (error) {
+      setClaiming(false);
+      if (error.code === '23505') { setStatus('taken'); setErr('That handle was just taken — try another.'); }
+      else setErr('Could not save your handle. Please try again.');
+      return;
+    }
+    onClaimed(u);
+  };
+
+  const hint = {
+    invalid:   '3–20 characters · letters, numbers, _ or -',
+    checking:  'Searching the rolls…',
+    available: '✓ available',
+    taken:     '✗ already claimed',
+    idle:      ' ',
+  }[status];
+  const hintColor = status === 'available' ? 'text-fuchsia-300'
+    : (status === 'taken' || status === 'invalid') ? 'text-pink-400'
+    : 'text-purple-400/70';
+
+  return (
+    <div className="ht-bg ht-body fixed inset-0 overflow-y-auto flex items-center justify-center p-4">
+      <style>{FONT_CSS}</style>
+      <div className="ht-frame" aria-hidden="true" />
+      <div className="ht-card rounded-xl p-8 w-full max-w-sm text-center" style={{ transform: 'none' }}>
+        <Crown size={48} />
+        <h1 className="ht-display text-xl text-pink-200 mt-2 mb-1">Choose your handle</h1>
+        <p className="text-[13px] italic mb-5 text-purple-300/75">
+          This is how fellow readers know you in a shared archive. Pick something you'll keep.
+        </p>
+
+        <div className="text-left">
+          <label htmlFor="handle" className="block ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1.5">Username</label>
+          <div className="flex items-center bg-purple-950/60 border border-purple-700/50 rounded-sm focus-within:border-pink-400 px-3">
+            <span className="text-purple-400/70 text-[15px]">@</span>
+            <input id="handle" value={value} autoFocus
+              onChange={e => setValue(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && claim()}
+              placeholder="ravenquill"
+              className="flex-1 min-w-0 bg-transparent px-1.5 py-2.5 text-[15px] placeholder-purple-400/50 focus:outline-none text-purple-100" />
+          </div>
+          <p className={`text-[11px] mt-1.5 ${hintColor}`}>{hint}</p>
+          {err && <p className="text-sm text-pink-300 mt-1">{err}</p>}
+        </div>
+
+        <button onClick={claim} disabled={status !== 'available' || claiming}
+          className="ht-display w-full mt-4 py-3 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-40 text-white text-xs font-semibold uppercase tracking-widest">
+          {claiming ? 'Inscribing…' : '✦ Claim handle ✦'}
+        </button>
+        <button onClick={() => supabase.auth.signOut()}
+          className="mt-3 text-[11px] text-purple-400/60 hover:text-purple-300 italic">
+          sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Small gothic avatar for rosters — a cropped version of the AvatarPage figure.
+function MiniAvatar({ av, size = 34 }) {
+  const g    = av?.gender    || 'nonbinary';
+  const skin = av?.skin_tone || '#c4956a';
+  const hair = av?.hair_color || '#1e1b4b';
+  const robe = av?.robe_color || '#5b21b6';
+  return (
+    <div className="rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-purple-800/70 to-pink-900/40"
+      style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox="22 22 44 50" fill="none">
+        <path d="M26 72 Q44 66 62 72 L64 88 H24 Z" fill={robe} opacity=".7" />
+        <rect x="40" y="53" width="8" height="8" rx="2" fill={skin} />
+        <ellipse cx="44" cy="46" rx="16" ry="17" fill={skin} />
+        <path d={HAIR_STYLES[g]} fill={hair} />
+        <ellipse cx="38" cy="46" rx="2.4" ry="3" fill="white" />
+        <ellipse cx="50" cy="46" rx="2.4" ry="3" fill="white" />
+        <ellipse cx="38.5" cy="46.5" rx="1.5" ry="1.7" fill="#4c1d95" />
+        <ellipse cx="50.5" cy="46.5" rx="1.5" ry="1.7" fill="#4c1d95" />
+      </svg>
+    </div>
+  );
+}
+
+// The Shared Archives panel on the profile. Lists the user's shared libraries,
+// and lets them bind a new one or join with a code. Each library expands into
+// a roster + invite/owner controls (LibraryDetail).
+function SharedArchives({ session }) {
+  const me = session.user.id;
+  const [libs, setLibs] = useState(null);   // null = loading
+  const [openId, setOpenId] = useState(null);
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [joinErr, setJoinErr] = useState('');
+
+  const load = async () => {
+    const { data, error } = await supabase
+      .from('libraries')
+      .select('id, name, created_by, library_members(user_id, role)')
+      .order('created_at', { ascending: true });
+    if (error) { setErr('Could not open your shared archives.'); setLibs([]); return; }
+    setErr('');
+    setLibs(data || []);
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const create = async () => {
+    const n = name.trim();
+    if (!n || busy) return;
+    setBusy(true); setErr('');
+    const { data, error } = await supabase.rpc('create_library', { p_name: n });
+    setBusy(false);
+    if (error) { setErr('Could not bind the archive. Please try again.'); return; }
+    setName('');
+    await load();
+    setOpenId(data);
+  };
+
+  const join = async () => {
+    const c = code.trim();
+    if (!c || busy) return;
+    setBusy(true); setJoinErr('');
+    const { data, error } = await supabase.rpc('accept_library_invite', { p_code: c });
+    setBusy(false);
+    if (error) { setJoinErr('That invite is invalid or expired.'); return; }
+    setCode('');
+    await load();
+    setOpenId(data);
+  };
+
+  return (
+    <>
+      <h3 className="ht-display text-xs uppercase tracking-widest text-purple-300/70 mb-2">Shared Archives</h3>
+      <div className="ht-card rounded-md p-3 mb-5 space-y-3">
+        <p className="text-[12px] text-purple-300/70 italic">
+          A shelf you keep with others — each tome tagged with whose copy is whose.
+          Your ratings, progress, and marginalia stay yours alone.
+        </p>
+
+        {/* library list */}
+        {libs === null ? (
+          <p className="text-[12px] text-purple-400/60 italic">Opening…</p>
+        ) : libs.length === 0 ? (
+          <p className="text-[12px] text-purple-400/60 italic">No shared archives yet. Bind one below, or join with a code.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {libs.map(lib => {
+              const members = lib.library_members || [];
+              const myRole = members.find(m => m.user_id === me)?.role;
+              const isOpen = openId === lib.id;
+              return (
+                <div key={lib.id} className="rounded-sm border border-purple-700/40 overflow-hidden">
+                  <button onClick={() => setOpenId(isOpen ? null : lib.id)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-purple-900/30">
+                    <span className="flex-1 min-w-0">
+                      <span className="text-[14px] text-pink-100 truncate block">{lib.name}</span>
+                      <span className="text-[11px] text-purple-400/70 italic">
+                        {members.length} member{members.length === 1 ? '' : 's'}
+                        {myRole === 'owner' ? ' · you keep it' : ''}
+                      </span>
+                    </span>
+                    <span className="text-purple-400 text-xs">{isOpen ? '▾' : '▸'}</span>
+                  </button>
+                  {isOpen && <LibraryDetail lib={lib} me={me} onChanged={() => { setOpenId(null); load(); }} />}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {err && <p className="text-[12px] text-pink-300">{err}</p>}
+
+        {/* create + join */}
+        <div className="ht-rule my-1" aria-hidden="true" />
+        <div className="flex gap-2">
+          <input value={name} onChange={e => setName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && create()}
+            placeholder="Name a new shared archive…"
+            className="flex-1 min-w-0 bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400" />
+          <button onClick={create} disabled={busy || !name.trim()}
+            className="ht-display text-[10px] uppercase px-3 py-1.5 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100 flex-shrink-0 whitespace-nowrap">
+            Bind
+          </button>
+        </div>
+        <div className="flex gap-2">
+          <input value={code} onChange={e => setCode(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && join()}
+            placeholder="Have a code? Join an archive…"
+            className="flex-1 min-w-0 bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400" />
+          <button onClick={join} disabled={busy || !code.trim()}
+            className="ht-display text-[10px] uppercase px-3 py-1.5 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100 flex-shrink-0 whitespace-nowrap">
+            Join
+          </button>
+        </div>
+        {joinErr && <p className="text-[12px] text-pink-300">{joinErr}</p>}
+      </div>
+    </>
+  );
+}
+
+// One expanded library: roster (avatars + handles + roles), an invite-code
+// generator (any member), and owner-only rename/remove/delete + member Leave.
+function LibraryDetail({ lib, me, onChanged }) {
+  const members = lib.library_members || [];
+  const isOwner = members.find(m => m.user_id === me)?.role === 'owner';
+  const [roster, setRoster] = useState(null);
+  const [invite, setInvite] = useState(null); // { code, expires_at }
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const loadRoster = async () => {
+    const { data: mem, error } = await supabase
+      .from('library_members').select('user_id, role').eq('library_id', lib.id);
+    if (error) { setErr('Could not load the roster.'); return; }
+    const ids = (mem || []).map(m => m.user_id);
+    const [{ data: profs }, { data: avs }] = await Promise.all([
+      supabase.from('profiles').select('user_id, username').in('user_id', ids),
+      supabase.from('avatars').select('user_id, gender, hair_color, skin_tone, robe_color').in('user_id', ids),
+    ]);
+    const pBy = Object.fromEntries((profs || []).map(p => [p.user_id, p]));
+    const aBy = Object.fromEntries((avs || []).map(a => [a.user_id, a]));
+    setRoster((mem || []).map(m => ({
+      ...m, username: pBy[m.user_id]?.username, av: aBy[m.user_id],
+    })));
+  };
+  useEffect(() => { loadRoster(); }, [lib.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const makeInvite = async () => {
+    setBusy(true); setErr(''); setCopied(false);
+    const { data, error } = await supabase.from('library_invites')
+      .insert({ library_id: lib.id, created_by: me })
+      .select('code, expires_at').single();
+    setBusy(false);
+    if (error) { setErr('Could not create an invite.'); return; }
+    setInvite(data);
+  };
+
+  const copyCode = async () => {
+    try { await navigator.clipboard.writeText(invite.code); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { /* clipboard blocked — the code is shown for manual copy */ }
+  };
+
+  const removeMember = async (uid) => {
+    if (!window.confirm('Remove this member from the archive?')) return;
+    const { error } = await supabase.from('library_members')
+      .delete().eq('library_id', lib.id).eq('user_id', uid);
+    if (error) { setErr('Could not remove that member.'); return; }
+    loadRoster();
+  };
+
+  const leave = async () => {
+    if (!window.confirm('Leave this shared archive?')) return;
+    const { error } = await supabase.from('library_members')
+      .delete().eq('library_id', lib.id).eq('user_id', me);
+    if (error) { setErr('Could not leave.'); return; }
+    onChanged();
+  };
+
+  const rename = async () => {
+    const next = window.prompt('Rename this archive', lib.name);
+    if (next == null || !next.trim()) return;
+    const { error } = await supabase.from('libraries').update({ name: next.trim() }).eq('id', lib.id);
+    if (error) { setErr('Could not rename.'); return; }
+    onChanged();
+  };
+
+  const destroy = async () => {
+    if (!window.confirm('Delete this shared archive for everyone? This cannot be undone.')) return;
+    const { error } = await supabase.from('libraries').delete().eq('id', lib.id);
+    if (error) { setErr('Could not delete the archive.'); return; }
+    onChanged();
+  };
+
+  return (
+    <div className="px-3 pb-3 pt-1 bg-purple-950/30 border-t border-purple-700/30 space-y-2.5">
+      {/* roster */}
+      {roster === null ? (
+        <p className="text-[12px] text-purple-400/60 italic pt-1">Gathering the keepers…</p>
+      ) : (
+        <div className="space-y-1.5 pt-1">
+          {roster.map(m => (
+            <div key={m.user_id} className="flex items-center gap-2">
+              <MiniAvatar av={m.av} />
+              <span className="flex-1 min-w-0 truncate text-[13px] text-purple-100">
+                @{m.username || 'reader'}{m.user_id === me ? ' (you)' : ''}
+              </span>
+              <span className={`ht-display text-[8px] uppercase tracking-widest px-1.5 py-0.5 rounded-sm ${
+                m.role === 'owner' ? 'bg-pink-500/20 text-pink-200' : 'bg-purple-800/50 text-purple-300'
+              }`}>{m.role}</span>
+              {isOwner && m.user_id !== me && (
+                <button onClick={() => removeMember(m.user_id)}
+                  className="text-purple-400/60 hover:text-pink-300 text-sm px-1" aria-label="Remove member">✕</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* invite */}
+      {invite ? (
+        <div className="rounded-sm border border-pink-400/30 bg-purple-950/50 p-2.5">
+          <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1">Invite code</p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-pink-200 text-lg tracking-widest">{invite.code}</code>
+            <button onClick={copyCode}
+              className="ht-display text-[9px] uppercase px-2 py-1 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100">
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <p className="text-[11px] text-purple-400/60 italic mt-1">
+            Share it with a fellow reader · expires {new Date(invite.expires_at).toLocaleDateString()}
+          </p>
+        </div>
+      ) : (
+        <button onClick={makeInvite} disabled={busy}
+          className="ht-display text-[10px] uppercase px-3 py-1.5 rounded-sm border border-purple-700/50 hover:border-pink-400/60 text-purple-200 disabled:opacity-40">
+          ✦ Invite a fellow reader
+        </button>
+      )}
+
+      {/* owner / member actions */}
+      <div className="flex flex-wrap gap-2 pt-0.5">
+        {isOwner ? (
+          <>
+            <button onClick={rename}
+              className="ht-display text-[9px] uppercase px-2.5 py-1 rounded-sm text-purple-300 hover:text-pink-200">Rename</button>
+            <button onClick={destroy}
+              className="ht-display text-[9px] uppercase px-2.5 py-1 rounded-sm text-pink-400/80 hover:text-pink-300">Delete archive</button>
+          </>
+        ) : (
+          <button onClick={leave}
+            className="ht-display text-[9px] uppercase px-2.5 py-1 rounded-sm text-pink-400/80 hover:text-pink-300">Leave archive</button>
+        )}
+      </div>
+      {err && <p className="text-[12px] text-pink-300">{err}</p>}
+    </div>
+  );
+}
+
+function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
   const [draft, setDraft] = useState({ ...avatar });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -2287,13 +2700,8 @@ function AvatarPage({ avatar, books, session, onSave, onClose }) {
             <path d="M34 29 L36 24 L40 27 L44 22 L48 27 L52 24 L54 29Z" fill="none" stroke="#f0a6e0" strokeWidth="1.2" strokeLinejoin="round"/>
           </svg>
         </div>
-        <input
-          aria-label="Avatar name"
-          value={draft.name}
-          onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-          className="bg-transparent border-b border-pink-400/40 focus:border-pink-400 focus:outline-none text-pink-200 ht-display text-sm text-center px-2 py-1 w-52"
-        />
-        <p className="text-[11px] text-purple-400/60 italic mt-1">click name to edit</p>
+        <div className="ht-display text-base text-pink-200">@{username || '…'}</div>
+        <p className="text-[11px] text-purple-400/60 italic mt-1">your handle · how readers know you in shared archives</p>
       </div>
 
       {/* customiser */}
@@ -2343,6 +2751,9 @@ function AvatarPage({ avatar, books, session, onSave, onClose }) {
           </div>
         ))}
       </div>
+
+      {/* shared archives */}
+      <SharedArchives session={session} />
 
       {/* mini shelf */}
       <h3 className="ht-display text-xs uppercase tracking-widest text-purple-300/70 mb-2">Your Shelf</h3>
