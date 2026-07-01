@@ -1597,7 +1597,62 @@ export default function Hushthorn() {
   const sorted = sortBooks(filtered, sortKey);
   const gridBooks = sorted.filter((b) => matchesQuery(b, query));
 
+  // FIELD_MAP maps in-memory book fields → `books` columns. Hoisted so both the
+  // personal path and the shared-group path reuse the same mapping. Personal
+  // marks (overall/smut/read/progress) intentionally live here for personal
+  // books; for shared books the group path is RESTRICTED to non-personal keys
+  // only (see GROUP_KEYS) so a shared `books` row never carries anyone's marks.
+  const FIELD_MAP = { coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', progress: 'progress' };
+  // Split keys for the shared-book branch (the no-leak rule).
+  const PERSONAL_KEYS = ['read', 'overall', 'smut', 'progress'];
+  const GROUP_KEYS = ['title', 'author', 'coverUrl', 'genres', 'formats'];
+
   const updateBook = async (id, patch) => {
+    // Shared-book branch: a book carrying `library_id` splits its patch into MY
+    // private reading state (book_personal_state) and group fields (the shared
+    // `books` row). Group writes are restricted to GROUP_KEYS so overall/smut/
+    // read/progress are NEVER written to a shared row (the core privacy rule).
+    // Personal books (no library_id) fall through to the unchanged path below.
+    const shared = sharedBooks.find(b => b.id === id);
+    if (shared && shared.library_id) {
+      // Auto-Read parity with the personal path: any format at 100% marks Read.
+      // Re-derive from MY merged state (which is what the shared book carries).
+      if ('progress' in patch && !patch.read && !shared.read) {
+        const merged = { ...shared, ...patch };
+        if (maxPercent(merged) >= 100) patch = { ...patch, read: true };
+      }
+
+      // 1) Personal marks → my book_personal_state row (PK conflict book_id,user_id).
+      const personal = Object.fromEntries(
+        PERSONAL_KEYS.filter(k => k in patch).map(k => [k, patch[k]])
+      );
+      if (Object.keys(personal).length) {
+        const { error } = await supabase.from('book_personal_state').upsert({
+          book_id: id,
+          user_id: session.user.id,
+          ...personal,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'book_id,user_id' });
+        if (error) { console.error('updateBook (personal_state):', error.message); return; }
+      }
+
+      // 2) Group fields → the shared `books` row, mapped via FIELD_MAP but
+      //    RESTRICTED to GROUP_KEYS only (never a personal mark).
+      const groupPatch = Object.fromEntries(
+        Object.entries(FIELD_MAP)
+          .filter(([k]) => GROUP_KEYS.includes(k) && k in patch)
+          .map(([k, col]) => [col, patch[k]])
+      );
+      if (Object.keys(groupPatch).length) {
+        const { error } = await supabase.from('books').update(groupPatch).eq('id', id);
+        if (error) { console.error('updateBook (shared group):', error.message); return; }
+      }
+
+      // Optimistically mirror the change onto the open detail/card.
+      setSharedBooks(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
+      return;
+    }
+
     // Handle notes diff — detects adds and/or deletes by comparing ID sets
     if ('notes' in patch) {
       const current = books.find(b => b.id === id);
@@ -1635,8 +1690,8 @@ export default function Hushthorn() {
       if (maxPercent(merged) >= 100) patch = { ...patch, read: true };
     }
 
-    // Handle book field changes
-    const FIELD_MAP = { coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', progress: 'progress' };
+    // Handle book field changes (personal path — uses the full FIELD_MAP,
+    // hoisted above; personal marks legitimately live on the personal row).
     const dbPatch = Object.fromEntries(
       Object.entries(FIELD_MAP).filter(([k]) => k in patch).map(([k, v]) => [v, patch[k]])
     );
@@ -1652,6 +1707,65 @@ export default function Hushthorn() {
     if (error) { console.error('removeBook:', error.message); return; }
     setBooks(prev => prev.filter(b => b.id !== id));
     setActiveId(null);
+  };
+
+  // Per-format "I own" toggle for a SHARED book. Writes only MY book_ownership
+  // rows (PK book_id,user_id,format); never touches another member's ownership.
+  //   own === true  → insert my (book,me,format) row (ignore 23505 duplicate),
+  //                   and add `format` to books.formats if missing so
+  //                   ProgressEditor renders that format's row for everyone.
+  //   own === false → delete my (book,me,format) row.
+  // Local state: patch the book's `ownership` array + re-derive `shelf`
+  // (>=1 owner → 'owned', 0 owners → 'wishlist'). Defensive: every Supabase
+  // call logs its error and returns rather than throwing to the UI.
+  const toggleOwnership = async (bookId, format, own) => {
+    if (!session) return;
+    const me = session.user.id;
+    const book = sharedBooks.find(b => b.id === bookId);
+    if (!book) return;
+
+    if (own) {
+      const { error } = await supabase.from('book_ownership').insert({
+        book_id: bookId,
+        user_id: me,
+        format,
+      });
+      // 23505 = unique_violation: the row already exists → treat as success (idempotent).
+      if (error && error.code !== '23505') { console.error('toggleOwnership (insert):', error.message); return; }
+
+      // Ensure the format is present in the shared book's group-level formats
+      // union so ProgressEditor shows that format's row.
+      const currentFormats = book.formats || [];
+      if (!currentFormats.includes(format)) {
+        const nextFormats = [...currentFormats, format];
+        const { error: fErr } = await supabase.from('books').update({ formats: nextFormats }).eq('id', bookId);
+        if (fErr) { console.error('toggleOwnership (formats union):', fErr.message); return; }
+      }
+    } else {
+      const { error } = await supabase.from('book_ownership')
+        .delete()
+        .eq('book_id', bookId)
+        .eq('user_id', me)
+        .eq('format', format);
+      if (error) { console.error('toggleOwnership (delete):', error.message); return; }
+    }
+
+    // Optimistic local update: mutate MY ownership entries, add the format to the
+    // group union on insert, and re-derive `shelf` from the resulting ownership.
+    setSharedBooks(prev => prev.map(b => {
+      if (b.id !== bookId) return b;
+      const others = (b.ownership || []).filter(o => !(o.user_id === me && o.format === format));
+      const nextOwnership = own ? [...others, { user_id: me, format }] : others;
+      const nextFormats = own && !(b.formats || []).includes(format)
+        ? [...(b.formats || []), format]
+        : b.formats;
+      return {
+        ...b,
+        ownership: nextOwnership,
+        formats: nextFormats,
+        shelf: nextOwnership.length ? 'owned' : 'wishlist',
+      };
+    }));
   };
 
   // Lazy backfill: persist one book's sampled spine color and mirror it locally
