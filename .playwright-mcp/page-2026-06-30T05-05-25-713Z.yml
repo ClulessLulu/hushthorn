@@ -1,0 +1,21 @@
+- generic [ref=e2]:
+  - img [ref=e3]
+  - heading "Hushthorn" [level=1] [ref=e8]
+  - paragraph [ref=e9]: a candlelit archive for the books you shouldn't read in public
+  - generic [ref=e10]:
+    - button "Sign in" [ref=e11] [cursor=pointer]
+    - button "Create account" [ref=e12] [cursor=pointer]
+  - generic [ref=e13]:
+    - generic [ref=e14]:
+      - generic [ref=e15]: Email
+      - textbox "Email" [ref=e16]:
+        - /placeholder: your@grimoire.com
+    - generic [ref=e17]:
+      - generic [ref=e18]: Password
+      - textbox "Password" [ref=e19]:
+        - /placeholder: ••••••••••••
+    - button "Enter the Archive" [ref=e21] [cursor=pointer]
+  - generic [ref=e24]: or
+  - button "Continue with Google" [ref=e26] [cursor=pointer]:
+    - img [ref=e27]
+    - text: Continue with Google
