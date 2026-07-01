@@ -1648,6 +1648,39 @@ export default function Hushthorn() {
         if (error) { console.error('updateBook (shared group):', error.message); return; }
       }
 
+      // 3) Notes are per-user and private even on a shared book (the `notes`
+      //    table carries user_id; RLS is owner-only). A note on a shared book is
+      //    just book_id=<shared id>, user_id=me — same shape as a personal note.
+      //    Source "current" from sharedBooks (which carries MY loaded notes),
+      //    then diff by note-id sets exactly like the personal path below.
+      if ('notes' in patch) {
+        const current = sharedBooks.find(b => b.id === id);
+        if (current) {
+          const currentIds = new Set((current.notes || []).map(n => n.id));
+          const patchIds = new Set((patch.notes || []).map(n => n.id));
+          const added = (patch.notes || []).find(n => !currentIds.has(n.id));
+          const removed = (current.notes || []).find(n => !patchIds.has(n.id));
+          if (added) {
+            const { error } = await supabase.from('notes').insert({
+              id: added.id,
+              book_id: id,
+              user_id: session.user.id,
+              page: added.page,
+              is_quote: added.isQuote,
+              text: added.text,
+              is_voice: added.isVoice,
+              is_time: added.isTime ?? false,
+              date: added.date,
+            });
+            if (error) { console.error('updateBook (shared note insert):', error.message); return; }
+          }
+          if (removed) {
+            const { error } = await supabase.from('notes').delete().eq('id', removed.id);
+            if (error) { console.error('updateBook (shared note delete):', error.message); return; }
+          }
+        }
+      }
+
       // Optimistically mirror the change onto the open detail/card.
       setSharedBooks(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
       return;
