@@ -1881,6 +1881,86 @@ export default function Hushthorn() {
     if (book.shelf === 'owned') setActiveId(id);
   };
 
+  // Add a brand-new book directly into a shared archive (Task 4). Parallel to
+  // `addBook`, but for the shared case: the `books` row carries the library and
+  // the creator's id for provenance, and NEVER any personal marks — the no-leak
+  // rule. `overall/smut/read/progress` on a shared row stay at defaults; the
+  // adder's marks (if any) are ignored here. Ownership is recorded per selected
+  // format in `book_ownership`. This does NOT handle the "title already exists in
+  // the archive → merge" case — that is Task 5 (`moveBookIntoArchive`); a
+  // duplicate title landing here is left as a separate shared row for now.
+  //
+  // `myFormats` is the set of editions the adder owns; it must include at least
+  // 'print'. Defensive throughout — like `addBook`, this never throws to the UI.
+  const addBookToArchive = async (book, libraryId, myFormats) => {
+    if (!session || !libraryId) { console.error('addBookToArchive: missing session or libraryId'); return; }
+    const me = session.user.id;
+    // Normalize formats to the allowed set; guarantee 'print' is present.
+    const allowed = ['print', 'ebook', 'audio'];
+    let formats = Array.from(new Set((myFormats || []).filter(f => allowed.includes(f))));
+    if (!formats.includes('print')) formats = ['print', ...formats];
+
+    const id = crypto.randomUUID();
+    // 1) Insert the shared books row — group fields only, marks at defaults.
+    const { error: bErr } = await supabase.from('books').insert({
+      id,
+      library_id: libraryId,
+      user_id: me,                 // creator / provenance only; access is by library policy
+      title: book.title,
+      author: book.author,
+      year: book.year ?? null,
+      cover_url: book.coverUrl,
+      genres: book.genres,
+      spine_color: book.spineColor ?? null,
+      formats,
+      // The no-leak rule: a shared row carries NO personal marks.
+      overall: 0,
+      smut: 0,
+      read: false,
+      progress: {},
+    });
+    if (bErr) { console.error('addBookToArchive (book):', bErr.message); return; }
+
+    // 2) Insert one ownership row per selected format (idempotent on 23505).
+    const { error: oErr } = await supabase.from('book_ownership').insert(
+      formats.map(format => ({ book_id: id, user_id: me, format }))
+    );
+    if (oErr && oErr.code !== '23505') { console.error('addBookToArchive (ownership):', oErr.message); }
+
+    // 3) Optimistically prepend to the shelf only if this archive is active.
+    //    Build the shared MergedBook shape (Task 2): my marks at defaults, my
+    //    ownership listed, shelf derived as 'owned' (>=1 owner), no reveals/notes,
+    //    and reuse the roster the archive already loaded when available.
+    if (currentLibraryId === libraryId) {
+      const members = sharedBooks[0]?.members || [];
+      const merged = {
+        id,
+        title: book.title,
+        author: book.author,
+        year: book.year ?? null,
+        coverUrl: book.coverUrl,
+        genres: book.genres || [],
+        formats,
+        spineColor: book.spineColor ?? null,
+        library_id: libraryId,
+        // My private state — defaults; the shared row's columns are ignored.
+        read: false,
+        overall: 0,
+        smut: 0,
+        progress: {},
+        notes: [],
+        shelf: 'owned',
+        ownership: formats.map(f => ({ user_id: me, format: f })),
+        reveals: [],
+        members,
+      };
+      setSharedBooks(prev => [merged, ...prev]);
+    }
+    setAddOpen(false);
+    // Open the detail like `addBook` does for owned books (owners always own here).
+    setActiveId(id);
+  };
+
   const shelfTabs = [
     { key: "all", label: "All" },
     { key: "owned", label: "Owned" },
@@ -2079,7 +2159,7 @@ export default function Hushthorn() {
         )}
       </main>
 
-      {addOpen && <AddBookModal onAdd={addBook} onAddMany={importBooks} onClose={() => setAddOpen(false)} session={session} books={books} />}
+      {addOpen && <AddBookModal onAdd={addBook} onAddToArchive={addBookToArchive} currentLibraryId={currentLibraryId} onAddMany={importBooks} onClose={() => setAddOpen(false)} session={session} books={shelfBooks} />}
       {avatarOpen && (
         <AvatarPage
           avatar={avatar}
@@ -3244,7 +3324,24 @@ function AuthPage() {
 
 /* ── add book modal ────────────────────────────────────────── */
 
-function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
+function AddBookModal({ onAdd, onAddToArchive, currentLibraryId = null, onAddMany, onClose, session, books = [] }) {
+  // Adding into a shared archive (Task 4) vs. the personal library. When shared,
+  // the confirm routes to `onAddToArchive(book, myFormats)` and a small format
+  // chooser is shown; otherwise behaviour is exactly as today via `onAdd`.
+  const inArchive = currentLibraryId != null;
+  // Which editions the adder owns — Print is always on (the floor for an archive add).
+  const [myFormats, setMyFormats] = useState(['print']);
+  const toggleFormat = (f) => {
+    if (f === 'print') return; // Print is the required minimum; not toggleable.
+    setMyFormats((prev) => prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]);
+  };
+  // Route a confirmed book to the archive add (formats) or the personal add.
+  // `shelf` is meaningful only for personal adds; shared shelf is derived from
+  // ownership, so it is dropped on the archive path.
+  const commitAdd = (book) => {
+    if (inArchive) onAddToArchive(book, currentLibraryId, myFormats);
+    else onAdd(book);
+  };
   const [mode, setMode] = useState(() => {
     // Mobile (coarse pointer + narrow viewport) defaults to Scan; web to Search.
     if (typeof window !== "undefined" && window.matchMedia &&
@@ -3385,10 +3482,10 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
     };
     // Already in the archive? Confirm before adding a separate copy.
     if (existingByTitle(doc.title)) {
-      setPendingDup({ title: doc.title, run: () => onAdd(book) });
+      setPendingDup({ title: doc.title, run: () => commitAdd(book) });
       return;
     }
-    onAdd(book);
+    commitAdd(book);
   };
 
   // Fetch a Google Books cover for a title — runs regardless of whether Claude succeeds.
@@ -3806,7 +3903,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
     const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
     const pc = manual.pageCount;
     const validPageCount = (typeof pc === "number" && Number.isInteger(pc) && pc > 0) ? pc : null;
-    onAdd({
+    commitAdd({
       title: manual.title.trim(),
       author: manual.author.trim() || "Unknown author",
       year: null,
@@ -3849,6 +3946,37 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [] }) {
         <ModeTab active={mode === "search"} onClick={() => setMode("search")}>Scour the grimoire</ModeTab>
         <ModeTab active={mode === "scan"} onClick={() => setMode("scan")}>Scan or upload</ModeTab>
       </div>
+
+      {/* Archive add: which editions do you own? Print is the required floor;
+          Ebook/Audio are opt-in. Audio stays cyan per the design system. Shown
+          only when inscribing into a shared archive. */}
+      {inArchive && (
+        <div className="mb-4">
+          <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1.5">Which formats do you own?</p>
+          <div className="flex gap-2 flex-wrap">
+            {[
+              { f: 'print', label: '📖 Print', on: 'border-pink-400/70 bg-pink-400/10 text-pink-200', off: 'border-purple-700/40 text-purple-400 hover:border-purple-500/60' },
+              { f: 'ebook', label: '📱 Ebook', on: 'border-pink-400/70 bg-pink-400/10 text-pink-200', off: 'border-purple-700/40 text-purple-400 hover:border-purple-500/60' },
+              { f: 'audio', label: '🎧 Audio', on: 'border-cyan-400/70 bg-cyan-400/10 text-cyan-200', off: 'border-purple-700/40 text-purple-400 hover:border-purple-500/60' },
+            ].map(({ f, label, on, off }) => {
+              const active = myFormats.includes(f);
+              const locked = f === 'print';
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => toggleFormat(f)}
+                  aria-pressed={active}
+                  disabled={locked}
+                  className={`ht-display text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-sm border transition-colors ${active ? on : off} ${locked ? 'cursor-default' : ''}`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {mode === "search" ? (
         <>
