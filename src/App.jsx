@@ -1234,6 +1234,15 @@ function Meter({ value, onChange, Icon, label, readOnly = false, size }) {
 export default function Hushthorn() {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
+  // Shared-library archive switcher (Phase 2). `currentLibraryId` null = the
+  // personal library (unchanged behaviour). `archives` is the list of shared
+  // archives the user belongs to, each with the user's own membership role.
+  // No UI sets `currentLibraryId` yet (Task 6 wires the switcher), so the app
+  // renders exactly as before until then.
+  const [currentLibraryId, setCurrentLibraryId] = useState(null);
+  const [archives, setArchives] = useState([]);
+  // Books loaded for the active shared archive (empty while personal).
+  const [sharedBooks, setSharedBooks] = useState([]);
   // Identity. `profile` is the user's claimed username row (or null until claimed).
   // `profileReady` gates the UsernameGate so the app never flashes before we know.
   const [profile, setProfile] = useState(null);
@@ -1270,18 +1279,24 @@ export default function Hushthorn() {
     if (!session) {
       setBooks([]); setDataLoading(false);
       setProfile(null); setProfileReady(false);
+      setArchives([]); setSharedBooks([]); setCurrentLibraryId(null);
       return;
     }
     setDataLoading(true);
     const uid = session.user.id;
     Promise.all([
-      supabase.from('books').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
+      // Personal shelf only — `.is('library_id', null)` keeps shared-archive
+      // rows (whose creator is this user) out of the personal library.
+      supabase.from('books').select('*').eq('user_id', uid).is('library_id', null).order('created_at', { ascending: false }),
       supabase.from('notes').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
       supabase.from('avatars').select('*').eq('user_id', uid).maybeSingle(),
       supabase.from('profiles').select('username').eq('user_id', uid).maybeSingle(),
-    ]).then(([{ data: booksData, error: bErr }, { data: notesData, error: nErr }, { data: avatarData }, { data: profileData }]) => {
+      // Shared archives this user belongs to, with the user's own role.
+      supabase.from('libraries').select('id,name,library_members(user_id,role)'),
+    ]).then(([{ data: booksData, error: bErr }, { data: notesData, error: nErr }, { data: avatarData }, { data: profileData }, { data: libsData, error: lErr }]) => {
       if (bErr) console.error('books fetch:', bErr.message);
       if (nErr) console.error('notes fetch:', nErr.message);
+      if (lErr) console.error('libraries fetch:', lErr.message);
       const notesByBook = {};
       for (const n of (notesData || [])) {
         if (!notesByBook[n.book_id]) notesByBook[n.book_id] = [];
@@ -1309,9 +1324,166 @@ export default function Hushthorn() {
         pref_sort: avatarData.pref_sort ?? 'recent',
       });
       setProfile(profileData || null);
+      // Map libraries → [{ id, name, role }] where role is THIS user's
+      // membership role. A library with no matching membership row is skipped
+      // defensively (shouldn't happen under RLS, but never a dead end).
+      setArchives((libsData || []).reduce((acc, lib) => {
+        const mine = (lib.library_members || []).find(m => m.user_id === uid);
+        if (mine) acc.push({ id: lib.id, name: lib.name, role: mine.role });
+        return acc;
+      }, []));
     }).catch(err => console.error('data load:', err))
       .finally(() => { setDataLoading(false); setProfileReady(true); });
   }, [session]);
+
+  // ── shared archive read/merge layer (Phase 2, Task 2) ──────────────
+  // Load one shared archive's books and merge each row into the app's
+  // in-memory book shape so Meter/ProgressEditor/CardProgress/spine need no
+  // change. A shared MergedBook carries the group fields PLUS: library_id,
+  // ownership[], reveals[], members[], and my private read/overall/smut/progress
+  // sourced from book_personal_state (defaults if I have no row). `shelf` is
+  // derived from ownership. Every Supabase call is defensive: errors are logged
+  // and treated as empty, so a partial failure degrades to a thinner shelf
+  // rather than throwing — never a dead end.
+  const loadArchiveBooks = async (uid, libraryId) => {
+    if (!uid || !libraryId) return [];
+
+    const { data: rows, error: rErr } = await supabase
+      .from('books').select('*').eq('library_id', libraryId)
+      .order('created_at', { ascending: false });
+    if (rErr) console.error('archive books fetch:', rErr.message);
+    const bookRows = rows || [];
+    const ids = bookRows.map(b => b.id);
+    if (ids.length === 0) return [];
+
+    const [
+      { data: own, error: oErr },
+      { data: ps, error: pErr },
+      { data: mem, error: mErr },
+      { data: myNotes, error: nErr },
+    ] = await Promise.all([
+      supabase.from('book_ownership').select('book_id,user_id,format').in('book_id', ids),
+      // RLS returns MY rows plus any revealed co-member rows (opt-in policy).
+      supabase.from('book_personal_state').select('*').in('book_id', ids),
+      // Roster. NOTE: `library_members` has no declared FK to `profiles`/`avatars`
+      // (both key on `user_id → auth.users`), so PostgREST cannot embed them.
+      // Reuse the Phase 1 LibraryDetail pattern: load members, then fetch
+      // profiles + avatars by user_id in a second round.
+      supabase.from('library_members').select('user_id,role').eq('library_id', libraryId),
+      // My notes only, for these shared books — same shape as the personal load.
+      supabase.from('notes').select('*').eq('user_id', uid).in('book_id', ids)
+        .order('created_at', { ascending: false }),
+    ]);
+    if (oErr) console.error('ownership fetch:', oErr.message);
+    if (pErr) console.error('personal_state fetch:', pErr.message);
+    if (mErr) console.error('roster fetch:', mErr.message);
+    if (nErr) console.error('archive notes fetch:', nErr.message);
+
+    const ownRows = own || [];
+    const psRows = ps || [];
+    const memRows = mem || [];
+
+    // Second round: profiles + avatars for the roster, by user_id (Phase 1 idiom).
+    const memberIds = memRows.map(m => m.user_id);
+    let profsData = [];
+    let avsData = [];
+    if (memberIds.length) {
+      const [{ data: profs, error: prErr }, { data: avs, error: avErr }] = await Promise.all([
+        supabase.from('profiles').select('user_id, username').in('user_id', memberIds),
+        supabase.from('avatars').select('user_id, gender, hair_color, skin_tone, robe_color').in('user_id', memberIds),
+      ]);
+      if (prErr) console.error('roster profiles fetch:', prErr.message);
+      if (avErr) console.error('roster avatars fetch:', avErr.message);
+      profsData = profs || [];
+      avsData = avs || [];
+    }
+    const profBy = Object.fromEntries(profsData.map(p => [p.user_id, p]));
+    const avBy = Object.fromEntries(avsData.map(a => [a.user_id, a]));
+
+    // roster → [{ user_id, username, av }]
+    const members = memRows.map(m => {
+      const a = avBy[m.user_id];
+      return {
+        user_id: m.user_id,
+        username: profBy[m.user_id]?.username,
+        av: a
+          ? {
+              gender: a.gender,
+              hair_color: a.hair_color,
+              skin_tone: a.skin_tone,
+              robe_color: a.robe_color,
+            }
+          : null,
+      };
+    });
+
+    // my notes, grouped by book (personal-load shape).
+    const notesByBook = {};
+    for (const n of (myNotes || [])) {
+      if (!notesByBook[n.book_id]) notesByBook[n.book_id] = [];
+      notesByBook[n.book_id].push({
+        id: n.id, page: n.page, isQuote: n.is_quote,
+        text: n.text, isVoice: n.is_voice, date: n.date, isTime: n.is_time,
+      });
+    }
+
+    return bookRows.map(row => {
+      const mine = psRows.find(p => p.book_id === row.id && p.user_id === uid) || null;
+      const reveals = psRows
+        .filter(p => p.book_id === row.id && p.user_id !== uid)
+        .map(p => ({
+          user_id: p.user_id,
+          overall: p.overall ?? 0,
+          smut: p.smut ?? 0,
+          progress: (p.progress && typeof p.progress === 'object') ? p.progress : {},
+          read: !!p.read,
+        }));
+      const ownership = ownRows
+        .filter(o => o.book_id === row.id)
+        .map(o => ({ user_id: o.user_id, format: o.format }));
+
+      return {
+        id: row.id,
+        title: row.title,
+        author: row.author,
+        year: row.year,
+        coverUrl: row.cover_url,
+        genres: row.genres || [],
+        formats: row.formats || ['print'],
+        spineColor: row.spine_color,
+        library_id: row.library_id,
+        // MY private state (defaults when I have no book_personal_state row) —
+        // the shared `books` row's own overall/smut/progress/read are ignored
+        // (the no-leak rule).
+        read: mine ? !!mine.read : false,
+        overall: mine ? (mine.overall ?? 0) : 0,
+        smut: mine ? (mine.smut ?? 0) : 0,
+        progress: (mine && mine.progress && typeof mine.progress === 'object') ? mine.progress : {},
+        notes: notesByBook[row.id] || [],
+        // derived: any owner → owned, else the shared wishlist.
+        shelf: ownership.length ? 'owned' : 'wishlist',
+        ownership,
+        reveals,
+        members,
+      };
+    });
+  };
+
+  // Load the active archive's books when switched; clear when personal (null).
+  // Nothing sets `currentLibraryId` yet, so this is inert until Task 6.
+  useEffect(() => {
+    if (currentLibraryId == null || !session) { setSharedBooks([]); return; }
+    let cancelled = false;
+    loadArchiveBooks(session.user.id, currentLibraryId)
+      .then(merged => { if (!cancelled) setSharedBooks(merged); })
+      .catch(err => { console.error('loadArchiveBooks:', err); if (!cancelled) setSharedBooks([]); });
+    return () => { cancelled = true; };
+  }, [currentLibraryId, session]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Active shelf source: personal library (null) → `books`; else the loaded
+  // shared archive. Since `currentLibraryId` stays null until Task 6 wires the
+  // switcher, this is exactly `books` today — the personal path is unchanged.
+  const shelfBooks = currentLibraryId === null ? books : sharedBooks;
 
   const [shelfFilter, setShelfFilter] = useState("all");
   const [activeId, setActiveId] = useState(null);
@@ -1408,9 +1580,9 @@ export default function Hushthorn() {
     }
   };
 
-  const activeBook = books.find((b) => b.id === activeId) || null;
+  const activeBook = shelfBooks.find((b) => b.id === activeId) || null;
 
-  const filtered = books.filter((b) => {
+  const filtered = shelfBooks.filter((b) => {
     if (shelfFilter === "all") return true;
     if (shelfFilter === "owned") return b.shelf === "owned";
     if (shelfFilter === "wishlist") return b.shelf === "wishlist";
