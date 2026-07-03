@@ -2060,22 +2060,29 @@ export default function Hushthorn() {
 
     if (!existing) {
       // ── Case A: convert the personal row in place ──────────────────────
-      // A1) Flip it into the archive.
-      const { error: mErr } = await supabase.from('books')
-        .update({ library_id: libraryId }).eq('id', bookId);
-      if (mErr) { console.error('moveBookIntoArchive (convert library_id):', mErr.message); return; }
+      // Order matters for the no-leak rule: a shared `books` row must carry NO
+      // personal marks. We migrate marks WHILE the row is still personal
+      // (owner-only), then flip+reset in ONE atomic UPDATE so there is never an
+      // instant where the row is shared AND still carries my marks. On partial
+      // failure the row stays personal with marks intact (recoverable, no leak),
+      // and re-running no-ops because the personal-row load requires library_id
+      // IS NULL (still true).
 
-      // A2) Migrate my marks into MY personal_state (only if meaningful).
+      // A1) Migrate my marks into MY personal_state (only if meaningful) — done
+      //     first, while the row is still owner-only, so nothing leaks.
       if (!(await upsertMyState(bookId))) return;
 
-      // A3) RESET the row's mark columns to defaults — the no-leak rule: a shared
-      //     row visible to every member must carry no one's personal marks.
-      const { error: zErr } = await supabase.from('books')
-        .update({ overall: 0, smut: 0, read: false, progress: {} })
+      // A2) Flip into the archive AND reset the mark columns in a SINGLE update.
+      //     Because it is one statement, at the instant library_id is set the
+      //     marks are already zeroed — no leak window.
+      const { error: mErr } = await supabase.from('books')
+        .update({ library_id: libraryId, overall: 0, smut: 0, read: false, progress: {} })
         .eq('id', bookId);
-      if (zErr) { console.error('moveBookIntoArchive (reset marks):', zErr.message); return; }
+      if (mErr) { console.error('moveBookIntoArchive (convert+reset):', mErr.message); return; }
 
-      // A4) Record my ownership per format (idempotent).
+      // A3) Record my ownership per format (idempotent). MUST come AFTER the
+      //     flip: the book_ownership insert RLS requires the book to already be
+      //     in one of my libraries; inserting while still personal is denied.
       if (!(await insertMyOwnership(bookId))) return;
     } else {
       // ── Case B: merge into the existing shared row ─────────────────────
