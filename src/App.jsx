@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Fragment } from "react";
 import Papa from "papaparse";
 import { supabase } from './lib/supabase';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
@@ -1802,10 +1802,16 @@ export default function Hushthorn() {
     setBooks(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
   };
 
+  // Delete a book row. For a SHARED book this is a group action — deleting the
+  // shared `books` row cascades ownership + everyone's personal_state (schema),
+  // so it leaves the archive for every member. The DetailPanel confirms this and
+  // steers a user who only wants to drop their own copy toward the "I own"
+  // toggles instead. Update whichever local list holds the book.
   const removeBook = async (id) => {
     const { error } = await supabase.from('books').delete().eq('id', id);
     if (error) { console.error('removeBook:', error.message); return; }
     setBooks(prev => prev.filter(b => b.id !== id));
+    setSharedBooks(prev => prev.filter(b => b.id !== id));
     setActiveId(null);
   };
 
@@ -2427,6 +2433,7 @@ export default function Hushthorn() {
                   )}
                 </div>
                 <CardProgress book={b} />
+                {b.library_id && <SharedCardBlock book={b} meId={session.user.id} />}
               </button>
             ))}
           </div>
@@ -2450,6 +2457,7 @@ export default function Hushthorn() {
           onClose={() => setActiveId(null)}
           onUpdate={(patch) => updateBook(activeBook.id, patch)}
           onRemove={() => removeBook(activeBook.id)}
+          onToggleOwnership={toggleOwnership}
           session={session}
           archives={archives}
           onMoveToArchive={moveBookIntoArchive}
@@ -3151,10 +3159,14 @@ function LibraryDetail({ lib, me, onChanged }) {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // Per-archive reveal opt-in (Phase 2). null = not yet loaded; reflects MY
+  // library_members.share_reading for this archive.
+  const [shareReading, setShareReading] = useState(null);
+  const [shareBusy, setShareBusy] = useState(false);
 
   const loadRoster = async () => {
     const { data: mem, error } = await supabase
-      .from('library_members').select('user_id, role').eq('library_id', lib.id);
+      .from('library_members').select('user_id, role, share_reading').eq('library_id', lib.id);
     if (error) { setErr('Could not load the roster.'); return; }
     const ids = (mem || []).map(m => m.user_id);
     const [{ data: profs }, { data: avs }] = await Promise.all([
@@ -3166,8 +3178,24 @@ function LibraryDetail({ lib, me, onChanged }) {
     setRoster((mem || []).map(m => ({
       ...m, username: pBy[m.user_id]?.username, av: aBy[m.user_id],
     })));
+    setShareReading(!!(mem || []).find(m => m.user_id === me)?.share_reading);
   };
   useEffect(() => { loadRoster(); }, [lib.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Flip MY per-archive reveal opt-in. Optimistic; reverts on error with a
+  // clear message. Only ever writes my own row (user_id = me).
+  const setArchiveShareReading = async (on) => {
+    if (shareBusy) return;
+    setShareBusy(true); setErr('');
+    setShareReading(on);
+    const { error } = await supabase.from('library_members')
+      .update({ share_reading: on }).eq('library_id', lib.id).eq('user_id', me);
+    setShareBusy(false);
+    if (error) {
+      setShareReading(!on); // revert
+      setErr('Could not change your sharing. Please try again.');
+    }
+  };
 
   const makeInvite = async () => {
     setBusy(true); setErr(''); setCopied(false);
@@ -3239,6 +3267,35 @@ function LibraryDetail({ lib, me, onChanged }) {
           ))}
         </div>
       )}
+
+      {/* per-archive reveal opt-in — share MY ratings & progress (never notes) */}
+      <div className="rounded-sm border border-purple-700/40 bg-purple-950/40 p-2.5">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={!!shareReading}
+          disabled={shareReading === null || shareBusy}
+          onClick={() => setArchiveShareReading(!shareReading)}
+          className="flex items-center gap-2.5 w-full text-left disabled:opacity-50"
+        >
+          <span
+            aria-hidden="true"
+            className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-sm border transition-colors ${
+              shareReading ? 'bg-pink-600/70 border-pink-400/70' : 'bg-purple-900/70 border-purple-700/60'
+            }`}
+          >
+            <span className={`inline-block h-3.5 w-3.5 rounded-sm bg-purple-50 transition-transform ${shareReading ? 'translate-x-4' : 'translate-x-0.5'}`} />
+          </span>
+          <span className="ht-display text-[10px] uppercase tracking-wide text-purple-100">
+            Share my ratings &amp; progress in this archive
+          </span>
+        </button>
+        <p className="text-[11px] text-purple-400/60 italic mt-1 leading-snug">
+          {shareReading
+            ? 'Fellow keepers can see your Verdict, Smoulder, and progress here. Your marginalia stays sealed.'
+            : 'Your marks stay hidden from co-keepers. Turn this on to let them read your Verdict, Smoulder, and progress — never your notes.'}
+        </p>
+      </div>
 
       {/* invite */}
       {invite ? (
@@ -5016,12 +5073,225 @@ function CoverEditor({ book, onUpdate, session }) {
   );
 }
 
+/* ── shared-archive card blocks (Phase 2) ─────────────────────
+   Rendered only for shared books (`book.library_id` set). "Who has it" =
+   one member row per roster entry with the editions that member owns; the
+   reveal grid = a rigid aligned grid of everyone's Verdict / Smoulder / %
+   where you always see your own marks and co-members appear only if they
+   opted in. Notes are NEVER rendered here (the reveal never carries them). */
+
+// Per-format ownership glyphs. Audio keeps the app's cyan-for-audio rule; the
+// glyph itself lives in a cyan span so the tint reads as "audio" even inline.
+const FORMAT_GLYPHS = [
+  { fmt: "print", glyph: "📖", label: "Print", cyan: false },
+  { fmt: "ebook", glyph: "📱", label: "Ebook", cyan: false },
+  { fmt: "audio", glyph: "🎧", label: "Audio", cyan: true },
+];
+
+// Resolve a member's display name from the roster (never leak a raw user_id).
+function memberName(members, userId, meId) {
+  const m = (members || []).find((x) => x.user_id === userId);
+  if (userId === meId) return "You";
+  return m?.username ? `@${m.username}` : "A reader";
+}
+
+// "Who has it" — one row per roster member: avatar · name · the format glyphs
+// that member owns (audio in cyan), or an italic "wants it" when they own none.
+function WhoHasIt({ members = [], ownership = [], meId }) {
+  if (!members.length) return null;
+  return (
+    <div className="mt-3">
+      <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400/80 mb-1.5">
+        Who has it
+      </p>
+      <div className="space-y-1">
+        {members.map((m) => {
+          const owned = FORMAT_GLYPHS.filter((g) =>
+            ownership.some((o) => o.user_id === m.user_id && o.format === g.fmt)
+          );
+          return (
+            <div key={m.user_id} className="flex items-center gap-2">
+              <MiniAvatar av={m.av} size={20} />
+              <span className="flex-1 min-w-0 truncate text-[13px] text-purple-100/90">
+                {m.user_id === meId ? "You" : `@${m.username || "reader"}`}
+              </span>
+              {owned.length ? (
+                <span className="flex items-center gap-1.5 text-[13px] leading-none">
+                  {owned.map((g) => (
+                    <span
+                      key={g.fmt}
+                      className={g.cyan ? "text-cyan-300" : ""}
+                      title={g.label}
+                      aria-label={g.label}
+                    >
+                      {g.glyph}
+                    </span>
+                  ))}
+                </span>
+              ) : (
+                <span className="text-[11px] italic text-purple-400/60">wants it</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// A single reveal row (name · Verdict swords · Smoulder candles · percent).
+// Marks render with the app's real Sword/Candle icons via readOnly Meter — never
+// the ⚔/🕯 unicode the sketch used. `progress`-driven percent reuses maxPercent.
+function RevealRow({ name, overall, smut, progress, read, formats }) {
+  const pct = read
+    ? 100
+    : maxPercent({ formats, progress: progress || {} });
+  return (
+    <>
+      <span className="text-[13px] italic text-purple-300/80 truncate">{name}</span>
+      <span className="flex items-center">
+        <Meter value={overall} Icon={Sword} label="Verdict" readOnly size={13} />
+      </span>
+      <span className="flex items-center">
+        <Meter value={smut} Icon={Candle} label="Smoulder" readOnly size={13} />
+      </span>
+      <span className="text-[12px] tabular-nums text-purple-300/70 text-right">{pct}%</span>
+    </>
+  );
+}
+
+// The reveal grid. First row is always You (your own marks + your progress).
+// Then every OTHER member: their marks if they appear in `reveals` (opted in),
+// else an italic "hasn't shared." Names join reveals[].user_id ↔ members[].
+function RevealGrid({ book, meId }) {
+  const members = book.members || [];
+  const reveals = book.reveals || [];
+  const others = members.filter((m) => m.user_id !== meId);
+  return (
+    <div className="mt-3 pt-2.5 border-t border-purple-700/25">
+      <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400/80 mb-1.5">
+        Ratings &amp; progress
+      </p>
+      <div
+        className="grid items-center gap-x-2.5 gap-y-1"
+        style={{ gridTemplateColumns: "minmax(52px,auto) auto auto 1fr" }}
+      >
+        {/* You — always shown, sourced from my merged private state. */}
+        <RevealRow
+          name="You"
+          overall={book.overall}
+          smut={book.smut}
+          progress={book.progress}
+          read={book.read}
+          formats={book.formats}
+        />
+        {others.map((m) => {
+          const r = reveals.find((x) => x.user_id === m.user_id);
+          if (r) {
+            return (
+              <RevealRow
+                key={m.user_id}
+                name={memberName(members, m.user_id, meId)}
+                overall={r.overall}
+                smut={r.smut}
+                progress={r.progress}
+                read={r.read}
+                formats={book.formats}
+              />
+            );
+          }
+          return (
+            <Fragment key={m.user_id}>
+              <span className="text-[13px] italic text-purple-300/80 truncate">
+                {memberName(members, m.user_id, meId)}
+              </span>
+              <span className="col-start-2 col-end-5 text-[12px] italic text-purple-400/60">
+                hasn&rsquo;t shared their marks
+              </span>
+            </Fragment>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// The full shared block for a card (Who has it + reveal grid). Renders nothing
+// for a personal book so callers can drop it in unconditionally if they prefer.
+function SharedCardBlock({ book, meId }) {
+  if (!book.library_id) return null;
+  return (
+    <div className="mt-2">
+      <WhoHasIt members={book.members} ownership={book.ownership} meId={meId} />
+      <RevealGrid book={book} meId={meId} />
+    </div>
+  );
+}
+
+// Detail-panel "I own" toggles — one per format (📖/📱/🎧, audio cyan). Each
+// reflects whether *I* own that format and flips my book_ownership via
+// toggleOwnership. Dropping every format is how a member leaves just their own
+// copy without deleting the shared book for the archive.
+function OwnFormatToggles({ book, meId, onToggle }) {
+  return (
+    <div className="ht-card rounded-md p-4 mt-4 space-y-2.5">
+      <span className="ht-display text-xs uppercase text-pink-200 font-semibold">
+        Which editions do you own?
+      </span>
+      <div className="flex flex-wrap gap-2">
+        {FORMAT_GLYPHS.map((g) => {
+          const owned = (book.ownership || []).some(
+            (o) => o.user_id === meId && o.format === g.fmt
+          );
+          const on = g.cyan
+            ? "bg-cyan-500/25 border-cyan-400/60 text-cyan-100"
+            : "bg-pink-600/30 border-pink-400/60 text-pink-100";
+          const off = "bg-purple-950/50 border-purple-700/50 text-purple-300 hover:border-pink-400/50";
+          return (
+            <button
+              key={g.fmt}
+              type="button"
+              aria-pressed={owned}
+              onClick={() => onToggle(book.id, g.fmt, !owned)}
+              className={`ht-display text-[10px] uppercase tracking-wide px-3 py-1.5 rounded-sm border transition-colors ${owned ? on : off}`}
+            >
+              {g.glyph} {g.label}{owned ? " ✓" : ""}
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-purple-400/60 italic leading-snug">
+        Tick the editions on your shelf. Untick them all to drop your copy without
+        removing this tome from the archive.
+      </p>
+    </div>
+  );
+}
+
 /* ── detail panel ──────────────────────────────────────────── */
 
-function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = [], onMoveToArchive }) {
+function DetailPanel({ book, onClose, onUpdate, onRemove, onToggleOwnership, session, archives = [], onMoveToArchive }) {
+  const isShared = !!book.library_id;
+  const me = session?.user?.id;
   // Move-into-archive control (Task 5) is offered for PERSONAL books only (no
   // library_id) and only when the user actually belongs to at least one archive.
   const canMove = !book.library_id && archives.length > 0 && typeof onMoveToArchive === 'function';
+
+  // "Remove" on a SHARED book is a group action: deleting the shared row cascades
+  // ownership + everyone's personal_state, so it leaves every member's shelf. We
+  // confirm that plainly and point solo-drop toward the "I own" toggles. A
+  // personal book keeps its silent remove (unchanged behaviour).
+  const handleRemove = () => {
+    if (isShared) {
+      const ok = window.confirm(
+        'Remove this tome from the shared archive for everyone? ' +
+        'It leaves every member’s shelf and cannot be undone.\n\n' +
+        'To drop only your own copy, untick your "I own" editions instead.'
+      );
+      if (!ok) return;
+    }
+    onRemove();
+  };
   const [moveTo, setMoveTo] = useState("");
   const [moving, setMoving] = useState(false);
   const runMove = async () => {
@@ -5052,28 +5322,37 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = []
         <div className="sm:w-52 flex-shrink-0">
           <CoverEditor book={book} onUpdate={onUpdate} session={session} />
           <div className="mt-3 flex flex-col gap-1.5">
-            <ToggleRow
-              label={book.shelf === "owned" ? "On the Owned shelf" : "On the Wishlist"}
-              action={book.shelf === "owned" ? "Move to Wishlist" : "Mark as Owned"}
-              onClick={() => onUpdate({ shelf: book.shelf === "owned" ? "wishlist" : "owned" })}
-            />
+            {/* Owned/Wishlist toggle: personal books only. On a shared book the
+                shelf is derived from ownership, so the "I own" toggles below own
+                that state instead. */}
+            {!isShared && (
+              <ToggleRow
+                label={book.shelf === "owned" ? "On the Owned shelf" : "On the Wishlist"}
+                action={book.shelf === "owned" ? "Move to Wishlist" : "Mark as Owned"}
+                onClick={() => onUpdate({ shelf: book.shelf === "owned" ? "wishlist" : "owned" })}
+              />
+            )}
             <ToggleRow
               label={book.read ? "Read ✓" : "Not yet read"}
               action={book.read ? "Mark Unread" : "Mark as Read"}
               onClick={() => onUpdate({ read: !book.read })}
             />
-            <ToggleRow
-              label={(book.formats || []).includes("audio") ? "Audiobook 🎧" : "No audio copy"}
-              action={(book.formats || []).includes("audio") ? "Remove audio" : "I have the audio"}
-              onClick={() => {
-                const fmts = book.formats || ["print"];
-                onUpdate({
-                  formats: fmts.includes("audio") ? fmts.filter((f) => f !== "audio") : [...fmts, "audio"],
-                });
-              }}
-            />
-            <button onClick={onRemove} className="mt-1 text-sm text-purple-400/60 hover:text-pink-300 underline underline-offset-2 italic">
-              Banish from the archive
+            {/* Audio toggle: personal books only. On a shared book audio is one of
+                the per-format "I own" toggles below (kept cyan there). */}
+            {!isShared && (
+              <ToggleRow
+                label={(book.formats || []).includes("audio") ? "Audiobook 🎧" : "No audio copy"}
+                action={(book.formats || []).includes("audio") ? "Remove audio" : "I have the audio"}
+                onClick={() => {
+                  const fmts = book.formats || ["print"];
+                  onUpdate({
+                    formats: fmts.includes("audio") ? fmts.filter((f) => f !== "audio") : [...fmts, "audio"],
+                  });
+                }}
+              />
+            )}
+            <button onClick={handleRemove} className="mt-1 text-sm text-purple-400/60 hover:text-pink-300 underline underline-offset-2 italic">
+              {isShared ? "Remove from this archive" : "Banish from the archive"}
             </button>
 
             {canMove && (
@@ -5111,7 +5390,13 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = []
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="ht-card rounded-md p-4 space-y-3">
+          {/* Shared book: per-format "I own" toggles → my book_ownership. The
+              Verdict/Smoulder/progress editors below already write MY private
+              state via the branched updateBook. */}
+          {isShared && typeof onToggleOwnership === "function" && (
+            <OwnFormatToggles book={book} meId={me} onToggle={onToggleOwnership} />
+          )}
+          <div className={`ht-card rounded-md p-4 space-y-3 ${isShared ? "mt-4" : ""}`}>
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <span className="ht-display text-xs uppercase text-indigo-200 font-semibold">Verdict ⚔</span>
               <Meter value={book.overall} onChange={(v) => onUpdate({ overall: v })} Icon={Sword} label="Verdict" />
@@ -5127,6 +5412,15 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = []
           </div>
 
           <ProgressEditor book={book} onUpdate={onUpdate} />
+
+          {/* Shared book: the "Who has it" roster + reveal grid. Notes stay below
+              and remain private — they are never rendered in the reveal. */}
+          {isShared && (
+            <div className="ht-card rounded-md p-4 mt-4">
+              <WhoHasIt members={book.members} ownership={book.ownership} meId={me} />
+              <RevealGrid book={book} meId={me} />
+            </div>
+          )}
 
           <NotesSection book={book} onUpdate={onUpdate} />
         </div>
