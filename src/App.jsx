@@ -1961,6 +1961,183 @@ export default function Hushthorn() {
     setActiveId(id);
   };
 
+  // Move a PERSONAL book into a shared archive (Task 5) — the highest-risk data
+  // op: it must be correct AND idempotent (re-running changes nothing, never
+  // errors) and it must never leak my personal marks onto the shared row.
+  //
+  // Two cases, keyed on whether the archive already holds a book with the same
+  // title (case-insensitive, whitespace-trimmed — matched in JS to guard against
+  // ilike partial-match false positives):
+  //
+  //   A. Title NOT present → convert the personal row in place: flip its
+  //      library_id, migrate my marks into book_personal_state, RESET the row's
+  //      mark columns to defaults (the no-leak rule), record my ownership.
+  //   B. Title ALREADY present → merge into the existing shared row: migrate my
+  //      marks + ownership onto it, re-point my notes (dedupe by fingerprint),
+  //      union my formats into the group, then delete my personal row.
+  //
+  // Defensive throughout — every Supabase call logs its error and returns; the
+  // caller (DetailPanel) never sees a throw.
+  const moveBookIntoArchive = async (bookId, libraryId) => {
+    if (!session || !bookId || !libraryId) {
+      console.error('moveBookIntoArchive: missing session, bookId, or libraryId');
+      return;
+    }
+    const me = session.user.id;
+
+    // Normalized-text fingerprint for note dedupe — same idea as noteFingerprint
+    // (a stable hash of the meaningful content). Include page/quote/time so an
+    // identical quote logged at two different pages is not falsely collapsed.
+    const noteFp = (n) => {
+      const text = (n.text || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      return [text, n.page ?? '', n.isQuote ? 'q' : '', n.isTime ? 't' : ''].join('|');
+    };
+
+    // 1) Load the personal row straight from the DB (source of truth), guarded to
+    //    my ownership and to the personal library (library_id null).
+    const { data: row, error: rErr } = await supabase
+      .from('books').select('*')
+      .eq('id', bookId).eq('user_id', me).is('library_id', null)
+      .maybeSingle();
+    if (rErr) { console.error('moveBookIntoArchive (load row):', rErr.message); return; }
+    if (!row) { console.error('moveBookIntoArchive: personal book not found (or not mine / not personal)'); return; }
+
+    const title = (row.title || '').trim();
+    // My current marks on the personal row. A book is "meaningful" (worth a
+    // personal_state row) only if it carries a real mark — otherwise we create
+    // NO row so the archive isn't littered with bogus default rows.
+    const marks = {
+      read: !!row.read,
+      overall: row.overall ?? 0,
+      smut: row.smut ?? 0,
+      progress: (row.progress && typeof row.progress === 'object') ? row.progress : {},
+    };
+    const hasMarks = marks.overall > 0 || marks.smut > 0 || marks.read === true
+      || (marks.progress && Object.keys(marks.progress).length > 0);
+    // Formats to record ownership for — default to print when none.
+    let formats = Array.isArray(row.formats) && row.formats.length ? row.formats : ['print'];
+    const allowed = ['print', 'ebook', 'audio'];
+    formats = Array.from(new Set(formats.filter(f => allowed.includes(f))));
+    if (!formats.length) formats = ['print'];
+
+    // 2) Is the title already in this archive? Case-insensitive DB match, then a
+    //    strict normalized-title comparison in JS to reject ilike partial hits.
+    const { data: candidates, error: cErr } = await supabase
+      .from('books').select('*')
+      .eq('library_id', libraryId).ilike('title', title);
+    if (cErr) { console.error('moveBookIntoArchive (title lookup):', cErr.message); return; }
+    const key = title.toLowerCase();
+    const existing = (candidates || []).find(
+      c => (c.title || '').trim().toLowerCase() === key
+    ) || null;
+
+    const upsertMyState = async (targetId) => {
+      if (!hasMarks) return true; // unrated/unstarted → no bogus row
+      const { error } = await supabase.from('book_personal_state').upsert({
+        book_id: targetId,
+        user_id: me,
+        read: marks.read,
+        overall: marks.overall,
+        smut: marks.smut,
+        progress: marks.progress,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'book_id,user_id' });
+      if (error) { console.error('moveBookIntoArchive (personal_state):', error.message); return false; }
+      return true;
+    };
+
+    const insertMyOwnership = async (targetId) => {
+      // One row per format; ignore 23505 (PK dedupe) so re-running is idempotent.
+      const { error } = await supabase.from('book_ownership').insert(
+        formats.map(format => ({ book_id: targetId, user_id: me, format }))
+      );
+      if (error && error.code !== '23505') {
+        console.error('moveBookIntoArchive (ownership):', error.message);
+        return false;
+      }
+      return true;
+    };
+
+    if (!existing) {
+      // ── Case A: convert the personal row in place ──────────────────────
+      // A1) Flip it into the archive.
+      const { error: mErr } = await supabase.from('books')
+        .update({ library_id: libraryId }).eq('id', bookId);
+      if (mErr) { console.error('moveBookIntoArchive (convert library_id):', mErr.message); return; }
+
+      // A2) Migrate my marks into MY personal_state (only if meaningful).
+      if (!(await upsertMyState(bookId))) return;
+
+      // A3) RESET the row's mark columns to defaults — the no-leak rule: a shared
+      //     row visible to every member must carry no one's personal marks.
+      const { error: zErr } = await supabase.from('books')
+        .update({ overall: 0, smut: 0, read: false, progress: {} })
+        .eq('id', bookId);
+      if (zErr) { console.error('moveBookIntoArchive (reset marks):', zErr.message); return; }
+
+      // A4) Record my ownership per format (idempotent).
+      if (!(await insertMyOwnership(bookId))) return;
+    } else {
+      // ── Case B: merge into the existing shared row ─────────────────────
+      const target = existing.id;
+
+      // B1) Migrate my marks onto the existing row's personal_state (upsert).
+      if (!(await upsertMyState(target))) return;
+
+      // B2) Record my ownership on the target per format (idempotent).
+      if (!(await insertMyOwnership(target))) return;
+
+      // B3) Re-point my notes FIRST, THEN delete the personal row — the
+      //     notes.book_id FK would break if we deleted first.
+      const { data: myNotesTarget, error: tnErr } = await supabase
+        .from('notes').select('*').eq('user_id', me).eq('book_id', target);
+      if (tnErr) { console.error('moveBookIntoArchive (target notes):', tnErr.message); return; }
+      const { data: myNotesSource, error: snErr } = await supabase
+        .from('notes').select('*').eq('user_id', me).eq('book_id', bookId);
+      if (snErr) { console.error('moveBookIntoArchive (source notes):', snErr.message); return; }
+
+      // Fingerprints already on the target (mine). Map the DB column names into
+      // the in-memory shape noteFp expects.
+      const toShape = (n) => ({ text: n.text, page: n.page, isQuote: n.is_quote, isTime: n.is_time });
+      const targetFps = new Set((myNotesTarget || []).map(n => noteFp(toShape(n))));
+      for (const n of (myNotesSource || [])) {
+        const fp = noteFp(toShape(n));
+        if (targetFps.has(fp)) {
+          // Duplicate already on the target → drop the leftover personal note.
+          const { error } = await supabase.from('notes').delete().eq('id', n.id);
+          if (error) { console.error('moveBookIntoArchive (note dedupe delete):', error.message); return; }
+        } else {
+          // Unique → re-point it at the shared row, and record its fp so two
+          // identical source notes don't both survive.
+          const { error } = await supabase.from('notes').update({ book_id: target }).eq('id', n.id);
+          if (error) { console.error('moveBookIntoArchive (note re-point):', error.message); return; }
+          targetFps.add(fp);
+        }
+      }
+
+      // B4) Now that no note references it, delete my personal row.
+      const { error: dErr } = await supabase.from('books').delete().eq('id', bookId);
+      if (dErr) { console.error('moveBookIntoArchive (delete personal row):', dErr.message); return; }
+
+      // B5) Union any of my formats not already on the target's group formats so
+      //     ProgressEditor shows those rows for everyone.
+      const targetFormats = Array.isArray(existing.formats) && existing.formats.length
+        ? existing.formats : ['print'];
+      const unioned = Array.from(new Set([...targetFormats, ...formats]));
+      if (unioned.length !== targetFormats.length) {
+        const { error: fErr } = await supabase.from('books')
+          .update({ formats: unioned }).eq('id', target);
+        if (fErr) { console.error('moveBookIntoArchive (formats union):', fErr.message); return; }
+      }
+    }
+
+    // Local state: drop the moved book from the personal shelf. `sharedBooks`
+    // is left to reload when the archive is switched into (the archive view is
+    // not necessarily active right now), so we don't optimistically inject it.
+    setBooks(prev => prev.filter(b => b.id !== bookId));
+    if (activeId === bookId) setActiveId(null);
+  };
+
   const shelfTabs = [
     { key: "all", label: "All" },
     { key: "owned", label: "Owned" },
@@ -2177,6 +2354,8 @@ export default function Hushthorn() {
           onUpdate={(patch) => updateBook(activeBook.id, patch)}
           onRemove={() => removeBook(activeBook.id)}
           session={session}
+          archives={archives}
+          onMoveToArchive={moveBookIntoArchive}
         />
       )}
 
@@ -4732,7 +4911,23 @@ function CoverEditor({ book, onUpdate, session }) {
 
 /* ── detail panel ──────────────────────────────────────────── */
 
-function DetailPanel({ book, onClose, onUpdate, onRemove, session }) {
+function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = [], onMoveToArchive }) {
+  // Move-into-archive control (Task 5) is offered for PERSONAL books only (no
+  // library_id) and only when the user actually belongs to at least one archive.
+  const canMove = !book.library_id && archives.length > 0 && typeof onMoveToArchive === 'function';
+  const [moveTo, setMoveTo] = useState("");
+  const [moving, setMoving] = useState(false);
+  const runMove = async () => {
+    if (!moveTo || moving) return;
+    setMoving(true);
+    try {
+      await onMoveToArchive(book.id, moveTo);
+    } catch (e) {
+      // moveBookIntoArchive never throws by contract, but stay defensive.
+      console.error('DetailPanel move:', e);
+    }
+    onClose();
+  };
   return (
     <Overlay onClose={onClose} label={book.title} wide>
       <div className="flex items-start justify-between mb-4 gap-3">
@@ -4773,6 +4968,38 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session }) {
             <button onClick={onRemove} className="mt-1 text-sm text-purple-400/60 hover:text-pink-300 underline underline-offset-2 italic">
               Banish from the archive
             </button>
+
+            {canMove && (
+              <div className="mt-3 pt-3 border-t border-purple-800/40 space-y-1.5">
+                <span className="ht-display text-[10px] uppercase text-pink-200 font-semibold tracking-wide">
+                  Move into a shared archive
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={moveTo}
+                    onChange={(e) => setMoveTo(e.target.value)}
+                    disabled={moving}
+                    aria-label="Choose a shared archive"
+                    className="flex-1 min-w-0 text-sm rounded-sm bg-purple-950/60 border border-purple-800/60 text-purple-100 px-2 py-1 focus:outline-none focus:border-pink-500/60"
+                  >
+                    <option value="">Choose an archive…</option>
+                    {archives.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={runMove}
+                    disabled={!moveTo || moving}
+                    className="ht-display text-[10px] uppercase px-2 py-1 rounded-sm bg-pink-800/60 hover:bg-pink-700/70 disabled:opacity-40 disabled:hover:bg-pink-800/60 text-pink-100 whitespace-nowrap flex-shrink-0"
+                  >
+                    {moving ? "Moving…" : "Move"}
+                  </button>
+                </div>
+                <p className="text-[11px] text-purple-400/60 italic leading-snug">
+                  Shares this tome with that archive as a co-owner. Your marks stay yours; the shared copy carries none.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
