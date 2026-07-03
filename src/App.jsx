@@ -1207,6 +1207,54 @@ function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery }) {
   );
 }
 
+/* ── archive switcher ──────────────────────────────────────── */
+
+// Swaps the shelf between the personal library (`null`) and a shared archive.
+// `current` is the active library id (null = My Library); `archives` is
+// `[{id,name,role}]`; `onSwitch(id|null)` sets `currentLibraryId`. Themed to
+// match ControlsBar (Cinzel labels, sharp corners, purple/pink — no cyan).
+function ArchiveSwitcher({ current, archives = [], onSwitch }) {
+  const inArchive = current !== null;
+  const activeName = inArchive
+    ? (archives.find((a) => a.id === current)?.name ?? "Shared archive")
+    : null;
+  return (
+    <div className="max-w-5xl mx-auto px-5 pb-4 flex flex-wrap items-center justify-center gap-2">
+      <label className="ht-display text-[9px] uppercase tracking-widest text-purple-400/70">
+        Shelf
+      </label>
+      <div className="relative">
+        <select
+          value={current ?? ""}
+          onChange={(e) => onSwitch(e.target.value === "" ? null : e.target.value)}
+          aria-label="Choose which shelf to browse"
+          className={`ht-display appearance-none rounded-sm border px-3 py-1.5 pr-7 text-[11px] uppercase tracking-wide focus:outline-none focus:border-pink-400 transition-colors ${
+            inArchive
+              ? "bg-gradient-to-b from-fuchsia-600/40 to-purple-800/50 border-pink-400/60 text-pink-100"
+              : "bg-purple-950/60 border-purple-700/50 text-purple-200"
+          }`}
+        >
+          <option value="">My Library</option>
+          {archives.map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+        <span
+          aria-hidden="true"
+          className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[9px] ${inArchive ? "text-pink-200/80" : "text-purple-400/70"}`}
+        >
+          ▾
+        </span>
+      </div>
+      {inArchive && (
+        <span className="ht-display inline-flex items-center gap-1.5 rounded-sm border border-pink-400/40 bg-pink-500/10 px-2.5 py-1 text-[9px] uppercase tracking-widest text-pink-200">
+          <span aria-hidden="true">♥</span> {activeName}
+        </span>
+      )}
+    </div>
+  );
+}
+
 /* ── rating meters ─────────────────────────────────────────── */
 
 function Meter({ value, onChange, Icon, label, readOnly = false, size }) {
@@ -1486,6 +1534,16 @@ export default function Hushthorn() {
   const shelfBooks = currentLibraryId === null ? books : sharedBooks;
 
   const [shelfFilter, setShelfFilter] = useState("all");
+  // Switch the active shelf (null = My Library). The filter tab set differs
+  // between contexts (personal Owned/Wishlist vs. archive I own/Others own/
+  // Nobody), so reset to "All" on switch to avoid a stale, un-highlighted tab.
+  // Also drop back to the library view so the switch is immediately visible.
+  const switchLibrary = (id) => {
+    setCurrentLibraryId(id);
+    setShelfFilter("all");
+    setActiveId(null);
+    setView("library");
+  };
   const [activeId, setActiveId] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
   const [view, setView] = useState("library"); // library | oracle | pair
@@ -1582,10 +1640,19 @@ export default function Hushthorn() {
 
   const activeBook = shelfBooks.find((b) => b.id === activeId) || null;
 
+  // `me` scopes the archive ownership filters below. Null-safe: personal books
+  // never reach the ownership branches (those keys only exist in an archive).
+  const me = session?.user?.id;
   const filtered = shelfBooks.filter((b) => {
     if (shelfFilter === "all") return true;
+    // Personal-shelf filters (currentLibraryId === null) — unchanged.
     if (shelfFilter === "owned") return b.shelf === "owned";
     if (shelfFilter === "wishlist") return b.shelf === "wishlist";
+    // Archive-only ownership filters (non-exclusive; computed from `ownership`).
+    if (shelfFilter === "iown") return (b.ownership || []).some((o) => o.user_id === me);
+    if (shelfFilter === "othersown") return (b.ownership || []).some((o) => o.user_id !== me);
+    if (shelfFilter === "nobody") return (b.ownership || []).length === 0;
+    // Shared across both contexts.
     if (shelfFilter === "read") return b.read;
     if (shelfFilter === "unread") return !b.read;
     if (shelfFilter === "audio") return (b.formats || []).includes("audio");
@@ -2145,14 +2212,28 @@ export default function Hushthorn() {
     if (activeId === bookId) setActiveId(null);
   };
 
-  const shelfTabs = [
-    { key: "all", label: "All" },
-    { key: "owned", label: "Owned" },
-    { key: "wishlist", label: "Wishlist" },
-    { key: "read", label: "Read" },
-    { key: "unread", label: "Unread" },
-    { key: "audio", label: "🎧 Audio" },
-  ];
+  // In the personal library (currentLibraryId === null) the tabs are UNCHANGED.
+  // Inside a shared archive, ownership is per-member, so Owned/Wishlist give way
+  // to non-exclusive ownership filters (I own · Others own · Nobody). Read/Unread
+  // and 🎧 Audio stay in both contexts.
+  const shelfTabs = currentLibraryId === null
+    ? [
+        { key: "all", label: "All" },
+        { key: "owned", label: "Owned" },
+        { key: "wishlist", label: "Wishlist" },
+        { key: "read", label: "Read" },
+        { key: "unread", label: "Unread" },
+        { key: "audio", label: "🎧 Audio" },
+      ]
+    : [
+        { key: "all", label: "All" },
+        { key: "iown", label: "I own" },
+        { key: "othersown", label: "Others own" },
+        { key: "nobody", label: "Nobody" },
+        { key: "read", label: "Read" },
+        { key: "unread", label: "Unread" },
+        { key: "audio", label: "🎧 Audio" },
+      ];
 
   if (!authReady) return (
     <div className="ht-bg ht-body" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -2213,6 +2294,15 @@ export default function Hushthorn() {
           </button>
         </div>
       </header>
+
+      {/* archive switcher — only when the reader belongs to a shared archive */}
+      {archives.length > 0 && (
+        <ArchiveSwitcher
+          current={currentLibraryId}
+          archives={archives}
+          onSwitch={switchLibrary}
+        />
+      )}
 
       {/* shelf banners */}
       <nav className="max-w-5xl mx-auto px-5 flex flex-wrap justify-center gap-2 pb-6" aria-label="Shelves">
@@ -4386,11 +4476,21 @@ function AddBookModal({ onAdd, onAddToArchive, currentLibraryId = null, onAddMan
           </div>
           {liveStatus && <p className="text-sm text-pink-200/90 italic">{liveStatus}</p>}
 
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" checked={scanMultiple} onChange={(e) => setScanMultiple(e.target.checked)} className="accent-pink-500" />
-            <span className="ht-display text-[10px] uppercase tracking-widest text-purple-200">Scan multiple</span>
-            <span className="text-xs text-purple-400/60 italic">— queue barcodes, add them all at once</span>
-          </label>
+          {/* Batch multi-scan lands in My Library (no archive path yet — Task 4
+              deferred it). Hide the toggle inside an archive so a stack can't be
+              imported into the personal library by accident; a single scan into
+              the archive still works via the format chooser above. */}
+          {inArchive ? (
+            <p className="text-xs text-purple-400/70 italic border border-purple-800/40 rounded-sm px-3 py-2 bg-purple-950/40">
+              Batch scanning lands in <span className="text-pink-200">My Library</span>, not this archive. Add tomes here one at a time — switch to My Library to import a stack.
+            </p>
+          ) : (
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" checked={scanMultiple} onChange={(e) => setScanMultiple(e.target.checked)} className="accent-pink-500" />
+              <span className="ht-display text-[10px] uppercase tracking-widest text-purple-200">Scan multiple</span>
+              <span className="text-xs text-purple-400/60 italic">— queue barcodes, add them all at once</span>
+            </label>
+          )}
 
           <div className="flex gap-2 flex-wrap">
             {!liveActive ? (
