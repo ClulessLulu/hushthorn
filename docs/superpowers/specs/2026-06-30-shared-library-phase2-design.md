@@ -97,6 +97,17 @@ create policy "members delete shared books" on public.books
   for delete using (library_id is not null and library_id in (select public.my_library_ids()));
   -- any member may remove a shared book from the archive (group action; UI confirms).
 
+-- CRITICAL (added after real-JWT QA caught it): the pre-existing personal-books
+-- policy is FOR ALL and checks only user_id. Left as-is it is OR'd at INSERT with the
+-- member policy, so a NON-member could POST a book with any library_id (their own
+-- user_id satisfies the personal policy) and inject it into any archive. Scope the
+-- personal policy to personal rows so shared writes are governed solely by the member
+-- policies above. (The move-in convert still works: the flip's WITH CHECK on the new
+-- library_id-bearing row is satisfied by "members update shared books".)
+alter policy "users manage own books" on public.books
+  using      (auth.uid() = user_id and library_id is null)
+  with check (auth.uid() = user_id and library_id is null);
+
 -- book_ownership: members read all tags for their libraries' books; write only their own.
 create policy "members read ownership" on public.book_ownership
   for select using (
@@ -128,6 +139,18 @@ create policy "co-members read shared personal state (opt-in)" on public.book_pe
   );
 
 -- notes: UNCHANGED owner-only. Never revealed, even with share_reading on.
+
+-- library_members: `share_reading` is written by the per-archive reveal toggle, but
+-- Phase 1 gave this table only SELECT + DELETE policies — so the UPDATE silently
+-- matched 0 rows (PostgREST returns 200) and the reveal never turned on. Add UPDATE,
+-- but restrict it to the OWNER's own row AND — via a column grant — to the
+-- `share_reading` column only. A plain `using (user_id = auth.uid())` would also let a
+-- member set their own `role = 'owner'` (privilege escalation); the column grant blocks
+-- that before RLS is evaluated. (Added after real-JWT QA caught the dead toggle.)
+revoke update on public.library_members from authenticated, anon;
+grant  update (share_reading) on public.library_members to authenticated;
+create policy "members update own share_reading" on public.library_members
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
 ```
 
 After applying, run `get_advisors(security)` — expect no new findings (RLS enabled on both
