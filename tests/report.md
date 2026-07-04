@@ -637,3 +637,193 @@ per-user JWTs: case-insensitive username uniqueness, owner-vs-member permissions
 the recursion-free membership read, outsider isolation returning empty (not
 errors), invite expiry/exhaustion/idempotency, and the closed direct-insert hole.
 Nothing to route back to supabase-migrator or frontend-dev.
+
+---
+
+# QA Report — Shared Library Phase 2 (shared shelf + per-format ownership + private reading state)
+
+Reviewed against [`tests/shared-library-phase2-test-plan.md`](shared-library-phase2-test-plan.md),
+the spec (`docs/superpowers/specs/2026-06-30-shared-library-phase2-design.md`), and
+the move/merge cases (`tests/shared-library-phase2-move-merge-cases.md`). Branch
+`phase2-shared-shelf`. Executed with **real per-user JWTs** (GoTrue password-grant)
+against project `ujxsrcxbhcbihhdluzyl`. MCP service-role used only for setup,
+ground-truth, and cleanup — never to prove an access case.
+
+Actors created fresh: **A** (owner of test library L), **B** (member), **C**
+(outsider, no library). Pre-existing real accounts (Sin/Loveless/Lorreighna) and
+library "The Cathedral" were left untouched.
+
+## Summary verdict: NO-GO — 2 defects (1 blocker, 1 critical isolation break)
+
+31 checks executed: **29 PASS, 2 FAIL**. The data model, no-leak rule, ownership
+grain, and the entire move/merge/idempotency surface are correct. But two RLS
+policy gaps break the feature: the per-archive **reveal cannot be turned on at all**
+(headline feature dead on arrival), and a **non-member can inject books into any
+archive** (cross-tenant isolation break). Both are `library_members`/`books` policy
+issues owned by **supabase-migrator**; no `src/App.jsx` change is required.
+
+## PASS/FAIL table
+
+| ID | Check | Result | Evidence |
+|---|---|---|---|
+| P-01 | Convert rated book to shared -> `books` row marks reset | PASS | after move: `overall=0,smut=0,read=false,progress={}`, `library_id=L`, `user_id=A` kept |
+| P-02 | B reads shared row -> no rating | PASS | REST-as-B `GET /books?id=eq.P` -> `overall=0,smut=0,read=false,progress={}` |
+| P-03 | B cannot read A personal_state (share_reading=false) | PASS | REST-as-B -> `[]` (0 rows) |
+| P-04 | B CAN read A personal_state when share_reading=true (reveal) | PASS* | with value set (via service role, see FAIL-1): B sees `overall=4,smut=3,read=true,progress={print:100}` |
+| P-05 | Toggling share_reading back hides A again | PASS | REST-as-B -> only B's own row, A's hidden |
+| P-06 | Notes NEVER returned to B, even with sharing on | PASS | REST-as-B `GET /notes?book_id=eq.P` -> `[]` both before and after reveal |
+| P-07 | B always sees her own personal_state row | PASS | REST-as-B filtered to B -> her row returned regardless of A's toggle |
+| O-01 | A owns print+audio, B owns ebook -> exact rows | PASS | `book_ownership` = (A,audio),(A,print),(B,ebook) exactly |
+| O-02 | A cannot insert ownership for B | PASS | REST-as-A insert `user_id=B` -> HTTP 403 `42501` RLS violation |
+| O-03 | B cannot delete A's ownership | PASS | REST-as-B DELETE -> 0 rows; A's print row still present |
+| O-04 | Tagging new format unions into `books.formats` | PASS | B tags ebook -> formats `{print,audio,ebook}` |
+| O-05 | >=1 owner -> owned; 0 -> wishlist (derivation) | PASS | `loadArchiveBooks` L1512 `shelf: ownership.length ? 'owned':'wishlist'`; S2 has 3 owners -> owned |
+| O-06 | B inserts her own ownership on a book she didn't create | PASS | REST-as-B insert on A's shared book -> 201 |
+| M-CONVERT (a) | Convert-in-place: migrate, reset, own both, keep notes | PASS | ps(P,A)=4/3/true/{print:100}; ownership=ebook,print; 2 notes kept; 1 books row |
+| M-MERGE (b) | Merge existing title (case-insensitive), no dup, notes re-pointed+deduped | PASS | 1 "fourth wing" row; P2 deleted; ps(S,A)=5/4/true/{audio:100}; S group marks 0/0/false/{}; A owns audio, B owns print; formats {print,audio}; A notes on S=3, on P2=0 |
+| I-CONVERT (c) | Re-run move of shared book -> no-op | PASS | load `id=P AND user_id=A AND library_id is null` -> `[]` -> function returns |
+| I-MERGE (c) | Re-seed identical P2, re-run merge -> idempotent | PASS | post==pre: own=1(audio), ps=1, notes=3, P2=0; upsert-in-place (200 w/ merge-duplicates hdr), 23505 swallowed, all fp dups deleted |
+| E-UNRATED (d) | Unrated -> NO personal_state row; ownership still created | PASS | ps(P3)=0 rows; ownership(P3,A,print)=1 |
+| E-NOFORMAT (e) | Empty formats -> single print ownership | PASS | ownership(P4)=1 row, format=print |
+| E-ISOLATION (f) | Untouched personal book stays owner-only, absent from archive | PASS | P5 library_id=NULL, 0 ownership, marks 5/5/true; REST-as-B `GET /books?id=eq.P5` -> `[]` |
+| C-01 | Title match guard (ilike + strict JS equality) | PASS | code: `.ilike('title',title)` then `.find(c=>c.title.trim().toLowerCase()===key)` |
+| C-02 | No-leak reset (single update flips library_id + zeroes marks) | PASS | code L2151-2153 `update ... library_id, overall:0,smut:0,read:false,progress:{}` |
+| C-03 | Meaningful-mark guard (no upsert when !hasMarks) | PASS | `upsertMyState` early-returns; verified live by E-UNRATED |
+| C-04 | Ownership insert ignores 23505 | PASS | code `error.code !== '23505'`; verified live (I-MERGE 409 swallowed) |
+| C-05 | personal_state upsert onConflict book_id,user_id | PASS | code L2117; verified in-place upsert with merge-duplicates header |
+| C-06 | Notes re-pointed/deduped BEFORE deleting personal row | PASS | code: note loop (B3) precedes `delete from books` (B4) |
+| C-07 | Note dedupe: fp-collision deleted, survivor adds fp | PASS | code L2185-2194 `targetFps.add(fp)` on re-point; verified (dup collapsed) |
+| C-08 | Format union in merge | PASS | code L2202-2211; verified formats {print,audio} |
+| C-09 | UI gate move control only when !library_id && archives>0 | PASS | code L5278 `canMove` |
+| C-10 | Defensive: every call logs + returns; nothing throws | PASS | every branch guarded; `runMove` try/catch |
+| S-01 | Personal book excluded from archive queries | PASS | personal load `.is('library_id',null)` L1338; archive load `.eq('library_id',L)` L1400 |
+| S-02 | Outsider C reads archive books -> [] | PASS | REST-as-C -> `[]` HTTP 200 (not error) |
+| S-03 | Outsider C reads ownership -> [] | PASS | REST-as-C -> `[]` |
+| S-04 | Outsider C reads personal_state -> [] | PASS | REST-as-C -> `[]` |
+| S-05 | Outsider C reads roster -> [] | PASS | REST-as-C `GET /library_members?library_id=eq.L` -> `[]` |
+| S-06 | Member B edits group fields | PASS | REST-as-B PATCH title -> 200 |
+| S-07 | Member B adds a shared book | PASS | REST-as-B insert `library_id=L` -> 201 |
+| S-08 | Any member removes a shared book | PASS | REST-as-A DELETE -> 204; confirmed gone as B |
+| S-09 | No infinite recursion on shared selects | PASS | REST-as-B books/ownership/personal_state -> 200, no `42P17` |
+| S-10 | Outsider C CANNOT insert a book into L | **FAIL** | REST-as-C insert `library_id=L, user_id=C` -> **HTTP 201, row created**; member B then sees "Intruder Book" in the archive |
+| (reveal write) | A can turn on `share_reading` via the client | **FAIL** | REST-as-A `PATCH /library_members ... share_reading=true` -> HTTP 200 but **0 rows updated**; value stays false |
+
+\* P-04 is marked PASS-with-caveat: the reveal *policy* on `book_personal_state`
+works correctly once `share_reading=true` is set, but that value can never be set
+through the app because of FAIL-1. So the reveal is verified sound in mechanism but
+unreachable in practice until FAIL-1 is fixed.
+
+## Defects (exact evidence + suspected cause + owner)
+
+### FAIL-1 — Reveal opt-in is unsettable: no UPDATE policy on `library_members` (BLOCKER)
+**Owner: supabase-migrator.**
+- **Repro:** as A (owner + member of L), `PATCH /rest/v1/library_members?library_id=eq.L&user_id=eq.A` body `{"share_reading":true}` with A's JWT -> **HTTP 200, response `[]`**. MCP ground-truth: `share_reading` remains `false`.
+- **Cause:** `pg_policies` for `library_members` has exactly two policies — `read co-members` (SELECT) and `leave or owner removes` (DELETE). There is **no UPDATE policy**. With RLS enabled and no UPDATE policy, the update matches 0 rows and PostgREST/Supabase-JS returns `{error:null, data:[]}` — **no error surfaced**, so `setArchiveShareReading` (App.jsx L3187-3197) optimistically shows the toggle "on" while the DB never changes.
+- **Impact:** the entire per-archive reveal (the Phase 2 headline "deliberate opt-in to reveal ratings/progress") is dead on arrival. `book_personal_state`'s opt-in policy requires `owner.share_reading = true`, which is unreachable. Verified the reveal chain itself is correct by setting the value via service role (P-04 then returned A's marks; notes stayed hidden), isolating the defect purely to the missing policy.
+- **Fix direction:** add an UPDATE policy on `library_members` scoped to `user_id = auth.uid()` (a member may only flip their own row), e.g. `for update using (user_id = auth.uid()) with check (user_id = auth.uid())`.
+
+### FAIL-2 — Non-member can inject books into any archive (CRITICAL isolation break)
+**Owner: supabase-migrator.**
+- **Repro:** as C (NOT a member of L — confirmed `library_members` has 0 rows for C in L), `POST /rest/v1/books` body `{"library_id":"<L>","user_id":"<C>","title":"Intruder Book",...}` with C's JWT -> **HTTP 201, row created**. Member B then reads `GET /books?library_id=eq.L` and **sees "Intruder Book"** in the shared shelf.
+- **Cause:** the pre-existing personal-books policy `"users manage own books"` is `FOR ALL ... with_check (auth.uid() = user_id)`. At INSERT it is OR'd with `"members insert shared books"` (`library_id IS NOT NULL AND library_id IN my_library_ids()`). Because C sets `user_id = C`, the personal policy's `with_check` passes regardless of `library_id`, so C can attach a book to **any** library it names. The member-only gate is bypassed.
+- **Impact:** cross-tenant integrity break — any authenticated stranger can pollute any archive's shelf (books load into every member's `loadArchiveBooks`). Also lets a non-member set `library_id` on their own personal row and have it surface in others' archives.
+- **Fix direction:** narrow the personal policy so it only governs personal rows, e.g. add `AND library_id IS NULL` to both the `using` and `with_check` of `"users manage own books"`. Then shared inserts are governed solely by `"members insert shared books"`, which correctly requires membership. Re-verify personal-shelf CRUD after the change.
+
+## Advisor note
+`get_advisors(security)` after the run: **no new** "RLS disabled" or "policy allows
+all" findings for the Phase 2 tables — RLS is enabled on both `book_ownership` and
+`book_personal_state`, and no new SECURITY DEFINER function was added. The 5
+SECURITY DEFINER WARNs are the pre-existing Phase 1 helpers/RPCs; the `covers`
+public-bucket and leaked-password WARNs are pre-existing and unrelated. Note: the
+linter does NOT flag either defect above — both are logic gaps in policy *coverage*
+(a missing policy; an over-broad OR'd policy), which only real-JWT testing exposes.
+
+## Cleanup confirmed
+All 3 test users (A/B/C), test library L, its members/invites, and every seeded
+book/ownership/personal_state/note were deleted (service role; `on delete cascade`
+handled ownership/personal_state, notes deleted explicitly). Post-cleanup counts
+match the pre-test baseline exactly: **personal books=23, total books=23,
+avatars=2, profiles=3, libraries=1, library_members=3, library_invites=1,
+book_ownership=0, book_personal_state=0, notes=1, leftover test users=0.** The
+injected "Intruder Book" was also removed. `src/App.jsx` and the schema were **not**
+modified by QA.
+
+## Go / No-Go
+
+**NO-GO** — Failing IDs: **S-10** (non-member book injection) and the reveal-write
+check (**no UPDATE policy on `library_members`**). Route both to
+**supabase-migrator**:
+1. Add a self-scoped UPDATE policy on `library_members` so a member can set their
+   own `share_reading` (unblocks the reveal).
+2. Constrain `"users manage own books"` to `library_id IS NULL` so non-members
+   can't attach books to archives they don't belong to.
+
+Everything else — the no-leak rule end-to-end, per-format ownership, the full
+convert/merge/idempotency/edge surface, member permissions, outsider read
+isolation, and recursion-freedom — is correct and holds under real per-user JWTs.
+Re-QA after the two policy fixes; no frontend changes are needed for either.
+
+---
+
+# QA Report — Shared Library Phase 2 RLS Re-QA (post-`shared_library_phase2_rls_fixes`)
+
+**Migration under test:** `shared_library_phase2_rls_fixes` (`20260704063933`) on
+project `ujxsrcxbhcbihhdluzyl`. Focused re-run confirming the two prior blockers
+(FAIL-1 reveal-write, FAIL-2 / S-10 injection) are fixed and no regression to
+move-in convert or personal-book access.
+**Plan:** [tests/shared-library-phase2-rls-refix-test-plan.md](shared-library-phase2-rls-refix-test-plan.md).
+**Method:** real per-user JWTs (GoTrue password-grant) for A (owner), B (member of
+L), C (outsider); PostgREST as each user is what enforces RLS. MCP service role
+used ONLY for setup, ground-truth, and cleanup. Users created via SQL then
+password-grant; note the seeded `auth.users` rows required the GoTrue token
+columns (`confirmation_token`, `recovery_token`, `email_change`,
+`email_change_token_new`, …) set to `''` (not NULL) or token issuance fails with
+"Database error querying schema" — a setup detail, not a product defect.
+
+## Fixes verified present in live schema (pre-run inspection)
+- `library_members`: table-level UPDATE **revoked** from `authenticated`/`anon`;
+  column-level UPDATE granted **only on `share_reading`** to `authenticated`; new
+  RLS policy `members update own share_reading` (`user_id = auth.uid()`).
+- `books`: `users manage own books` FOR ALL now `(auth.uid() = user_id AND
+  library_id IS NULL)` in both USING and WITH CHECK; shared rows are owned solely
+  by the additive `members … shared books` policies.
+
+## Pass/Fail table (cases 1–6)
+
+| ID | Case | Result | Evidence (request → response) |
+|---|---|---|---|
+| R-1a | reveal-write: A sets own `share_reading=true` (was FAIL-1) | **PASS** | REST-as-A `PATCH /library_members?…&user_id=eq.A {"share_reading":true}` → HTTP 200, row returned `share_reading:true`; re-read as A → `share_reading:true`. (Prior: 200 with 0 rows updated.) |
+| R-1b | reveal ON: B reads A's `book_personal_state` | **PASS** | REST-as-B `GET /book_personal_state?book_id=eq.<S>&user_id=eq.A` → HTTP 200, 1 row `read:true, overall:4, smut:3, progress:{print:100}`. |
+| R-1c | reveal OFF: A flips false → B sees 0 rows | **PASS** | REST-as-A `PATCH share_reading:false` → 200; REST-as-B same GET → HTTP 200 `[]`. |
+| R-2 | role-escalation guard (new): A cannot self-promote | **PASS** | REST-as-A `PATCH {"role":"owner"}` → **HTTP 403 / 42501** "permission denied for table library_members"; combined `{"share_reading":true,"role":"owner"}` smuggle also **403** (whole statement rejected, `share_reading` NOT written). MCP ground-truth: A `role=owner`, B `role=member` unchanged. |
+| R-3 | S-10 (was FAIL-2): outsider C injects into L | **PASS** | REST-as-C `POST /books {library_id:L,user_id:C,…}` → **HTTP 403 / 42501** "new row violates row-level security policy for table books"; REST-as-B archive list shows no intruder; MCP: 0 rows titled "Intruder Refix Book", 0 books authored by C. (Prior: HTTP 201, row created.) |
+| R-4 | regression — member B shared insert | **PASS** | REST-as-B `POST /books {library_id:L,user_id:B,…}` → **HTTP 201**, row created `library_id=L`. |
+| R-5 | regression — move-in convert flip | **PASS** | REST-as-A `PATCH /books?id=eq.<personal,A> {"library_id":L}` → **HTTP 200**, row now `library_id=L`. Owner-member UPDATE flip allowed. |
+| R-6a | regression — personal CRUD | **PASS** | REST-as-A create→201, read→200, update→200, delete→200/204, verify-gone→`[]`. All on a `library_id null` book. |
+| R-6b | regression — personal shelf scoping | **PASS** | REST-as-A `GET /books?user_id=eq.A&library_id=is.null` returns only the fresh personal probe, excluding all three `library_id=L` shared rows A can otherwise see. |
+
+**Total: 9/9 checks PASS (cases 1–6 all PASS), 0 FAIL.**
+
+## Both prior blockers confirmed fixed
+- **FAIL-1 → fixed:** `share_reading` is now settable by the owner-member through
+  the client (R-1a), and the full reveal chain works end-to-end and reverses
+  cleanly (R-1b/R-1c). The fix did not open a role-write hole (R-2).
+- **FAIL-2 / S-10 → fixed:** the outsider can no longer inject a book into an
+  archive; the narrowed `users manage own books` policy leaves shared inserts to
+  the membership-gated policy, which C fails (R-3). Legitimate member insert
+  (R-4), owner convert flip (R-5), and personal CRUD/scoping (R-6) all still work.
+
+## Cleanup confirmed
+All 3 test users (A/B/C), test library L + members + invite, and every seeded
+book / ownership / personal_state were deleted (service role; cascades handled
+ownership + personal_state). Post-cleanup counts match baseline exactly:
+**personal books=23, total books=23, avatars=2, profiles=3, libraries=1,
+library_members=3, library_invites=1, book_ownership=0, book_personal_state=0,
+notes=1, leftover test users=0.** `src/App.jsx` and the schema were **not**
+modified by QA.
+
+## Go / No-Go
+
+**GO** — both prior blockers (S-10, reveal-write) are fixed, the new
+role-escalation guard holds, and no regression to convert or personal-book access.
+Shared Library Phase 2 is releasable at the RLS layer.
