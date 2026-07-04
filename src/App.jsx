@@ -1672,7 +1672,7 @@ export default function Hushthorn() {
   const FIELD_MAP = { coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', progress: 'progress' };
   // Split keys for the shared-book branch (the no-leak rule).
   const PERSONAL_KEYS = ['read', 'overall', 'smut', 'progress'];
-  const GROUP_KEYS = ['title', 'author', 'coverUrl', 'genres', 'formats'];
+  const GROUP_KEYS = ['title', 'author', 'coverUrl', 'genres', 'formats', 'spineColor'];
 
   const updateBook = async (id, patch) => {
     // Shared-book branch: a book carrying `library_id` splits its patch into MY
@@ -1680,12 +1680,12 @@ export default function Hushthorn() {
     // `books` row). Group writes are restricted to GROUP_KEYS so overall/smut/
     // read/progress are NEVER written to a shared row (the core privacy rule).
     // Personal books (no library_id) fall through to the unchanged path below.
-    const shared = sharedBooks.find(b => b.id === id);
-    if (shared && shared.library_id) {
+    const target = shelfBooks.find(b => b.id === id);
+    if (target && target.library_id) {
       // Auto-Read parity with the personal path: any format at 100% marks Read.
       // Re-derive from MY merged state (which is what the shared book carries).
-      if ('progress' in patch && !patch.read && !shared.read) {
-        const merged = { ...shared, ...patch };
+      if ('progress' in patch && !patch.read && !target.read) {
+        const merged = { ...target, ...patch };
         if (maxPercent(merged) >= 100) patch = { ...patch, read: true };
       }
 
@@ -1721,7 +1721,7 @@ export default function Hushthorn() {
       //    Source "current" from sharedBooks (which carries MY loaded notes),
       //    then diff by note-id sets exactly like the personal path below.
       if ('notes' in patch) {
-        const current = sharedBooks.find(b => b.id === id);
+        const current = target;
         if (current) {
           const currentIds = new Set((current.notes || []).map(n => n.id));
           const patchIds = new Set((patch.notes || []).map(n => n.id));
@@ -1879,7 +1879,9 @@ export default function Hushthorn() {
   // a write failure leaves spine_color null in the DB (retried next session).
   // The color value is supplied by the caller (Frontend); never computed here.
   const persistSpineColor = async (id, spine_color) => {
-    setBooks(prev => prev.map(b => b.id === id ? { ...b, spineColor: spine_color } : b));
+    const updater = prev => prev.map(b => b.id === id ? { ...b, spineColor: spine_color } : b);
+    setBooks(updater);
+    setSharedBooks(updater);
     const { error } = await supabase.from('books').update({ spine_color }).eq('id', id);
     if (error) console.error('persistSpineColor:', error.message);
   };
@@ -1895,7 +1897,7 @@ export default function Hushthorn() {
   // On miss or error: marks tried and does nothing; field stays empty.
   useEffect(() => {
     if (!activeId) return;
-    const book = books.find((b) => b.id === activeId);
+    const book = shelfBooks.find((b) => b.id === activeId);
     if (!book) return;
     if (!(book.formats || ["print"]).includes("print")) return;
     if (book.progress?.print?.pages) return; // already has a page count
@@ -1994,10 +1996,12 @@ export default function Hushthorn() {
     });
     if (bErr) { console.error('addBookToArchive (book):', bErr.message); return; }
 
-    // 2) Insert one ownership row per selected format (idempotent on 23505).
-    const { error: oErr } = await supabase.from('book_ownership').insert(
-      formats.map(format => ({ book_id: id, user_id: me, format }))
-    );
+    // 2) Insert one ownership row per selected format. Upsert with
+    //    ignoreDuplicates so a partial re-run skips already-present rows per-row
+    //    rather than failing the whole batch on 23505 when any row exists.
+    const ownRows = formats.map(format => ({ book_id: id, user_id: me, format }));
+    const { error: oErr } = await supabase.from('book_ownership')
+      .upsert(ownRows, { onConflict: 'book_id,user_id,format', ignoreDuplicates: true });
     if (oErr && oErr.code !== '23505') { console.error('addBookToArchive (ownership):', oErr.message); }
 
     // 3) Optimistically prepend to the shelf only if this archive is active.
@@ -2005,7 +2009,19 @@ export default function Hushthorn() {
     //    ownership listed, shelf derived as 'owned' (>=1 owner), no reveals/notes,
     //    and reuse the roster the archive already loaded when available.
     if (currentLibraryId === libraryId) {
-      const members = sharedBooks[0]?.members || [];
+      // Seed the current user so the adder's avatar shows immediately even when
+      // this is the first book in a fresh archive (no roster loaded yet). The
+      // card labels the current user "You"; the avatar appearance is what matters.
+      const members = sharedBooks[0]?.members || [{
+        user_id: me,
+        username: profile?.username,
+        av: {
+          gender: avatar.gender,
+          hair_color: avatar.hair_color,
+          skin_tone: avatar.skin_tone,
+          robe_color: avatar.robe_color,
+        },
+      }];
       const merged = {
         id,
         title: book.title,
@@ -2054,7 +2070,7 @@ export default function Hushthorn() {
   const moveBookIntoArchive = async (bookId, libraryId) => {
     if (!session || !bookId || !libraryId) {
       console.error('moveBookIntoArchive: missing session, bookId, or libraryId');
-      return;
+      return false;
     }
     const me = session.user.id;
 
@@ -2072,8 +2088,8 @@ export default function Hushthorn() {
       .from('books').select('*')
       .eq('id', bookId).eq('user_id', me).is('library_id', null)
       .maybeSingle();
-    if (rErr) { console.error('moveBookIntoArchive (load row):', rErr.message); return; }
-    if (!row) { console.error('moveBookIntoArchive: personal book not found (or not mine / not personal)'); return; }
+    if (rErr) { console.error('moveBookIntoArchive (load row):', rErr.message); return false; }
+    if (!row) { console.error('moveBookIntoArchive: personal book not found (or not mine / not personal)'); return false; }
 
     const title = (row.title || '').trim();
     // My current marks on the personal row. A book is "meaningful" (worth a
@@ -2098,7 +2114,7 @@ export default function Hushthorn() {
     const { data: candidates, error: cErr } = await supabase
       .from('books').select('*')
       .eq('library_id', libraryId).ilike('title', title);
-    if (cErr) { console.error('moveBookIntoArchive (title lookup):', cErr.message); return; }
+    if (cErr) { console.error('moveBookIntoArchive (title lookup):', cErr.message); return false; }
     const key = title.toLowerCase();
     const existing = (candidates || []).find(
       c => (c.title || '').trim().toLowerCase() === key
@@ -2120,10 +2136,12 @@ export default function Hushthorn() {
     };
 
     const insertMyOwnership = async (targetId) => {
-      // One row per format; ignore 23505 (PK dedupe) so re-running is idempotent.
-      const { error } = await supabase.from('book_ownership').insert(
-        formats.map(format => ({ book_id: targetId, user_id: me, format }))
-      );
+      // One row per format; upsert with ignoreDuplicates so a partial re-run
+      // skips rows that already exist per-row (idempotent) instead of failing
+      // the whole batch on 23505 when ANY row is already present.
+      const rows = formats.map(format => ({ book_id: targetId, user_id: me, format }));
+      const { error } = await supabase.from('book_ownership')
+        .upsert(rows, { onConflict: 'book_id,user_id,format', ignoreDuplicates: true });
       if (error && error.code !== '23505') {
         console.error('moveBookIntoArchive (ownership):', error.message);
         return false;
@@ -2143,7 +2161,7 @@ export default function Hushthorn() {
 
       // A1) Migrate my marks into MY personal_state (only if meaningful) — done
       //     first, while the row is still owner-only, so nothing leaks.
-      if (!(await upsertMyState(bookId))) return;
+      if (!(await upsertMyState(bookId))) return false;
 
       // A2) Flip into the archive AND reset the mark columns in a SINGLE update.
       //     Because it is one statement, at the instant library_id is set the
@@ -2151,30 +2169,30 @@ export default function Hushthorn() {
       const { error: mErr } = await supabase.from('books')
         .update({ library_id: libraryId, overall: 0, smut: 0, read: false, progress: {} })
         .eq('id', bookId);
-      if (mErr) { console.error('moveBookIntoArchive (convert+reset):', mErr.message); return; }
+      if (mErr) { console.error('moveBookIntoArchive (convert+reset):', mErr.message); return false; }
 
       // A3) Record my ownership per format (idempotent). MUST come AFTER the
       //     flip: the book_ownership insert RLS requires the book to already be
       //     in one of my libraries; inserting while still personal is denied.
-      if (!(await insertMyOwnership(bookId))) return;
+      if (!(await insertMyOwnership(bookId))) return false;
     } else {
       // ── Case B: merge into the existing shared row ─────────────────────
       const target = existing.id;
 
       // B1) Migrate my marks onto the existing row's personal_state (upsert).
-      if (!(await upsertMyState(target))) return;
+      if (!(await upsertMyState(target))) return false;
 
       // B2) Record my ownership on the target per format (idempotent).
-      if (!(await insertMyOwnership(target))) return;
+      if (!(await insertMyOwnership(target))) return false;
 
       // B3) Re-point my notes FIRST, THEN delete the personal row — the
       //     notes.book_id FK would break if we deleted first.
       const { data: myNotesTarget, error: tnErr } = await supabase
         .from('notes').select('*').eq('user_id', me).eq('book_id', target);
-      if (tnErr) { console.error('moveBookIntoArchive (target notes):', tnErr.message); return; }
+      if (tnErr) { console.error('moveBookIntoArchive (target notes):', tnErr.message); return false; }
       const { data: myNotesSource, error: snErr } = await supabase
         .from('notes').select('*').eq('user_id', me).eq('book_id', bookId);
-      if (snErr) { console.error('moveBookIntoArchive (source notes):', snErr.message); return; }
+      if (snErr) { console.error('moveBookIntoArchive (source notes):', snErr.message); return false; }
 
       // Fingerprints already on the target (mine). Map the DB column names into
       // the in-memory shape noteFp expects.
@@ -2185,19 +2203,19 @@ export default function Hushthorn() {
         if (targetFps.has(fp)) {
           // Duplicate already on the target → drop the leftover personal note.
           const { error } = await supabase.from('notes').delete().eq('id', n.id);
-          if (error) { console.error('moveBookIntoArchive (note dedupe delete):', error.message); return; }
+          if (error) { console.error('moveBookIntoArchive (note dedupe delete):', error.message); return false; }
         } else {
           // Unique → re-point it at the shared row, and record its fp so two
           // identical source notes don't both survive.
           const { error } = await supabase.from('notes').update({ book_id: target }).eq('id', n.id);
-          if (error) { console.error('moveBookIntoArchive (note re-point):', error.message); return; }
+          if (error) { console.error('moveBookIntoArchive (note re-point):', error.message); return false; }
           targetFps.add(fp);
         }
       }
 
       // B4) Now that no note references it, delete my personal row.
       const { error: dErr } = await supabase.from('books').delete().eq('id', bookId);
-      if (dErr) { console.error('moveBookIntoArchive (delete personal row):', dErr.message); return; }
+      if (dErr) { console.error('moveBookIntoArchive (delete personal row):', dErr.message); return false; }
 
       // B5) Union any of my formats not already on the target's group formats so
       //     ProgressEditor shows those rows for everyone.
@@ -2207,7 +2225,7 @@ export default function Hushthorn() {
       if (unioned.length !== targetFormats.length) {
         const { error: fErr } = await supabase.from('books')
           .update({ formats: unioned }).eq('id', target);
-        if (fErr) { console.error('moveBookIntoArchive (formats union):', fErr.message); return; }
+        if (fErr) { console.error('moveBookIntoArchive (formats union):', fErr.message); return false; }
       }
     }
 
@@ -2216,6 +2234,7 @@ export default function Hushthorn() {
     // not necessarily active right now), so we don't optimistically inject it.
     setBooks(prev => prev.filter(b => b.id !== bookId));
     if (activeId === bookId) setActiveId(null);
+    return true;
   };
 
   // In the personal library (currentLibraryId === null) the tabs are UNCHANGED.
@@ -2460,7 +2479,7 @@ export default function Hushthorn() {
           onToggleOwnership={toggleOwnership}
           session={session}
           archives={archives}
-          onMoveToArchive={moveBookIntoArchive}
+          onMoveToArchive={(id, lib) => moveBookIntoArchive(id, lib)}
         />
       )}
 
@@ -5294,14 +5313,25 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, onToggleOwnership, ses
   };
   const [moveTo, setMoveTo] = useState("");
   const [moving, setMoving] = useState(false);
+  const [moveErr, setMoveErr] = useState("");
+  // Clear any stale move error when the selection changes to a different book.
+  useEffect(() => { setMoveErr(""); }, [book.id]);
   const runMove = async () => {
     if (!moveTo || moving) return;
+    setMoveErr("");
     setMoving(true);
+    let ok = false;
     try {
-      await onMoveToArchive(book.id, moveTo);
+      ok = await onMoveToArchive(book.id, moveTo);
     } catch (e) {
       // moveBookIntoArchive never throws by contract, but stay defensive.
       console.error('DetailPanel move:', e);
+      ok = false;
+    }
+    setMoving(false);
+    if (!ok) {
+      setMoveErr('Could not move this tome — check your connection and try again.');
+      return;
     }
     onClose();
   };
@@ -5384,6 +5414,9 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, onToggleOwnership, ses
                 <p className="text-[11px] text-purple-400/60 italic leading-snug">
                   Shares this tome with that archive as a co-owner. Your marks stay yours; the shared copy carries none.
                 </p>
+                {moveErr && (
+                  <p className="text-[11px] text-pink-300 italic leading-snug">{moveErr}</p>
+                )}
               </div>
             )}
           </div>
