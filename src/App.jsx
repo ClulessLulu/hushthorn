@@ -1333,9 +1333,9 @@ export default function Hushthorn() {
     setDataLoading(true);
     const uid = session.user.id;
     Promise.all([
-      // Personal shelf only — `.is('library_id', null)` keeps shared-archive
-      // rows (whose creator is this user) out of the personal library.
-      supabase.from('books').select('*').eq('user_id', uid).is('library_id', null).order('created_at', { ascending: false }),
+      // Personal shelf — every book I own. Books are personal again (union model);
+      // there is no `library_id` column and no shared-book rows to filter out.
+      supabase.from('books').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
       supabase.from('notes').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
       supabase.from('avatars').select('*').eq('user_id', uid).maybeSingle(),
       supabase.from('profiles').select('username').eq('user_id', uid).maybeSingle(),
@@ -1360,6 +1360,7 @@ export default function Hushthorn() {
         spineColor: b.spine_color,
         formats: b.formats || ['print'],
         progress: (b.progress && typeof b.progress === 'object') ? b.progress : {},
+        hidden: !!b.hidden_from_archives,
         notes: notesByBook[b.id] || [],
       })));
       if (avatarData) setAvatar({
@@ -1384,55 +1385,60 @@ export default function Hushthorn() {
       .finally(() => { setDataLoading(false); setProfileReady(true); });
   }, [session]);
 
-  // ── shared archive read/merge layer (Phase 2, Task 2) ──────────────
-  // Load one shared archive's books and merge each row into the app's
-  // in-memory book shape so Meter/ProgressEditor/CardProgress/spine need no
-  // change. A shared MergedBook carries the group fields PLUS: library_id,
-  // ownership[], reveals[], members[], and my private read/overall/smut/progress
-  // sourced from book_personal_state (defaults if I have no row). `shelf` is
-  // derived from ownership. Every Supabase call is defensive: errors are logged
-  // and treated as empty, so a partial failure degrades to a thinner shelf
-  // rather than throwing — never a dead end.
-  const loadArchiveBooks = async (uid, libraryId) => {
+  // ── shared archive union read model (Union model, Task 2) ───────────
+  // An archive is a *lens*: it merges every member's PERSONAL library, deduped
+  // by normalized title+author, and tags each entry with who owns it. Books stay
+  // personal (owner-only `books` rows); co-members are read ONLY through the two
+  // SECURITY DEFINER views:
+  //   • archive_shelf  — shareable metadata, NO marks columns (structurally can't leak)
+  //   • archive_reveal — a co-member's marks, ONLY where they opted into sharing
+  // My own row is the source of MY marks/notes/hidden; the views exclude my rows
+  // (and everyone's hidden rows for co-members).
+  //
+  // Produces UnionBook[]:
+  //   { key, title, author, coverUrl, genres, formats(union),
+  //     mineBookId?, read, overall, smut, progress, notes, hidden, shelf,   // from MY copy; defaults if I lack it
+  //     owners:  [{ user_id, username, av, formats, shelf }],               // me + every archive_shelf owner
+  //     reveals: [{ user_id, overall, smut, progress, read }] }             // archive_reveal rows for this key
+  //
+  // key = norm(title)+'|'+norm(author), norm(s)=(s||'').trim().toLowerCase().
+  // Every Supabase call is defensive: errors are logged and treated as empty, so
+  // a partial failure degrades to a thinner shelf rather than throwing.
+  const loadArchiveUnion = async (uid, libraryId) => {
     if (!uid || !libraryId) return [];
+    const norm = (s) => (s || '').trim().toLowerCase();
+    const keyOf = (title, author) => `${norm(title)}|${norm(author)}`;
 
-    const { data: rows, error: rErr } = await supabase
-      .from('books').select('*').eq('library_id', libraryId)
-      .order('created_at', { ascending: false });
-    if (rErr) console.error('archive books fetch:', rErr.message);
-    const bookRows = rows || [];
-    const ids = bookRows.map(b => b.id);
-    if (ids.length === 0) return [];
-
+    // Fetch my books, the two co-member views, my notes, and the roster in parallel.
     const [
-      { data: own, error: oErr },
-      { data: ps, error: pErr },
-      { data: mem, error: mErr },
+      { data: mineRows, error: bErr },
+      { data: shelfRows, error: sErr },
+      { data: revealRows, error: rvErr },
       { data: myNotes, error: nErr },
+      { data: memRows, error: mErr },
     ] = await Promise.all([
-      supabase.from('book_ownership').select('book_id,user_id,format').in('book_id', ids),
-      // RLS returns MY rows plus any revealed co-member rows (opt-in policy).
-      supabase.from('book_personal_state').select('*').in('book_id', ids),
-      // Roster. NOTE: `library_members` has no declared FK to `profiles`/`avatars`
-      // (both key on `user_id → auth.users`), so PostgREST cannot embed them.
-      // Reuse the Phase 1 LibraryDetail pattern: load members, then fetch
-      // profiles + avatars by user_id in a second round.
+      supabase.from('books').select('*').eq('user_id', uid),
+      supabase.from('archive_shelf').select('*').eq('library_id', libraryId),
+      supabase.from('archive_reveal').select('*').eq('library_id', libraryId),
+      supabase.from('notes').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
       supabase.from('library_members').select('user_id,role').eq('library_id', libraryId),
-      // My notes only, for these shared books — same shape as the personal load.
-      supabase.from('notes').select('*').eq('user_id', uid).in('book_id', ids)
-        .order('created_at', { ascending: false }),
     ]);
-    if (oErr) console.error('ownership fetch:', oErr.message);
-    if (pErr) console.error('personal_state fetch:', pErr.message);
-    if (mErr) console.error('roster fetch:', mErr.message);
-    if (nErr) console.error('archive notes fetch:', nErr.message);
+    if (bErr) console.error('union my books fetch:', bErr.message);
+    if (sErr) console.error('archive_shelf fetch:', sErr.message);
+    if (rvErr) console.error('archive_reveal fetch:', rvErr.message);
+    if (nErr) console.error('union notes fetch:', nErr.message);
+    if (mErr) console.error('union roster fetch:', mErr.message);
 
-    const ownRows = own || [];
-    const psRows = ps || [];
-    const memRows = mem || [];
+    const mine = mineRows || [];
+    const shelf = shelfRows || [];
+    const reveal = revealRows || [];
+    const members = memRows || [];
 
-    // Second round: profiles + avatars for the roster, by user_id (Phase 1 idiom).
-    const memberIds = memRows.map(m => m.user_id);
+    // Roster identity: `library_members` has no FK to profiles/avatars (both key
+    // on user_id → auth.users), so PostgREST can't embed them. Load members, then
+    // fetch profiles + avatars by user_id in a second round (the Phase-1 idiom).
+    // Seed with me so my avatar shows even before the roster resolves.
+    const memberIds = Array.from(new Set([uid, ...members.map(m => m.user_id)]));
     let profsData = [];
     let avsData = [];
     if (memberIds.length) {
@@ -1440,32 +1446,25 @@ export default function Hushthorn() {
         supabase.from('profiles').select('user_id, username').in('user_id', memberIds),
         supabase.from('avatars').select('user_id, gender, hair_color, skin_tone, robe_color').in('user_id', memberIds),
       ]);
-      if (prErr) console.error('roster profiles fetch:', prErr.message);
-      if (avErr) console.error('roster avatars fetch:', avErr.message);
+      if (prErr) console.error('union roster profiles fetch:', prErr.message);
+      if (avErr) console.error('union roster avatars fetch:', avErr.message);
       profsData = profs || [];
       avsData = avs || [];
     }
     const profBy = Object.fromEntries(profsData.map(p => [p.user_id, p]));
     const avBy = Object.fromEntries(avsData.map(a => [a.user_id, a]));
-
-    // roster → [{ user_id, username, av }]
-    const members = memRows.map(m => {
-      const a = avBy[m.user_id];
+    const identity = (userId) => {
+      const a = avBy[userId];
       return {
-        user_id: m.user_id,
-        username: profBy[m.user_id]?.username,
+        user_id: userId,
+        username: profBy[userId]?.username,
         av: a
-          ? {
-              gender: a.gender,
-              hair_color: a.hair_color,
-              skin_tone: a.skin_tone,
-              robe_color: a.robe_color,
-            }
+          ? { gender: a.gender, hair_color: a.hair_color, skin_tone: a.skin_tone, robe_color: a.robe_color }
           : null,
       };
-    });
+    };
 
-    // my notes, grouped by book (personal-load shape).
+    // My notes, grouped by book id (personal-load shape).
     const notesByBook = {};
     for (const n of (myNotes || [])) {
       if (!notesByBook[n.book_id]) notesByBook[n.book_id] = [];
@@ -1475,56 +1474,101 @@ export default function Hushthorn() {
       });
     }
 
-    return bookRows.map(row => {
-      const mine = psRows.find(p => p.book_id === row.id && p.user_id === uid) || null;
-      const reveals = psRows
-        .filter(p => p.book_id === row.id && p.user_id !== uid)
-        .map(p => ({
-          user_id: p.user_id,
-          overall: p.overall ?? 0,
-          smut: p.smut ?? 0,
-          progress: (p.progress && typeof p.progress === 'object') ? p.progress : {},
-          read: !!p.read,
-        }));
-      const ownership = ownRows
-        .filter(o => o.book_id === row.id)
-        .map(o => ({ user_id: o.user_id, format: o.format }));
+    const map = new Map();
 
-      return {
-        id: row.id,
-        title: row.title,
-        author: row.author,
-        year: row.year,
-        coverUrl: row.cover_url,
-        genres: row.genres || [],
-        formats: row.formats || ['print'],
-        spineColor: row.spine_color,
-        library_id: row.library_id,
-        // MY private state (defaults when I have no book_personal_state row) —
-        // the shared `books` row's own overall/smut/progress/read are ignored
-        // (the no-leak rule).
-        read: mine ? !!mine.read : false,
-        overall: mine ? (mine.overall ?? 0) : 0,
-        smut: mine ? (mine.smut ?? 0) : 0,
-        progress: (mine && mine.progress && typeof mine.progress === 'object') ? mine.progress : {},
-        notes: notesByBook[row.id] || [],
-        // derived: any owner → owned, else the shared wishlist.
-        shelf: ownership.length ? 'owned' : 'wishlist',
-        ownership,
-        reveals,
-        members,
-      };
-    });
+    // 1) Seed from MY books first (include ALL of mine, even hidden — hidden books
+    //    still show to ME; the views already exclude my hidden books for others).
+    for (const b of mine) {
+      const key = keyOf(b.title, b.author);
+      const meId = identity(uid);
+      const myFormats = b.formats || ['print'];
+      const myShelf = b.shelf || 'wishlist';
+      map.set(key, {
+        key,
+        title: b.title,
+        author: b.author,
+        coverUrl: b.cover_url,
+        genres: b.genres || [],
+        formats: Array.from(new Set(myFormats)),
+        mineBookId: b.id,
+        read: !!b.read,
+        overall: b.overall ?? 0,
+        smut: b.smut ?? 0,
+        progress: (b.progress && typeof b.progress === 'object') ? b.progress : {},
+        notes: notesByBook[b.id] || [],
+        hidden: !!b.hidden_from_archives,
+        shelf: myShelf,
+        owners: [{ user_id: uid, username: meId.username, av: meId.av, formats: myFormats, shelf: myShelf }],
+        reveals: [],
+      });
+    }
+
+    // 2) Fold in each co-member's archive_shelf row (metadata + ownership only).
+    for (const s of shelf) {
+      const key = keyOf(s.title, s.author);
+      const ownerFormats = s.formats || ['print'];
+      let entry = map.get(key);
+      if (!entry) {
+        // A title only co-members have — I don't own it, so marks default.
+        entry = {
+          key,
+          title: s.title,
+          author: s.author,
+          coverUrl: s.cover_url,
+          genres: s.genres || [],
+          formats: [],
+          mineBookId: undefined,
+          read: false,
+          overall: 0,
+          smut: 0,
+          progress: {},
+          notes: [],
+          hidden: false,
+          shelf: 'wishlist',
+          owners: [],
+          reveals: [],
+        };
+        map.set(key, entry);
+      }
+      // coverUrl/genres: prefer mine; else fall back to the first owner's.
+      if (!entry.coverUrl && s.cover_url) entry.coverUrl = s.cover_url;
+      if ((!entry.genres || entry.genres.length === 0) && (s.genres || []).length) entry.genres = s.genres;
+      // formats = union of every owner's formats.
+      entry.formats = Array.from(new Set([...(entry.formats || []), ...ownerFormats]));
+      const who = identity(s.owner_id);
+      entry.owners.push({
+        user_id: s.owner_id,
+        username: who.username,
+        av: who.av,
+        formats: ownerFormats,
+        shelf: s.shelf || 'wishlist',
+      });
+    }
+
+    // 3) Attach co-member reveals (opted-in marks) by key.
+    for (const r of reveal) {
+      const key = keyOf(r.title, r.author);
+      const entry = map.get(key);
+      if (!entry) continue; // a reveal with no shelf metadata — nothing to attach it to
+      entry.reveals.push({
+        user_id: r.owner_id,
+        overall: r.overall ?? 0,
+        smut: r.smut ?? 0,
+        progress: (r.progress && typeof r.progress === 'object') ? r.progress : {},
+        read: !!r.read,
+      });
+    }
+
+    return [...map.values()];
   };
 
-  // Load the active archive's books when switched; clear when personal (null).
-  // Nothing sets `currentLibraryId` yet, so this is inert until Task 6.
+  // Load the active archive's union when switched; clear when personal (null).
   useEffect(() => {
     if (currentLibraryId == null || !session) { setSharedBooks([]); return; }
     let cancelled = false;
-    loadArchiveBooks(session.user.id, currentLibraryId)
-      .then(merged => { if (!cancelled) setSharedBooks(merged); })
-      .catch(err => { console.error('loadArchiveBooks:', err); if (!cancelled) setSharedBooks([]); });
+    loadArchiveUnion(session.user.id, currentLibraryId)
+      .then(union => { if (!cancelled) setSharedBooks(union); })
+      .catch(err => { console.error('loadArchiveUnion:', err); if (!cancelled) setSharedBooks([]); });
     return () => { cancelled = true; };
   }, [currentLibraryId, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1648,10 +1692,12 @@ export default function Hushthorn() {
     // Personal-shelf filters (currentLibraryId === null) — unchanged.
     if (shelfFilter === "owned") return b.shelf === "owned";
     if (shelfFilter === "wishlist") return b.shelf === "wishlist";
-    // Archive-only ownership filters (non-exclusive; computed from `ownership`).
-    if (shelfFilter === "iown") return (b.ownership || []).some((o) => o.user_id === me);
-    if (shelfFilter === "othersown") return (b.ownership || []).some((o) => o.user_id !== me);
-    if (shelfFilter === "nobody") return (b.ownership || []).length === 0;
+    // Archive-only ownership filters (non-exclusive; computed from `owners`).
+    // Task 3 rebuilds the tab set (I own / Others own / Wishlist); these keep the
+    // current tabs functional against the UnionBook shape in the meantime.
+    if (shelfFilter === "iown") return (b.owners || []).some((o) => o.user_id === me && o.shelf === "owned");
+    if (shelfFilter === "othersown") return (b.owners || []).some((o) => o.user_id !== me && o.shelf === "owned");
+    if (shelfFilter === "nobody") return !(b.owners || []).some((o) => o.shelf === "owned");
     // Shared across both contexts.
     if (shelfFilter === "read") return b.read;
     if (shelfFilter === "unread") return !b.read;
@@ -1664,95 +1710,13 @@ export default function Hushthorn() {
   const sorted = sortBooks(filtered, sortKey);
   const gridBooks = sorted.filter((b) => matchesQuery(b, query));
 
-  // FIELD_MAP maps in-memory book fields → `books` columns. Hoisted so both the
-  // personal path and the shared-group path reuse the same mapping. Personal
-  // marks (overall/smut/read/progress) intentionally live here for personal
-  // books; for shared books the group path is RESTRICTED to non-personal keys
-  // only (see GROUP_KEYS) so a shared `books` row never carries anyone's marks.
-  const FIELD_MAP = { coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', progress: 'progress' };
-  // Split keys for the shared-book branch (the no-leak rule).
-  const PERSONAL_KEYS = ['read', 'overall', 'smut', 'progress'];
-  const GROUP_KEYS = ['title', 'author', 'coverUrl', 'genres', 'formats', 'spineColor'];
+  // FIELD_MAP maps in-memory book fields → `books` columns. Books are personal
+  // again (union model), so there is a single personal write path — marks and
+  // metadata all live on the owner's own row. `hidden` maps to the per-book
+  // `hidden_from_archives` flag that removes a book from the archive union.
+  const FIELD_MAP = { coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', progress: 'progress', hidden: 'hidden_from_archives' };
 
   const updateBook = async (id, patch) => {
-    // Shared-book branch: a book carrying `library_id` splits its patch into MY
-    // private reading state (book_personal_state) and group fields (the shared
-    // `books` row). Group writes are restricted to GROUP_KEYS so overall/smut/
-    // read/progress are NEVER written to a shared row (the core privacy rule).
-    // Personal books (no library_id) fall through to the unchanged path below.
-    const target = shelfBooks.find(b => b.id === id);
-    if (target && target.library_id) {
-      // Auto-Read parity with the personal path: any format at 100% marks Read.
-      // Re-derive from MY merged state (which is what the shared book carries).
-      if ('progress' in patch && !patch.read && !target.read) {
-        const merged = { ...target, ...patch };
-        if (maxPercent(merged) >= 100) patch = { ...patch, read: true };
-      }
-
-      // 1) Personal marks → my book_personal_state row (PK conflict book_id,user_id).
-      const personal = Object.fromEntries(
-        PERSONAL_KEYS.filter(k => k in patch).map(k => [k, patch[k]])
-      );
-      if (Object.keys(personal).length) {
-        const { error } = await supabase.from('book_personal_state').upsert({
-          book_id: id,
-          user_id: session.user.id,
-          ...personal,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'book_id,user_id' });
-        if (error) { console.error('updateBook (personal_state):', error.message); return; }
-      }
-
-      // 2) Group fields → the shared `books` row, mapped via FIELD_MAP but
-      //    RESTRICTED to GROUP_KEYS only (never a personal mark).
-      const groupPatch = Object.fromEntries(
-        Object.entries(FIELD_MAP)
-          .filter(([k]) => GROUP_KEYS.includes(k) && k in patch)
-          .map(([k, col]) => [col, patch[k]])
-      );
-      if (Object.keys(groupPatch).length) {
-        const { error } = await supabase.from('books').update(groupPatch).eq('id', id);
-        if (error) { console.error('updateBook (shared group):', error.message); return; }
-      }
-
-      // 3) Notes are per-user and private even on a shared book (the `notes`
-      //    table carries user_id; RLS is owner-only). A note on a shared book is
-      //    just book_id=<shared id>, user_id=me — same shape as a personal note.
-      //    Source "current" from sharedBooks (which carries MY loaded notes),
-      //    then diff by note-id sets exactly like the personal path below.
-      if ('notes' in patch) {
-        const current = target;
-        if (current) {
-          const currentIds = new Set((current.notes || []).map(n => n.id));
-          const patchIds = new Set((patch.notes || []).map(n => n.id));
-          const added = (patch.notes || []).find(n => !currentIds.has(n.id));
-          const removed = (current.notes || []).find(n => !patchIds.has(n.id));
-          if (added) {
-            const { error } = await supabase.from('notes').insert({
-              id: added.id,
-              book_id: id,
-              user_id: session.user.id,
-              page: added.page,
-              is_quote: added.isQuote,
-              text: added.text,
-              is_voice: added.isVoice,
-              is_time: added.isTime ?? false,
-              date: added.date,
-            });
-            if (error) { console.error('updateBook (shared note insert):', error.message); return; }
-          }
-          if (removed) {
-            const { error } = await supabase.from('notes').delete().eq('id', removed.id);
-            if (error) { console.error('updateBook (shared note delete):', error.message); return; }
-          }
-        }
-      }
-
-      // Optimistically mirror the change onto the open detail/card.
-      setSharedBooks(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
-      return;
-    }
-
     // Handle notes diff — detects adds and/or deletes by comparing ID sets
     if ('notes' in patch) {
       const current = books.find(b => b.id === id);
@@ -1800,78 +1764,32 @@ export default function Hushthorn() {
       if (error) { console.error('updateBook:', error.message); return; }
     }
     setBooks(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
+    // Mirror onto the archive union too: a UnionBook keyed on this row (my copy)
+    // gets my marks/notes/hidden patched so an open archive detail stays in sync.
+    setSharedBooks(prev => prev.map(b => b.mineBookId === id ? { ...b, ...patch } : b));
   };
 
-  // Delete a book row. For a SHARED book this is a group action — deleting the
-  // shared `books` row cascades ownership + everyone's personal_state (schema),
-  // so it leaves the archive for every member. The DetailPanel confirms this and
-  // steers a user who only wants to drop their own copy toward the "I own"
-  // toggles instead. Update whichever local list holds the book.
+  // Delete a personal book row (owner-only). Drop it from the personal shelf and
+  // from any archive union entry whose "my copy" is this row.
   const removeBook = async (id) => {
     const { error } = await supabase.from('books').delete().eq('id', id);
     if (error) { console.error('removeBook:', error.message); return; }
     setBooks(prev => prev.filter(b => b.id !== id));
-    setSharedBooks(prev => prev.filter(b => b.id !== id));
+    setSharedBooks(prev => prev.filter(b => b.mineBookId !== id));
     setActiveId(null);
   };
 
-  // Per-format "I own" toggle for a SHARED book. Writes only MY book_ownership
-  // rows (PK book_id,user_id,format); never touches another member's ownership.
-  //   own === true  → insert my (book,me,format) row (ignore 23505 duplicate),
-  //                   and add `format` to books.formats if missing so
-  //                   ProgressEditor renders that format's row for everyone.
-  //   own === false → delete my (book,me,format) row.
-  // Local state: patch the book's `ownership` array + re-derive `shelf`
-  // (>=1 owner → 'owned', 0 owners → 'wishlist'). Defensive: every Supabase
-  // call logs its error and returns rather than throwing to the UI.
-  const toggleOwnership = async (bookId, format, own) => {
-    if (!session) return;
-    const me = session.user.id;
-    const book = sharedBooks.find(b => b.id === bookId);
-    if (!book) return;
-
-    if (own) {
-      const { error } = await supabase.from('book_ownership').insert({
-        book_id: bookId,
-        user_id: me,
-        format,
-      });
-      // 23505 = unique_violation: the row already exists → treat as success (idempotent).
-      if (error && error.code !== '23505') { console.error('toggleOwnership (insert):', error.message); return; }
-
-      // Ensure the format is present in the shared book's group-level formats
-      // union so ProgressEditor shows that format's row.
-      const currentFormats = book.formats || [];
-      if (!currentFormats.includes(format)) {
-        const nextFormats = [...currentFormats, format];
-        const { error: fErr } = await supabase.from('books').update({ formats: nextFormats }).eq('id', bookId);
-        if (fErr) { console.error('toggleOwnership (formats union):', fErr.message); return; }
-      }
-    } else {
-      const { error } = await supabase.from('book_ownership')
-        .delete()
-        .eq('book_id', bookId)
-        .eq('user_id', me)
-        .eq('format', format);
-      if (error) { console.error('toggleOwnership (delete):', error.message); return; }
-    }
-
-    // Optimistic local update: mutate MY ownership entries, add the format to the
-    // group union on insert, and re-derive `shelf` from the resulting ownership.
-    setSharedBooks(prev => prev.map(b => {
-      if (b.id !== bookId) return b;
-      const others = (b.ownership || []).filter(o => !(o.user_id === me && o.format === format));
-      const nextOwnership = own ? [...others, { user_id: me, format }] : others;
-      const nextFormats = own && !(b.formats || []).includes(format)
-        ? [...(b.formats || []), format]
-        : b.formats;
-      return {
-        ...b,
-        ownership: nextOwnership,
-        formats: nextFormats,
-        shelf: nextOwnership.length ? 'owned' : 'wishlist',
-      };
-    }));
+  // Hide/reveal one of MY books from every shared archive union. `hidden_from_archives`
+  // is an owner-only flag on my own `books` row; the two archive views exclude
+  // hidden rows for co-members, and my personal library still shows it to me.
+  // Optimistic: patch `books` immediately and mirror onto any archive union entry
+  // whose "my copy" is this row, so the toggle reflects at once. Defensive: a write
+  // failure logs and leaves the in-memory state (retried on the next reload).
+  const setHidden = async (bookId, hidden) => {
+    setBooks(prev => prev.map(b => b.id === bookId ? { ...b, hidden } : b));
+    setSharedBooks(prev => prev.map(b => b.mineBookId === bookId ? { ...b, hidden } : b));
+    const { error } = await supabase.from('books').update({ hidden_from_archives: hidden }).eq('id', bookId);
+    if (error) console.error('setHidden:', error.message);
   };
 
   // Lazy backfill: persist one book's sampled spine color and mirror it locally
@@ -1954,287 +1872,6 @@ export default function Hushthorn() {
     setBooks(prev => [{ ...book, id, progress: book.progress || {}, notes: [] }, ...prev]);
     setAddOpen(false);
     if (book.shelf === 'owned') setActiveId(id);
-  };
-
-  // Add a brand-new book directly into a shared archive (Task 4). Parallel to
-  // `addBook`, but for the shared case: the `books` row carries the library and
-  // the creator's id for provenance, and NEVER any personal marks — the no-leak
-  // rule. `overall/smut/read/progress` on a shared row stay at defaults; the
-  // adder's marks (if any) are ignored here. Ownership is recorded per selected
-  // format in `book_ownership`. This does NOT handle the "title already exists in
-  // the archive → merge" case — that is Task 5 (`moveBookIntoArchive`); a
-  // duplicate title landing here is left as a separate shared row for now.
-  //
-  // `myFormats` is the set of editions the adder owns; it must include at least
-  // 'print'. Defensive throughout — like `addBook`, this never throws to the UI.
-  const addBookToArchive = async (book, libraryId, myFormats) => {
-    if (!session || !libraryId) { console.error('addBookToArchive: missing session or libraryId'); return; }
-    const me = session.user.id;
-    // Normalize formats to the allowed set; guarantee 'print' is present.
-    const allowed = ['print', 'ebook', 'audio'];
-    let formats = Array.from(new Set((myFormats || []).filter(f => allowed.includes(f))));
-    if (!formats.includes('print')) formats = ['print', ...formats];
-
-    const id = crypto.randomUUID();
-    // 1) Insert the shared books row — group fields only, marks at defaults.
-    const { error: bErr } = await supabase.from('books').insert({
-      id,
-      library_id: libraryId,
-      user_id: me,                 // creator / provenance only; access is by library policy
-      title: book.title,
-      author: book.author,
-      year: book.year ?? null,
-      cover_url: book.coverUrl,
-      genres: book.genres,
-      spine_color: book.spineColor ?? null,
-      formats,
-      // The no-leak rule: a shared row carries NO personal marks.
-      overall: 0,
-      smut: 0,
-      read: false,
-      progress: {},
-    });
-    if (bErr) { console.error('addBookToArchive (book):', bErr.message); return; }
-
-    // 2) Insert one ownership row per selected format. Upsert with
-    //    ignoreDuplicates so a partial re-run skips already-present rows per-row
-    //    rather than failing the whole batch on 23505 when any row exists.
-    const ownRows = formats.map(format => ({ book_id: id, user_id: me, format }));
-    const { error: oErr } = await supabase.from('book_ownership')
-      .upsert(ownRows, { onConflict: 'book_id,user_id,format', ignoreDuplicates: true });
-    if (oErr && oErr.code !== '23505') { console.error('addBookToArchive (ownership):', oErr.message); }
-
-    // 3) Optimistically prepend to the shelf only if this archive is active.
-    //    Build the shared MergedBook shape (Task 2): my marks at defaults, my
-    //    ownership listed, shelf derived as 'owned' (>=1 owner), no reveals/notes,
-    //    and reuse the roster the archive already loaded when available.
-    if (currentLibraryId === libraryId) {
-      // Seed the current user so the adder's avatar shows immediately even when
-      // this is the first book in a fresh archive (no roster loaded yet). The
-      // card labels the current user "You"; the avatar appearance is what matters.
-      const members = sharedBooks[0]?.members || [{
-        user_id: me,
-        username: profile?.username,
-        av: {
-          gender: avatar.gender,
-          hair_color: avatar.hair_color,
-          skin_tone: avatar.skin_tone,
-          robe_color: avatar.robe_color,
-        },
-      }];
-      const merged = {
-        id,
-        title: book.title,
-        author: book.author,
-        year: book.year ?? null,
-        coverUrl: book.coverUrl,
-        genres: book.genres || [],
-        formats,
-        spineColor: book.spineColor ?? null,
-        library_id: libraryId,
-        // My private state — defaults; the shared row's columns are ignored.
-        read: false,
-        overall: 0,
-        smut: 0,
-        progress: {},
-        notes: [],
-        shelf: 'owned',
-        ownership: formats.map(f => ({ user_id: me, format: f })),
-        reveals: [],
-        members,
-      };
-      setSharedBooks(prev => [merged, ...prev]);
-    }
-    setAddOpen(false);
-    // Open the detail like `addBook` does for owned books (owners always own here).
-    setActiveId(id);
-  };
-
-  // Move a PERSONAL book into a shared archive (Task 5) — the highest-risk data
-  // op: it must be correct AND idempotent (re-running changes nothing, never
-  // errors) and it must never leak my personal marks onto the shared row.
-  //
-  // Two cases, keyed on whether the archive already holds a book with the same
-  // title (case-insensitive, whitespace-trimmed — matched in JS to guard against
-  // ilike partial-match false positives):
-  //
-  //   A. Title NOT present → convert the personal row in place: flip its
-  //      library_id, migrate my marks into book_personal_state, RESET the row's
-  //      mark columns to defaults (the no-leak rule), record my ownership.
-  //   B. Title ALREADY present → merge into the existing shared row: migrate my
-  //      marks + ownership onto it, re-point my notes (dedupe by fingerprint),
-  //      union my formats into the group, then delete my personal row.
-  //
-  // Defensive throughout — every Supabase call logs its error and returns; the
-  // caller (DetailPanel) never sees a throw.
-  const moveBookIntoArchive = async (bookId, libraryId) => {
-    if (!session || !bookId || !libraryId) {
-      console.error('moveBookIntoArchive: missing session, bookId, or libraryId');
-      return false;
-    }
-    const me = session.user.id;
-
-    // Normalized-text fingerprint for note dedupe — same idea as noteFingerprint
-    // (a stable hash of the meaningful content). Include page/quote/time so an
-    // identical quote logged at two different pages is not falsely collapsed.
-    const noteFp = (n) => {
-      const text = (n.text || '').trim().toLowerCase().replace(/\s+/g, ' ');
-      return [text, n.page ?? '', n.isQuote ? 'q' : '', n.isTime ? 't' : ''].join('|');
-    };
-
-    // 1) Load the personal row straight from the DB (source of truth), guarded to
-    //    my ownership and to the personal library (library_id null).
-    const { data: row, error: rErr } = await supabase
-      .from('books').select('*')
-      .eq('id', bookId).eq('user_id', me).is('library_id', null)
-      .maybeSingle();
-    if (rErr) { console.error('moveBookIntoArchive (load row):', rErr.message); return false; }
-    if (!row) { console.error('moveBookIntoArchive: personal book not found (or not mine / not personal)'); return false; }
-
-    const title = (row.title || '').trim();
-    // My current marks on the personal row. A book is "meaningful" (worth a
-    // personal_state row) only if it carries a real mark — otherwise we create
-    // NO row so the archive isn't littered with bogus default rows.
-    const marks = {
-      read: !!row.read,
-      overall: row.overall ?? 0,
-      smut: row.smut ?? 0,
-      progress: (row.progress && typeof row.progress === 'object') ? row.progress : {},
-    };
-    const hasMarks = marks.overall > 0 || marks.smut > 0 || marks.read === true
-      || (marks.progress && Object.keys(marks.progress).length > 0);
-    // Formats to record ownership for — default to print when none.
-    let formats = Array.isArray(row.formats) && row.formats.length ? row.formats : ['print'];
-    const allowed = ['print', 'ebook', 'audio'];
-    formats = Array.from(new Set(formats.filter(f => allowed.includes(f))));
-    if (!formats.length) formats = ['print'];
-
-    // 2) Is the title already in this archive? Case-insensitive DB match, then a
-    //    strict normalized-title comparison in JS to reject ilike partial hits.
-    const { data: candidates, error: cErr } = await supabase
-      .from('books').select('*')
-      .eq('library_id', libraryId).ilike('title', title);
-    if (cErr) { console.error('moveBookIntoArchive (title lookup):', cErr.message); return false; }
-    const key = title.toLowerCase();
-    const existing = (candidates || []).find(
-      c => (c.title || '').trim().toLowerCase() === key
-    ) || null;
-
-    const upsertMyState = async (targetId) => {
-      if (!hasMarks) return true; // unrated/unstarted → no bogus row
-      const { error } = await supabase.from('book_personal_state').upsert({
-        book_id: targetId,
-        user_id: me,
-        read: marks.read,
-        overall: marks.overall,
-        smut: marks.smut,
-        progress: marks.progress,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'book_id,user_id' });
-      if (error) { console.error('moveBookIntoArchive (personal_state):', error.message); return false; }
-      return true;
-    };
-
-    const insertMyOwnership = async (targetId) => {
-      // One row per format; upsert with ignoreDuplicates so a partial re-run
-      // skips rows that already exist per-row (idempotent) instead of failing
-      // the whole batch on 23505 when ANY row is already present.
-      const rows = formats.map(format => ({ book_id: targetId, user_id: me, format }));
-      const { error } = await supabase.from('book_ownership')
-        .upsert(rows, { onConflict: 'book_id,user_id,format', ignoreDuplicates: true });
-      if (error && error.code !== '23505') {
-        console.error('moveBookIntoArchive (ownership):', error.message);
-        return false;
-      }
-      return true;
-    };
-
-    if (!existing) {
-      // ── Case A: convert the personal row in place ──────────────────────
-      // Order matters for the no-leak rule: a shared `books` row must carry NO
-      // personal marks. We migrate marks WHILE the row is still personal
-      // (owner-only), then flip+reset in ONE atomic UPDATE so there is never an
-      // instant where the row is shared AND still carries my marks. On partial
-      // failure the row stays personal with marks intact (recoverable, no leak),
-      // and re-running no-ops because the personal-row load requires library_id
-      // IS NULL (still true).
-
-      // A1) Migrate my marks into MY personal_state (only if meaningful) — done
-      //     first, while the row is still owner-only, so nothing leaks.
-      if (!(await upsertMyState(bookId))) return false;
-
-      // A2) Flip into the archive AND reset the mark columns in a SINGLE update.
-      //     Because it is one statement, at the instant library_id is set the
-      //     marks are already zeroed — no leak window.
-      const { error: mErr } = await supabase.from('books')
-        .update({ library_id: libraryId, overall: 0, smut: 0, read: false, progress: {} })
-        .eq('id', bookId);
-      if (mErr) { console.error('moveBookIntoArchive (convert+reset):', mErr.message); return false; }
-
-      // A3) Record my ownership per format (idempotent). MUST come AFTER the
-      //     flip: the book_ownership insert RLS requires the book to already be
-      //     in one of my libraries; inserting while still personal is denied.
-      if (!(await insertMyOwnership(bookId))) return false;
-    } else {
-      // ── Case B: merge into the existing shared row ─────────────────────
-      const target = existing.id;
-
-      // B1) Migrate my marks onto the existing row's personal_state (upsert).
-      if (!(await upsertMyState(target))) return false;
-
-      // B2) Record my ownership on the target per format (idempotent).
-      if (!(await insertMyOwnership(target))) return false;
-
-      // B3) Re-point my notes FIRST, THEN delete the personal row — the
-      //     notes.book_id FK would break if we deleted first.
-      const { data: myNotesTarget, error: tnErr } = await supabase
-        .from('notes').select('*').eq('user_id', me).eq('book_id', target);
-      if (tnErr) { console.error('moveBookIntoArchive (target notes):', tnErr.message); return false; }
-      const { data: myNotesSource, error: snErr } = await supabase
-        .from('notes').select('*').eq('user_id', me).eq('book_id', bookId);
-      if (snErr) { console.error('moveBookIntoArchive (source notes):', snErr.message); return false; }
-
-      // Fingerprints already on the target (mine). Map the DB column names into
-      // the in-memory shape noteFp expects.
-      const toShape = (n) => ({ text: n.text, page: n.page, isQuote: n.is_quote, isTime: n.is_time });
-      const targetFps = new Set((myNotesTarget || []).map(n => noteFp(toShape(n))));
-      for (const n of (myNotesSource || [])) {
-        const fp = noteFp(toShape(n));
-        if (targetFps.has(fp)) {
-          // Duplicate already on the target → drop the leftover personal note.
-          const { error } = await supabase.from('notes').delete().eq('id', n.id);
-          if (error) { console.error('moveBookIntoArchive (note dedupe delete):', error.message); return false; }
-        } else {
-          // Unique → re-point it at the shared row, and record its fp so two
-          // identical source notes don't both survive.
-          const { error } = await supabase.from('notes').update({ book_id: target }).eq('id', n.id);
-          if (error) { console.error('moveBookIntoArchive (note re-point):', error.message); return false; }
-          targetFps.add(fp);
-        }
-      }
-
-      // B4) Now that no note references it, delete my personal row.
-      const { error: dErr } = await supabase.from('books').delete().eq('id', bookId);
-      if (dErr) { console.error('moveBookIntoArchive (delete personal row):', dErr.message); return false; }
-
-      // B5) Union any of my formats not already on the target's group formats so
-      //     ProgressEditor shows those rows for everyone.
-      const targetFormats = Array.isArray(existing.formats) && existing.formats.length
-        ? existing.formats : ['print'];
-      const unioned = Array.from(new Set([...targetFormats, ...formats]));
-      if (unioned.length !== targetFormats.length) {
-        const { error: fErr } = await supabase.from('books')
-          .update({ formats: unioned }).eq('id', target);
-        if (fErr) { console.error('moveBookIntoArchive (formats union):', fErr.message); return false; }
-      }
-    }
-
-    // Local state: drop the moved book from the personal shelf. `sharedBooks`
-    // is left to reload when the archive is switched into (the archive view is
-    // not necessarily active right now), so we don't optimistically inject it.
-    setBooks(prev => prev.filter(b => b.id !== bookId));
-    if (activeId === bookId) setActiveId(null);
-    return true;
   };
 
   // In the personal library (currentLibraryId === null) the tabs are UNCHANGED.
@@ -2414,7 +2051,7 @@ export default function Hushthorn() {
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
             {gridBooks.map((b) => (
               <button
-                key={b.id}
+                key={b.id || b.key}
                 onClick={() => setActiveId(b.id)}
                 className="ht-card rounded-md p-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
               >
@@ -2452,14 +2089,13 @@ export default function Hushthorn() {
                   )}
                 </div>
                 <CardProgress book={b} />
-                {b.library_id && <SharedCardBlock book={b} meId={session.user.id} />}
               </button>
             ))}
           </div>
         )}
       </main>
 
-      {addOpen && <AddBookModal onAdd={addBook} onAddToArchive={addBookToArchive} currentLibraryId={currentLibraryId} onAddMany={importBooks} onClose={() => setAddOpen(false)} session={session} books={shelfBooks} />}
+      {addOpen && <AddBookModal onAdd={addBook} currentLibraryId={currentLibraryId} onAddMany={importBooks} onClose={() => setAddOpen(false)} session={session} books={books} />}
       {avatarOpen && (
         <AvatarPage
           avatar={avatar}
@@ -2476,10 +2112,8 @@ export default function Hushthorn() {
           onClose={() => setActiveId(null)}
           onUpdate={(patch) => updateBook(activeBook.id, patch)}
           onRemove={() => removeBook(activeBook.id)}
-          onToggleOwnership={toggleOwnership}
           session={session}
           archives={archives}
-          onMoveToArchive={(id, lib) => moveBookIntoArchive(id, lib)}
         />
       )}
 
@@ -3676,23 +3310,22 @@ function AuthPage() {
 
 /* ── add book modal ────────────────────────────────────────── */
 
-function AddBookModal({ onAdd, onAddToArchive, currentLibraryId = null, onAddMany, onClose, session, books = [] }) {
-  // Adding into a shared archive (Task 4) vs. the personal library. When shared,
-  // the confirm routes to `onAddToArchive(book, myFormats)` and a small format
-  // chooser is shown; otherwise behaviour is exactly as today via `onAdd`.
+function AddBookModal({ onAdd, currentLibraryId = null, onAddMany, onClose, session, books = [] }) {
+  // Union model: adding always targets the reader's OWN personal library via
+  // `onAdd`; the book then appears in any archive automatically (the archive is a
+  // lens over members' libraries). The old per-archive add + format chooser is
+  // gone; Task 3 removes the remaining archive-only chrome from this modal.
   const inArchive = currentLibraryId != null;
-  // Which editions the adder owns — Print is always on (the floor for an archive add).
+  // Which editions the adder owns — Print is always on. (Legacy format chooser
+  // still renders in `inArchive`; Task 3 removes it. Harmless in the meantime.)
   const [myFormats, setMyFormats] = useState(['print']);
   const toggleFormat = (f) => {
     if (f === 'print') return; // Print is the required minimum; not toggleable.
     setMyFormats((prev) => prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]);
   };
-  // Route a confirmed book to the archive add (formats) or the personal add.
-  // `shelf` is meaningful only for personal adds; shared shelf is derived from
-  // ownership, so it is dropped on the archive path.
+  // Every confirmed book goes to my personal library.
   const commitAdd = (book) => {
-    if (inArchive) onAddToArchive(book, currentLibraryId, myFormats);
-    else onAdd(book);
+    onAdd(book);
   };
   const [mode, setMode] = useState(() => {
     // Mobile (coarse pointer + narrow viewport) defaults to Scan; web to Search.
@@ -5092,12 +4725,13 @@ function CoverEditor({ book, onUpdate, session }) {
   );
 }
 
-/* ── shared-archive card blocks (Phase 2) ─────────────────────
-   Rendered only for shared books (`book.library_id` set). "Who has it" =
-   one member row per roster entry with the editions that member owns; the
-   reveal grid = a rigid aligned grid of everyone's Verdict / Smoulder / %
-   where you always see your own marks and co-members appear only if they
-   opted in. Notes are NEVER rendered here (the reveal never carries them). */
+/* ── shared-archive card blocks (union model) ─────────────────
+   Reusable pieces for an archive entry's card/detail (rebuilt & wired by Task 3
+   against the UnionBook shape). "Who has it" = one row per owner with the
+   editions that owner has; the reveal grid = an aligned grid of everyone's
+   Verdict / Smoulder / % where you always see your own marks and co-members
+   appear only if they opted in. Notes are NEVER rendered here (the reveal never
+   carries them). */
 
 // Per-format ownership glyphs. Audio keeps the app's cyan-for-audio rule; the
 // glyph itself lives in a cyan span so the tint reads as "audio" even inline.
@@ -5235,106 +4869,14 @@ function RevealGrid({ book, meId }) {
   );
 }
 
-// The full shared block for a card (Who has it + reveal grid). Renders nothing
-// for a personal book so callers can drop it in unconditionally if they prefer.
-function SharedCardBlock({ book, meId }) {
-  if (!book.library_id) return null;
-  return (
-    <div className="mt-2">
-      <WhoHasIt members={book.members} ownership={book.ownership} meId={meId} />
-      <RevealGrid book={book} meId={meId} />
-    </div>
-  );
-}
-
-// Detail-panel "I own" toggles — one per format (📖/📱/🎧, audio cyan). Each
-// reflects whether *I* own that format and flips my book_ownership via
-// toggleOwnership. Dropping every format is how a member leaves just their own
-// copy without deleting the shared book for the archive.
-function OwnFormatToggles({ book, meId, onToggle }) {
-  return (
-    <div className="ht-card rounded-md p-4 mt-4 space-y-2.5">
-      <span className="ht-display text-xs uppercase text-pink-200 font-semibold">
-        Which editions do you own?
-      </span>
-      <div className="flex flex-wrap gap-2">
-        {FORMAT_GLYPHS.map((g) => {
-          const owned = (book.ownership || []).some(
-            (o) => o.user_id === meId && o.format === g.fmt
-          );
-          const on = g.cyan
-            ? "bg-cyan-500/25 border-cyan-400/60 text-cyan-100"
-            : "bg-pink-600/30 border-pink-400/60 text-pink-100";
-          const off = "bg-purple-950/50 border-purple-700/50 text-purple-300 hover:border-pink-400/50";
-          return (
-            <button
-              key={g.fmt}
-              type="button"
-              aria-pressed={owned}
-              onClick={() => onToggle(book.id, g.fmt, !owned)}
-              className={`ht-display text-[10px] uppercase tracking-wide px-3 py-1.5 rounded-sm border transition-colors ${owned ? on : off}`}
-            >
-              {g.glyph} {g.label}{owned ? " ✓" : ""}
-            </button>
-          );
-        })}
-      </div>
-      <p className="text-[11px] text-purple-400/60 italic leading-snug">
-        Tick the editions on your shelf. Untick them all to drop your copy without
-        removing this tome from the archive.
-      </p>
-    </div>
-  );
-}
-
 /* ── detail panel ──────────────────────────────────────────── */
 
-function DetailPanel({ book, onClose, onUpdate, onRemove, onToggleOwnership, session, archives = [], onMoveToArchive }) {
-  const isShared = !!book.library_id;
-  const me = session?.user?.id;
-  // Move-into-archive control (Task 5) is offered for PERSONAL books only (no
-  // library_id) and only when the user actually belongs to at least one archive.
-  const canMove = !book.library_id && archives.length > 0 && typeof onMoveToArchive === 'function';
-
-  // "Remove" on a SHARED book is a group action: deleting the shared row cascades
-  // ownership + everyone's personal_state, so it leaves every member's shelf. We
-  // confirm that plainly and point solo-drop toward the "I own" toggles. A
-  // personal book keeps its silent remove (unchanged behaviour).
-  const handleRemove = () => {
-    if (isShared) {
-      const ok = window.confirm(
-        'Remove this tome from the shared archive for everyone? ' +
-        'It leaves every member’s shelf and cannot be undone.\n\n' +
-        'To drop only your own copy, untick your "I own" editions instead.'
-      );
-      if (!ok) return;
-    }
-    onRemove();
-  };
-  const [moveTo, setMoveTo] = useState("");
-  const [moving, setMoving] = useState(false);
-  const [moveErr, setMoveErr] = useState("");
-  // Clear any stale move error when the selection changes to a different book.
-  useEffect(() => { setMoveErr(""); }, [book.id]);
-  const runMove = async () => {
-    if (!moveTo || moving) return;
-    setMoveErr("");
-    setMoving(true);
-    let ok = false;
-    try {
-      ok = await onMoveToArchive(book.id, moveTo);
-    } catch (e) {
-      // moveBookIntoArchive never throws by contract, but stay defensive.
-      console.error('DetailPanel move:', e);
-      ok = false;
-    }
-    setMoving(false);
-    if (!ok) {
-      setMoveErr('Could not move this tome — check your connection and try again.');
-      return;
-    }
-    onClose();
-  };
+// Union model, Task 2: the detail panel is the single PERSONAL path. Every book
+// is my own owner-only row, so this is the pre-Phase-2 detail. Task 3 layers the
+// archive-entry variant on top (Who-has-it + reveal + a "Hide from shared
+// archives" toggle for my book, or a read-only "Add to my library" for a
+// co-member-only title). `archives` is accepted for that Task-3 wiring.
+function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = [] }) {
   return (
     <Overlay onClose={onClose} label={book.title} wide>
       <div className="flex items-start justify-between mb-4 gap-3">
@@ -5352,84 +4894,34 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, onToggleOwnership, ses
         <div className="sm:w-52 flex-shrink-0">
           <CoverEditor book={book} onUpdate={onUpdate} session={session} />
           <div className="mt-3 flex flex-col gap-1.5">
-            {/* Owned/Wishlist toggle: personal books only. On a shared book the
-                shelf is derived from ownership, so the "I own" toggles below own
-                that state instead. */}
-            {!isShared && (
-              <ToggleRow
-                label={book.shelf === "owned" ? "On the Owned shelf" : "On the Wishlist"}
-                action={book.shelf === "owned" ? "Move to Wishlist" : "Mark as Owned"}
-                onClick={() => onUpdate({ shelf: book.shelf === "owned" ? "wishlist" : "owned" })}
-              />
-            )}
+            <ToggleRow
+              label={book.shelf === "owned" ? "On the Owned shelf" : "On the Wishlist"}
+              action={book.shelf === "owned" ? "Move to Wishlist" : "Mark as Owned"}
+              onClick={() => onUpdate({ shelf: book.shelf === "owned" ? "wishlist" : "owned" })}
+            />
             <ToggleRow
               label={book.read ? "Read ✓" : "Not yet read"}
               action={book.read ? "Mark Unread" : "Mark as Read"}
               onClick={() => onUpdate({ read: !book.read })}
             />
-            {/* Audio toggle: personal books only. On a shared book audio is one of
-                the per-format "I own" toggles below (kept cyan there). */}
-            {!isShared && (
-              <ToggleRow
-                label={(book.formats || []).includes("audio") ? "Audiobook 🎧" : "No audio copy"}
-                action={(book.formats || []).includes("audio") ? "Remove audio" : "I have the audio"}
-                onClick={() => {
-                  const fmts = book.formats || ["print"];
-                  onUpdate({
-                    formats: fmts.includes("audio") ? fmts.filter((f) => f !== "audio") : [...fmts, "audio"],
-                  });
-                }}
-              />
-            )}
-            <button onClick={handleRemove} className="mt-1 text-sm text-purple-400/60 hover:text-pink-300 underline underline-offset-2 italic">
-              {isShared ? "Remove from this archive" : "Banish from the archive"}
+            <ToggleRow
+              label={(book.formats || []).includes("audio") ? "Audiobook 🎧" : "No audio copy"}
+              action={(book.formats || []).includes("audio") ? "Remove audio" : "I have the audio"}
+              onClick={() => {
+                const fmts = book.formats || ["print"];
+                onUpdate({
+                  formats: fmts.includes("audio") ? fmts.filter((f) => f !== "audio") : [...fmts, "audio"],
+                });
+              }}
+            />
+            <button onClick={onRemove} className="mt-1 text-sm text-purple-400/60 hover:text-pink-300 underline underline-offset-2 italic">
+              Banish from the archive
             </button>
-
-            {canMove && (
-              <div className="mt-3 pt-3 border-t border-purple-800/40 space-y-1.5">
-                <span className="ht-display text-[10px] uppercase text-pink-200 font-semibold tracking-wide">
-                  Move into a shared archive
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <select
-                    value={moveTo}
-                    onChange={(e) => setMoveTo(e.target.value)}
-                    disabled={moving}
-                    aria-label="Choose a shared archive"
-                    className="flex-1 min-w-0 text-sm rounded-sm bg-purple-950/60 border border-purple-800/60 text-purple-100 px-2 py-1 focus:outline-none focus:border-pink-500/60"
-                  >
-                    <option value="">Choose an archive…</option>
-                    {archives.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={runMove}
-                    disabled={!moveTo || moving}
-                    className="ht-display text-[10px] uppercase px-2 py-1 rounded-sm bg-pink-800/60 hover:bg-pink-700/70 disabled:opacity-40 disabled:hover:bg-pink-800/60 text-pink-100 whitespace-nowrap flex-shrink-0"
-                  >
-                    {moving ? "Moving…" : "Move"}
-                  </button>
-                </div>
-                <p className="text-[11px] text-purple-400/60 italic leading-snug">
-                  Shares this tome with that archive as a co-owner. Your marks stay yours; the shared copy carries none.
-                </p>
-                {moveErr && (
-                  <p className="text-[11px] text-pink-300 italic leading-snug">{moveErr}</p>
-                )}
-              </div>
-            )}
           </div>
         </div>
 
         <div className="flex-1 min-w-0">
-          {/* Shared book: per-format "I own" toggles → my book_ownership. The
-              Verdict/Smoulder/progress editors below already write MY private
-              state via the branched updateBook. */}
-          {isShared && typeof onToggleOwnership === "function" && (
-            <OwnFormatToggles book={book} meId={me} onToggle={onToggleOwnership} />
-          )}
-          <div className={`ht-card rounded-md p-4 space-y-3 ${isShared ? "mt-4" : ""}`}>
+          <div className="ht-card rounded-md p-4 space-y-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <span className="ht-display text-xs uppercase text-indigo-200 font-semibold">Verdict ⚔</span>
               <Meter value={book.overall} onChange={(v) => onUpdate({ overall: v })} Icon={Sword} label="Verdict" />
@@ -5445,15 +4937,6 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, onToggleOwnership, ses
           </div>
 
           <ProgressEditor book={book} onUpdate={onUpdate} />
-
-          {/* Shared book: the "Who has it" roster + reveal grid. Notes stay below
-              and remain private — they are never rendered in the reveal. */}
-          {isShared && (
-            <div className="ht-card rounded-md p-4 mt-4">
-              <WhoHasIt members={book.members} ownership={book.ownership} meId={me} />
-              <RevealGrid book={book} meId={me} />
-            </div>
-          )}
 
           <NotesSection book={book} onUpdate={onUpdate} />
         </div>
