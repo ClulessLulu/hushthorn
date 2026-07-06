@@ -2256,12 +2256,19 @@ export default function Hushthorn() {
         <DetailPanel
           book={activeBook}
           onClose={() => setActiveId(null)}
-          onUpdate={(patch) => {
+          onUpdate={async (patch) => {
             // UnionBooks update via mineBookId (my personal copy); personal books
             // update directly by id. If there is no mineBookId the book is not
             // mine — the panel offers "Add to my library" instead of edits.
             const id = activeBook.mineBookId ?? activeBook.id;
-            if (id) updateBook(id, patch);
+            if (!id) return;
+            await updateBook(id, patch);
+            // formats/shelf reshape the union entry's owners[] + top-level union,
+            // which the lightweight in-place mirror can't recompute — reload so the
+            // archive card / WhoHasIt reflect the change immediately.
+            if (currentLibraryId != null && ('formats' in patch || 'shelf' in patch)) {
+              refreshArchiveUnion();
+            }
           }}
           onRemove={() => { const rid = activeBook.mineBookId ?? activeBook.id; if (rid) removeBook(rid); }}
           session={session}
@@ -5118,6 +5125,11 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = []
 
                 <ProgressEditor book={book} onUpdate={onUpdate} />
 
+                {/* Formats I have — editing my editions refreshes the union. */}
+                <div className="ht-card rounded-md p-4">
+                  <FormatToggles book={book} onUpdate={onUpdate} />
+                </div>
+
                 {/* Hide from shared archives toggle */}
                 <div className="rounded-sm border border-purple-700/40 bg-purple-950/40 p-2.5">
                   <button
@@ -5180,16 +5192,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = []
               action={book.read ? "Mark Unread" : "Mark as Read"}
               onClick={() => onUpdate({ read: !book.read })}
             />
-            <ToggleRow
-              label={(book.formats || []).includes("audio") ? "Audiobook 🎧" : "No audio copy"}
-              action={(book.formats || []).includes("audio") ? "Remove audio" : "I have the audio"}
-              onClick={() => {
-                const fmts = book.formats || ["print"];
-                onUpdate({
-                  formats: fmts.includes("audio") ? fmts.filter((f) => f !== "audio") : [...fmts, "audio"],
-                });
-              }}
-            />
+            <div className="mt-1"><FormatToggles book={book} onUpdate={onUpdate} /></div>
             <button onClick={onRemove} className="mt-1 text-sm text-purple-400/60 hover:text-pink-300 underline underline-offset-2 italic">
               Banish from the archive
             </button>
@@ -5218,6 +5221,52 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = []
         </div>
       </div>
     </Overlay>
+  );
+}
+
+// Per-format ownership selector for the detail panel. Print/Ebook/Audio chips
+// in the sanctioned per-format accents (violet print · indigo ebook · cyan audio).
+// A tome must keep at least one format (reading progress is keyed by format), so
+// the last remaining chip can't be switched off.
+const FORMAT_OPTIONS = [
+  { fmt: "print", label: "Print", on: "bg-violet-600/40 border-violet-400/60 text-violet-100" },
+  { fmt: "ebook", label: "Ebook", on: "bg-indigo-600/40 border-indigo-400/60 text-indigo-100" },
+  { fmt: "audio", label: "Audio", on: "bg-cyan-600/30 border-cyan-400/60 text-cyan-200" },
+];
+function FormatToggles({ book, onUpdate }) {
+  const fmts = (book.formats && book.formats.length) ? book.formats : ["print"];
+  const toggle = (fmt) => {
+    const has = fmts.includes(fmt);
+    if (has && fmts.length === 1) return; // keep at least one format
+    onUpdate({ formats: has ? fmts.filter((f) => f !== fmt) : [...fmts, fmt] });
+  };
+  return (
+    <div>
+      <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400/80 mb-1.5">
+        Formats I have
+      </p>
+      <div className="flex gap-1.5">
+        {FORMAT_OPTIONS.map((o) => {
+          const on = fmts.includes(o.fmt);
+          const isLast = on && fmts.length === 1;
+          return (
+            <button
+              key={o.fmt}
+              type="button"
+              onClick={() => toggle(o.fmt)}
+              aria-pressed={on}
+              disabled={isLast}
+              title={isLast ? "A tome must keep at least one format" : undefined}
+              className={`ht-display flex-1 text-[10px] uppercase tracking-wide px-2 py-1.5 rounded-sm border transition-colors ${
+                on ? o.on : "bg-purple-950/50 border-purple-700/50 text-purple-400/60 hover:text-purple-200 hover:border-purple-600/60"
+              } ${isLast ? "cursor-default" : ""}`}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
