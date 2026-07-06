@@ -1070,7 +1070,7 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
            WhoHasIt/RevealGrid block here; the full view lives in the detail panel.
            This is the fix for spine #7 misalignment. */
         <span
-          className="mt-1.5 flex-shrink-0 flex items-center justify-center rounded-full bg-pink-500/60"
+          className="mt-1.5 flex-shrink-0 flex items-center justify-center rounded-sm bg-pink-500/60"
           style={{ width: 14, height: 14, fontSize: 7, lineHeight: 1, color: "rgba(255,235,255,0.9)" }}
           title={`${(book.owners || []).length} reader${(book.owners || []).length === 1 ? "" : "s"}`}
           aria-label={`${(book.owners || []).length} readers`}
@@ -1980,7 +1980,7 @@ export default function Hushthorn() {
         { key: "all", label: "All" },
         { key: "iown", label: "I own" },
         { key: "othersown", label: "Others own" },
-        { key: "nobody", label: "Wishlist" },
+        { key: "nobody", label: "To be adopted" },
         { key: "read", label: "Read" },
         { key: "unread", label: "Unread" },
         { key: "audio", label: "🎧 Audio" },
@@ -2173,7 +2173,7 @@ export default function Hushthorn() {
                         <Meter value={b.smut} Icon={Candle} label="Smoulder" readOnly size={13} />
                       </div>
                       <div className="mt-1.5 flex gap-1.5 flex-wrap">
-                        <span className={`ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm ${b.shelf === "owned" ? "bg-purple-800/60 text-purple-200" : "bg-pink-500/20 text-pink-200"}`}>
+                        <span className={`ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm ${b.shelf === "owned" ? "bg-indigo-500/30 text-indigo-200" : "bg-pink-500/20 text-pink-200"}`}>
                           {b.shelf === "owned" ? "Owned" : "Wishlist"}
                         </span>
                         <span className={`ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm ${b.read ? "bg-purple-500/30 text-purple-200" : "bg-purple-900/60 text-purple-400"}`}>
@@ -2232,7 +2232,7 @@ export default function Hushthorn() {
             const id = activeBook.mineBookId ?? activeBook.id;
             if (id) updateBook(id, patch);
           }}
-          onRemove={() => removeBook(activeBook.mineBookId ?? activeBook.id)}
+          onRemove={() => { const rid = activeBook.mineBookId ?? activeBook.id; if (rid) removeBook(rid); }}
           session={session}
           archives={archives}
           me={me}
@@ -4826,13 +4826,6 @@ const FORMAT_GLYPHS = [
   { fmt: "audio", glyph: "🎧", label: "Audio", cyan: true },
 ];
 
-// Resolve a member's display name from the roster (never leak a raw user_id).
-function memberName(members, userId, meId) {
-  const m = (members || []).find((x) => x.user_id === userId);
-  if (userId === meId) return "You";
-  return m?.username ? `@${m.username}` : "A reader";
-}
-
 // "Who has it" — one row per `owners` entry from the UnionBook.
 // `compact` = card-grid mode: shows only the owner count badge, no full rows
 // (fixes spine/card alignment bug #7).
@@ -4850,7 +4843,7 @@ function WhoHasIt({ owners = [], meId, compact = false }) {
         </span>
         <span className="flex -space-x-1">
           {owners.slice(0, 3).map((o) => (
-            <span key={o.user_id} className="inline-block rounded-full ring-1 ring-purple-900/60" style={{ width: 14, height: 14 }}>
+            <span key={o.user_id} className="inline-block rounded-full ring-1 ring-purple-700/50" style={{ width: 14, height: 14 }}>
               <MiniAvatar av={o.av} size={14} />
             </span>
           ))}
@@ -5062,7 +5055,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = []
             <WhoHasIt owners={book.owners} meId={me} />
 
             {/* Add to my library — only when this title is NOT mine yet */}
-            {!isMine && onOpenAdd && (
+            {!isMine && (
               <button
                 onClick={() => onOpenAdd({ title: book.title, author: book.author, coverUrl: book.coverUrl, genres: book.genres })}
                 className="ht-display w-full py-2 rounded-sm border border-pink-400/50 bg-pink-500/15 hover:bg-pink-500/25 text-pink-200 text-[10px] uppercase tracking-wide transition-colors"
