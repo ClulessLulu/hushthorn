@@ -827,3 +827,138 @@ modified by QA.
 **GO** — both prior blockers (S-10, reveal-write) are fixed, the new
 role-escalation guard holds, and no regression to convert or personal-book access.
 Shared Library Phase 2 is releasable at the RLS layer.
+
+---
+
+# QA Report — Shared Library Union Model (archive_shelf + archive_reveal)
+
+**Plan:** `tests/shared-library-union-model-test-plan.md`
+**Spec:** `docs/superpowers/specs/2026-07-05-shared-library-union-model-design.md`
+**Branch:** `union-model-shelf`. Migration: `shared_library_union_model` (`20260705093412`).
+**Scope:** Two SECURITY DEFINER views (`archive_shelf`, `archive_reveal`), the
+`books.hidden_from_archives` flag, teardown of Phase-2 tables/column, and the
+owner-only base-table invariant. Three confirmed auth users (A owner, B co-member,
+C outsider) created via SQL + GoTrue password-grant; every access assertion driven
+via real per-user JWT against PostgREST. MCP service role used only for setup,
+ground-truth schema checks, and cleanup.
+
+**JWT method note:** Users were created directly in `auth.users`/`auth.identities`
+via `execute_sql` (bcrypt cost-10 hash, `instance_id='00000000-…'`, token columns
+`''`, `email_confirmed_at` set). Real `authenticated`-role JWTs then obtained via
+`POST /auth/v1/token?grant_type=password`. The three `instance_id=NULL` and
+`email_verified` gaps (absent from initial insert) were corrected before JWT
+issuance. All JWTs were valid `authenticated`-role tokens; RLS was exercised
+faithfully.
+
+## Summary verdict: GO — 11/11 PASS, 0 FAIL, 1 non-blocking observation
+
+All no-leak cases (N-01 through N-10) PASS. All union/isolation/regression checks
+PASS. Security boundary is proven under real JWTs.
+
+## Counts
+
+| Bucket | Pass | Fail |
+|---|---|---|
+| B- (schema / migration / RLS / advisors) | 11 | 0 |
+| U- (union + ownership) | 5 | 0 |
+| N- (no-leak — headline security) | 10 | 0 |
+| I- (isolation / regression) | 6 | 0 |
+| **Total** | **32** | **0** |
+
+## Pass/Fail by ID
+
+### Schema / Migration (MCP — service role, ground-truth only)
+
+| ID | Result | Evidence |
+|---|---|---|
+| B-01 | PASS | `list_migrations`: `shared_library_union_model` (20260705093412) present. |
+| B-02 | PASS | `books.hidden_from_archives`: `data_type=boolean`, NOT NULL, default `false`. |
+| B-03 | PASS | `information_schema.tables`: `book_ownership` and `book_personal_state` return 0 rows — Phase-2 tables are gone. |
+| B-04 | PASS | `information_schema.columns`: no `library_id` column on `books` — Phase-2 column is gone. |
+| B-05 | PASS | `archive_shelf` columns: `[library_id, owner_id, book_id, title, author, cover_url, genres, formats, shelf]`. No marks columns. |
+| B-06 | PASS | `archive_reveal` columns: `[library_id, owner_id, book_id, title, author, overall, smut, progress, read]`. No `notes` column. |
+| B-07 | PASS | `pg_class.reloptions`: both views show `security_invoker=false` (SECURITY DEFINER confirmed). |
+| B-08 | PASS | `information_schema.tables.is_insertable_into=NO` for both views — DML is structurally rejected regardless of grant. |
+| B-09 | PASS | `pg_policies` on `books`: exactly one policy `"users manage own books"` cmd=ALL, `qual=(auth.uid()=user_id)`, `with_check=(auth.uid()=user_id)`. No Phase-2 shared-books policies remain. |
+| B-10 | PASS | `pg_policies` on `notes`: `"users manage own notes"` cmd=ALL, owner-only. |
+| B-11 | PASS | `get_advisors(security)`: exactly two `security_definer_view` WARNs for `archive_shelf` and `archive_reveal` — intentional and documented. No new `rls_disabled` or `policy_allows_all` finding. Pre-existing WARNs (5 SECURITY DEFINER functions, `covers` public bucket, leaked-password protection) unchanged. |
+
+### Union + Ownership (real JWTs)
+
+All requests: `Authorization: Bearer <user-JWT>` + `apikey: <anon>` to PostgREST.
+
+| ID | Result | Evidence |
+|---|---|---|
+| U-01 | PASS | JWT-B `GET /archive_shelf?library_id=eq.L`: 4 rows — Fourth Wing (print+audio), A Unique Tome (print), A Wishlist Book (wishlist), The Coveted Scroll (wishlist). A_HID ("A Secret Tome") absent. |
+| U-02 | PASS | JWT-A `GET /archive_shelf?library_id=eq.L`: 3 rows — Fourth Wing (ebook), B Unique Tome (print), The Coveted Scroll (wishlist). All `owner_id=B`. |
+| U-03 | PASS | JWT-B sees A's Fourth Wing row: `formats=[print,audio], shelf=owned`. JWT-A sees B's Fourth Wing row: `formats=[ebook], shelf=owned`. Both owner rows present from their respective caller's perspective; dedup is correctly left to client. |
+| U-04 | PASS | JWT-B archive_shelf row count = 4 (not 5). A_HID absent confirming hidden exclusion. |
+| U-05 | PASS | JWT-B `GET /archive_shelf?library_id=eq.L&owner_id=eq.A&shelf=eq.wishlist`: 2 rows — "A Wishlist Book" and "The Coveted Scroll", both `shelf=wishlist`. |
+
+### No-Leak — HEADLINE SECURITY (real JWTs)
+
+| ID | Result | Evidence |
+|---|---|---|
+| N-01 | PASS | JWT-B archive_shelf columns from live response: `[library_id, owner_id, book_id, title, author, cover_url, genres, formats, shelf]`. Keys `overall/smut/progress/read` absent. **Marks do not structurally exist in the shelf view.** |
+| N-02 | PASS | JWT-B archive_reveal columns with share_reading=ON: `[library_id, owner_id, book_id, title, author, overall, smut, progress, read]`. Key `notes` absent. **Notes never in either view.** Also confirmed by information_schema (B-06). |
+| N-03 | PASS | JWT-B `GET /archive_reveal?library_id=eq.L&owner_id=eq.A` with A's `share_reading=false`: **0 rows**. No marks visible. |
+| N-04 | PASS | JWT-B `GET /books?user_id=eq.A`: **0 rows**. Base table owner-only RLS holds; no alternative path to A's marks. |
+| N-05 | PASS | JWT-B `GET /notes?user_id=eq.A`: **0 rows**. Notes owner-only. |
+| N-06 | PASS | JWT-A PATCH `share_reading=true` (returned row confirms). JWT-B `GET /archive_reveal?library_id=eq.L&owner_id=eq.A`: **4 rows** — Fourth Wing (overall=4,smut=3,read=true), A Unique Tome (overall=5,smut=4,read=true), A Wishlist Book (0/0/false), The Coveted Scroll (0/0/false). A_HID absent from reveal. |
+| N-07 | PASS | JWT-A PATCH `share_reading=false`. JWT-B same GET: **0 rows** again. Toggle round-trip confirmed. |
+| N-08 | PASS | JWT-B `GET /archive_shelf?library_id=eq.L&book_id=eq.A_HID`: **0 rows**. Hidden book excluded from shelf. |
+| N-09 | PASS | JWT-A PATCH share_reading=true; JWT-B `GET /archive_reveal?library_id=eq.L&book_id=eq.A_HID`: **0 rows**. Hidden book excluded from reveal even with sharing on. |
+| N-10 | PASS | JWT-A `GET /books?id=eq.A_HID`: **1 row**, `hidden_from_archives=true`, `overall=5`, `smut=5`. Owner's personal view unaffected by the flag. |
+
+### Isolation / Regression (real JWTs + MCP)
+
+| ID | Result | Evidence |
+|---|---|---|
+| I-01 | PASS | JWT-C `GET /archive_shelf?library_id=eq.L`: **0 rows**. C shares no library with A/B. |
+| I-02 | PASS | JWT-C `GET /archive_reveal?library_id=eq.L`: **0 rows**. |
+| I-03 | PASS | JWT-C `GET /books?user_id=eq.A`: **0 rows**. Base table owner-only for outsider. |
+| I-04 | PASS | JWT-C `GET /notes?user_id=eq.A`: **0 rows**. Notes owner-only for outsider. |
+| I-05 | PASS | JWT-A `GET /books?user_id=eq.A`: **5 rows** — all of A's books including A_HID, with marks (overall/smut) and `hidden_from_archives` values intact. Personal library unaffected. |
+| I-06 | PASS | MCP spot-check of pre-existing personal books (Quicksilver/Sinner/Brimstone/Twisted Love/Haunting Adeline/The Awakening etc.): all present with `user_id`, marks, `hidden_from_archives=false`, formats. Phase-2 migration data is intact. |
+
+## Non-blocking observation (not a security defect)
+
+**Grants broader than spec on views (P1 — cosmetic):** The `authenticated` role has
+`arwdDxtm` (ALL privileges) on both views, not `SELECT` only as the spec's
+`grant select to authenticated` clause specifies. This is cosmetically incorrect
+but **not a security defect**: both views return `is_insertable_into=NO` (confirmed
+via `information_schema.tables`), so Postgres structurally rejects INSERT/UPDATE/
+DELETE/TRUNCATE regardless of the privilege grant. A client holding an authenticated
+JWT cannot mutate the views. The excess grants likely resulted from Supabase's
+default view ownership grant behavior superseding the explicit `REVOKE ALL`. Remedy
+(optional, not blocking): re-run `revoke all on public.archive_shelf, public.archive_reveal from public, anon; grant select on public.archive_shelf, public.archive_reveal to authenticated;` after the view is created. **Route to supabase-migrator if the team wants the grant tightened to match the spec exactly.**
+
+## Advisor note
+
+`get_advisors(security)` shows the two `security_definer_view` WARNs for
+`archive_shelf` and `archive_reveal`. These are **intentional and documented** in
+the spec: the definer view is the deliberate security seam that keeps `books`
+owner-only while allowing the view's `WHERE` clause to be the column-limited
+co-member read path. A `security_invoker` view + co-member policy would grant
+full-row reads and leak marks. No other new security finding was introduced by this
+migration.
+
+## Cleanup confirmed
+
+All test users (A/B/C), profiles, identities, library L, library_members, books
+(A: 5, B: 3), and notes (A: 2) were deleted via service-role `execute_sql`.
+Post-cleanup counts match pre-test baseline exactly:
+**qa_users_left=0, total_books=31, total_notes=2, profiles=3, libraries=1,
+library_members=3, avatars=3.** `src/App.jsx` and the schema were **not** modified
+by QA.
+
+## Go / No-Go
+
+**GO** — 11 test-plan IDs covering 32 individual checks, all PASS. Every no-leak
+case (N-01 through N-10) proved under real authenticated JWTs: marks do not
+structurally exist in `archive_shelf`; `archive_reveal` is gated by
+`share_reading`; notes never appear in either view; the hidden flag excludes a book
+from both views for co-members while keeping it visible to its owner; outsider C is
+fully isolated; the personal library is unaffected; and migrated Task-1 data is
+intact. The one non-blocking observation (excess view grants) does not constitute
+a security defect and does not block release.
