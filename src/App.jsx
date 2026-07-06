@@ -5192,7 +5192,6 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = []
               action={book.read ? "Mark Unread" : "Mark as Read"}
               onClick={() => onUpdate({ read: !book.read })}
             />
-            <div className="mt-1"><FormatToggles book={book} onUpdate={onUpdate} /></div>
             <button onClick={onRemove} className="mt-1 text-sm text-purple-400/60 hover:text-pink-300 underline underline-offset-2 italic">
               Banish from the archive
             </button>
@@ -5216,6 +5215,12 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = []
           </div>
 
           <ProgressEditor book={book} onUpdate={onUpdate} />
+
+          {/* Formats I have — same right-column placement (after progress) as the
+              archive detail, so editing formats feels identical in both contexts. */}
+          <div className="ht-card rounded-md p-4 mt-4">
+            <FormatToggles book={book} onUpdate={onUpdate} />
+          </div>
 
           <NotesSection book={book} onUpdate={onUpdate} />
         </div>
