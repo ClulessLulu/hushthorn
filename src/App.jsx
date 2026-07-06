@@ -1578,6 +1578,7 @@ export default function Hushthorn() {
         shelf: myShelf,
         owners: [{ user_id: uid, username: meId.username, av: meId.av, formats: myFormats, shelf: myShelf }],
         reveals: [],
+        createdAt: b.created_at,
       });
     }
 
@@ -1605,6 +1606,7 @@ export default function Hushthorn() {
           shelf: 'wishlist',
           owners: [],
           reveals: [],
+          createdAt: s.created_at,
         };
         map.set(key, entry);
       }
@@ -1613,6 +1615,8 @@ export default function Hushthorn() {
       if ((!entry.genres || entry.genres.length === 0) && (s.genres || []).length) entry.genres = s.genres;
       // formats = union of every owner's formats.
       entry.formats = Array.from(new Set([...(entry.formats || []), ...ownerFormats]));
+      // recency = most recent addition across owners (ISO strings sort chronologically).
+      if (s.created_at && (!entry.createdAt || s.created_at > entry.createdAt)) entry.createdAt = s.created_at;
       const who = identity(s.owner_id);
       entry.owners.push({
         user_id: s.owner_id,
@@ -1637,7 +1641,9 @@ export default function Hushthorn() {
       });
     }
 
-    return [...map.values()];
+    // Newest-first, so "Recently inscribed" (which preserves incoming order)
+    // surfaces the most recently added titles at the top of the archive union.
+    return [...map.values()].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   };
 
   // Reload the active archive's union on demand. Extracted from the switch effect
