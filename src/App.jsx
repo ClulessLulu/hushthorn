@@ -1783,13 +1783,19 @@ export default function Hushthorn() {
   // is an owner-only flag on my own `books` row; the two archive views exclude
   // hidden rows for co-members, and my personal library still shows it to me.
   // Optimistic: patch `books` immediately and mirror onto any archive union entry
-  // whose "my copy" is this row, so the toggle reflects at once. Defensive: a write
-  // failure logs and leaves the in-memory state (retried on the next reload).
+  // whose "my copy" is this row, so the toggle reflects at once. On write failure,
+  // roll the optimistic patch back — unlike a cosmetic field, a stuck `hidden`
+  // would leave a book the user believes is private still visible to co-members.
   const setHidden = async (bookId, hidden) => {
+    const prevHidden = books.find(b => b.id === bookId)?.hidden ?? false;
     setBooks(prev => prev.map(b => b.id === bookId ? { ...b, hidden } : b));
     setSharedBooks(prev => prev.map(b => b.mineBookId === bookId ? { ...b, hidden } : b));
     const { error } = await supabase.from('books').update({ hidden_from_archives: hidden }).eq('id', bookId);
-    if (error) console.error('setHidden:', error.message);
+    if (error) {
+      console.error('setHidden:', error.message);
+      setBooks(prev => prev.map(b => b.id === bookId ? { ...b, hidden: prevHidden } : b));
+      setSharedBooks(prev => prev.map(b => b.mineBookId === bookId ? { ...b, hidden: prevHidden } : b));
+    }
   };
 
   // Lazy backfill: persist one book's sampled spine color and mirror it locally
