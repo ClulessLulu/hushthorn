@@ -1476,10 +1476,16 @@ export default function Hushthorn() {
   // key = norm(title)+'|'+norm(author), norm(s)=(s||'').trim().toLowerCase().
   // Every Supabase call is defensive: errors are logged and treated as empty, so
   // a partial failure degrades to a thinner shelf rather than throwing.
+  // Union dedup key: one entry per normalized title+author (the app's
+  // unique-by-title rule). Shared by loadArchiveUnion (dedup) and addBook
+  // (reopen the archive panel by key after "Add to my library"), so the two
+  // key derivations can never drift and silently break the reopen.
+  const unionKeyOf = (title, author) =>
+    `${(title || '').trim().toLowerCase()}|${(author || '').trim().toLowerCase()}`;
+
   const loadArchiveUnion = async (uid, libraryId) => {
     if (!uid || !libraryId) return [];
-    const norm = (s) => (s || '').trim().toLowerCase();
-    const keyOf = (title, author) => `${norm(title)}|${norm(author)}`;
+    const keyOf = unionKeyOf;
 
     // Fetch my books, the two co-member views, my notes, and the roster in parallel.
     const [
@@ -1634,6 +1640,19 @@ export default function Hushthorn() {
     return [...map.values()];
   };
 
+  // Reload the active archive's union on demand. Extracted from the switch effect
+  // so a post-mutation flow (e.g. "Add to my library" from an archive) can refresh
+  // the merged shelf immediately instead of waiting for the next archive switch.
+  const refreshArchiveUnion = async () => {
+    if (currentLibraryId == null || !session) { setSharedBooks([]); return; }
+    try {
+      setSharedBooks(await loadArchiveUnion(session.user.id, currentLibraryId));
+    } catch (err) {
+      console.error('loadArchiveUnion:', err);
+      setSharedBooks([]);
+    }
+  };
+
   // Load the active archive's union when switched; clear when personal (null).
   useEffect(() => {
     if (currentLibraryId == null || !session) { setSharedBooks([]); return; }
@@ -1645,8 +1664,8 @@ export default function Hushthorn() {
   }, [currentLibraryId, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Active shelf source: personal library (null) → `books`; else the loaded
-  // shared archive. Since `currentLibraryId` stays null until Task 6 wires the
-  // switcher, this is exactly `books` today — the personal path is unchanged.
+  // shared-archive union (`sharedBooks`). The switcher is live, so
+  // `currentLibraryId` is routinely non-null while browsing an archive.
   const shelfBooks = currentLibraryId === null ? books : sharedBooks;
 
   const [shelfFilter, setShelfFilter] = useState("all");
@@ -1846,6 +1865,9 @@ export default function Hushthorn() {
     setBooks(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
     // Mirror onto the archive union too: a UnionBook keyed on this row (my copy)
     // gets my marks/notes/hidden patched so an open archive detail stays in sync.
+    // NOTE: patches top-level fields but NOT the entry's `owners[]` "me" row — fine
+    // today (the archive detail edits only marks/progress/hide, never shelf/formats).
+    // If an archive entry ever edits shelf/formats, mirror into owners[] here too.
     setSharedBooks(prev => prev.map(b => b.mineBookId === id ? { ...b, ...patch } : b));
   };
 
@@ -1960,7 +1982,16 @@ export default function Hushthorn() {
     if (error) { console.error('addBook:', error.message); return; }
     setBooks(prev => [{ ...book, id, progress: book.progress || {}, notes: [] }, ...prev]);
     setAddOpen(false);
-    if (book.shelf === 'owned') setActiveId(id);
+    // In an archive the active shelf is the union (entries resolve by `key`, not
+    // `id`), and it doesn't auto-refresh on insert. So after adding from an archive,
+    // reload the union and reopen by the union key — otherwise the panel orphans and
+    // the book keeps reading as "not mine" until re-entry.
+    if (currentLibraryId != null) {
+      await refreshArchiveUnion();
+      if (book.shelf === 'owned') setActiveId(unionKeyOf(book.title, book.author));
+    } else if (book.shelf === 'owned') {
+      setActiveId(id);
+    }
   };
 
   // In the personal library (currentLibraryId === null) the tabs are UNCHANGED.
