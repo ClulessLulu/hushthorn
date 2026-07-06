@@ -1,0 +1,12 @@
+{
+  "detector": {
+    "ignoreRules": [
+      "ai-color-palette",
+      "gradient-text",
+      "border-accent-on-rounded",
+      "broken-image"
+    ],
+    "ignoreFiles": [],
+    "ignoreValues": []
+  }
+}

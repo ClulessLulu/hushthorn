@@ -1005,6 +1005,8 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
   const w = 17 + (hashStr((book.author || "") + (book.title || "")) % 12);
   const wish = book.shelf === "wishlist";
   const hasAudio = (book.formats || []).includes("audio");
+  // UnionBook detection — personal books have `id`; archive entries have `owners`.
+  const isUnion = !!book.owners;
   // Two thin vertical EDGE RAILS rise from the foot of the spine — NEITHER is
   // gated on book.read, so a tome finished in audio still shows its partial
   // print rail. Defensive `formatPercent` coerces missing/malformed progress
@@ -1062,11 +1064,25 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
           }}
         />
       )}
-      {/* verdict gem */}
-      <span
-        className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0"
-        style={{ background: book.overall >= 5 ? "#fbbf24" : book.overall > 0 ? "#a5b4fc" : "rgba(255,255,255,0.15)" }}
-      />
+      {/* For UnionBooks: compact ownership count dot. For personal books: verdict gem. */}
+      {isUnion ? (
+        /* Compact ownership hint — a small pink dot with owner count. No
+           WhoHasIt/RevealGrid block here; the full view lives in the detail panel.
+           This is the fix for spine #7 misalignment. */
+        <span
+          className="mt-1.5 flex-shrink-0 flex items-center justify-center rounded-full bg-pink-500/60"
+          style={{ width: 14, height: 14, fontSize: 7, lineHeight: 1, color: "rgba(255,235,255,0.9)" }}
+          title={`${(book.owners || []).length} reader${(book.owners || []).length === 1 ? "" : "s"}`}
+          aria-label={`${(book.owners || []).length} readers`}
+        >
+          {(book.owners || []).length}
+        </span>
+      ) : (
+        <span
+          className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0"
+          style={{ background: book.overall >= 5 ? "#fbbf24" : book.overall > 0 ? "#a5b4fc" : "rgba(255,255,255,0.15)" }}
+        />
+      )}
       {/* audio ring — dormant until books carry a formats array */}
       {hasAudio && (
         <span className="mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0 border border-cyan-300/90 bg-transparent" />
@@ -1139,15 +1155,19 @@ function SpineShelf({ books, onOpen, query, onPersist }) {
       {rows.map((row, ri) => (
         <div key={ri}>
           <div className="flex items-end gap-[5px] px-3 min-h-[178px]">
-            {row.map((b) => (
-              <Spine
-                key={b.id}
-                book={b}
-                onOpen={() => onOpen(b.id)}
-                dimmed={!!query && !matchesQuery(b, query)}
-                onPersist={onPersist ? (c) => onPersist(b.id, c) : undefined}
-              />
-            ))}
+            {row.map((b) => {
+              const isUnion = !!b.owners;
+              const openId = isUnion ? b.key : b.id;
+              return (
+                <Spine
+                  key={b.id || b.key}
+                  book={b}
+                  onOpen={() => onOpen(openId)}
+                  dimmed={!!query && !matchesQuery(b, query)}
+                  onPersist={(!isUnion && onPersist) ? (c) => onPersist(b.id, c) : undefined}
+                />
+              );
+            })}
           </div>
           <div
             className="h-2.5 rounded-sm mb-6"
@@ -1211,46 +1231,98 @@ function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery }) {
 
 // Swaps the shelf between the personal library (`null`) and a shared archive.
 // `current` is the active library id (null = My Library); `archives` is
-// `[{id,name,role}]`; `onSwitch(id|null)` sets `currentLibraryId`. Themed to
-// match ControlsBar (Cinzel labels, sharp corners, purple/pink — no cyan).
+// `[{id,name,role}]`; `onSwitch(id|null)` sets `currentLibraryId`. Custom
+// dropdown styled to match ControlsBar — Cinzel labels, sharp corners,
+// purple/pink palette, no cyan. Closes on outside-click or Escape.
 function ArchiveSwitcher({ current, archives = [], onSwitch }) {
   const inArchive = current !== null;
   const activeName = inArchive
     ? (archives.find((a) => a.id === current)?.name ?? "Shared archive")
-    : null;
+    : "My Library";
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  // Close on outside-click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open]);
+
+  const choose = (id) => { onSwitch(id); setOpen(false); };
+
   return (
     <div className="max-w-5xl mx-auto px-5 pb-4 flex flex-wrap items-center justify-center gap-2">
-      <label className="ht-display text-[9px] uppercase tracking-widest text-purple-400/70">
+      <span className="ht-display text-[9px] uppercase tracking-widest text-purple-400/70">
         Shelf
-      </label>
-      <div className="relative">
-        <select
-          value={current ?? ""}
-          onChange={(e) => onSwitch(e.target.value === "" ? null : e.target.value)}
+      </span>
+      <div className="relative" ref={ref}>
+        <button
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded={open}
           aria-label="Choose which shelf to browse"
-          className={`ht-display appearance-none rounded-sm border px-3 py-1.5 pr-7 text-[11px] uppercase tracking-wide focus:outline-none focus:border-pink-400 transition-colors ${
+          onClick={() => setOpen((o) => !o)}
+          className={`ht-display flex items-center gap-2 rounded-sm border px-3 py-1.5 text-[11px] uppercase tracking-wide focus:outline-none focus:border-pink-400 transition-colors ${
             inArchive
-              ? "bg-gradient-to-b from-fuchsia-600/40 to-purple-800/50 border-pink-400/60 text-pink-100"
-              : "bg-purple-950/60 border-purple-700/50 text-purple-200"
+              ? "bg-purple-800/60 border-pink-400/60 text-pink-100 hover:bg-purple-700/70"
+              : "bg-purple-950/60 border-purple-700/50 text-purple-200 hover:bg-purple-900/60"
           }`}
         >
-          <option value="">My Library</option>
-          {archives.map((a) => (
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
-        </select>
-        <span
-          aria-hidden="true"
-          className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[9px] ${inArchive ? "text-pink-200/80" : "text-purple-400/70"}`}
-        >
-          ▾
-        </span>
+          {inArchive && <span aria-hidden="true" className="text-pink-300/80">♥</span>}
+          <span>{activeName}</span>
+          <span aria-hidden="true" className={`text-[9px] transition-transform ${open ? "rotate-180" : ""} ${inArchive ? "text-pink-200/80" : "text-purple-400/70"}`}>▾</span>
+        </button>
+
+        {open && (
+          <ul
+            role="listbox"
+            aria-label="Choose which shelf to browse"
+            className="absolute z-50 top-full left-0 mt-0.5 min-w-full bg-[#130b22] border border-purple-700/60 rounded-sm shadow-xl overflow-hidden"
+          >
+            <li>
+              <button
+                role="option"
+                aria-selected={current === null}
+                type="button"
+                onClick={() => choose(null)}
+                className={`ht-display w-full text-left px-3 py-2 text-[11px] uppercase tracking-wide hover:bg-purple-800/60 transition-colors ${
+                  current === null ? "text-pink-200 bg-purple-800/40" : "text-purple-200"
+                }`}
+              >
+                My Library
+              </button>
+            </li>
+            {archives.map((a) => (
+              <li key={a.id}>
+                <button
+                  role="option"
+                  aria-selected={current === a.id}
+                  type="button"
+                  onClick={() => choose(a.id)}
+                  className={`ht-display w-full text-left px-3 py-2 text-[11px] uppercase tracking-wide hover:bg-purple-800/60 transition-colors flex items-center gap-1.5 ${
+                    current === a.id ? "text-pink-200 bg-purple-800/40" : "text-purple-200"
+                  }`}
+                >
+                  <span aria-hidden="true" className="text-pink-400/60 text-[9px]">♥</span>
+                  {a.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
-      {inArchive && (
-        <span className="ht-display inline-flex items-center gap-1.5 rounded-sm border border-pink-400/40 bg-pink-500/10 px-2.5 py-1 text-[9px] uppercase tracking-widest text-pink-200">
-          <span aria-hidden="true">♥</span> {activeName}
-        </span>
-      )}
     </div>
   );
 }
@@ -1590,6 +1662,9 @@ export default function Hushthorn() {
   };
   const [activeId, setActiveId] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
+  // Seed for "Add to my library" from an archive entry — prefills the modal with
+  // the UnionBook's title/author/cover/genres so the user just picks format/shelf.
+  const [addSeed, setAddSeed] = useState(null);
   const [view, setView] = useState("library"); // library | oracle | pair
 
   // View controls. Initialized from prefs defaults; synced once an avatar row
@@ -1682,7 +1757,12 @@ export default function Hushthorn() {
     }
   };
 
-  const activeBook = shelfBooks.find((b) => b.id === activeId) || null;
+  // In a personal library, entries are looked up by `id`; in an archive, entries
+  // are UnionBooks keyed by `key` (they have no `id`). Support both so the grid
+  // open-by-key path works without changing the personal-library path.
+  const activeBook = shelfBooks.find((b) =>
+    b.key ? b.key === activeId : b.id === activeId
+  ) || null;
 
   // `me` scopes the archive ownership filters below. Null-safe: personal books
   // never reach the ownership branches (those keys only exist in an archive).
@@ -1821,8 +1901,11 @@ export default function Hushthorn() {
   // On miss or error: marks tried and does nothing; field stays empty.
   useEffect(() => {
     if (!activeId) return;
-    const book = shelfBooks.find((b) => b.id === activeId);
+    const book = shelfBooks.find((b) => b.key ? b.key === activeId : b.id === activeId);
     if (!book) return;
+    // UnionBooks have no personal `id` to write back to — skip the page-count
+    // backfill for archive entries (it would call updateBook with undefined id).
+    if (book.owners) return;
     if (!(book.formats || ["print"]).includes("print")) return;
     if (book.progress?.print?.pages) return; // already has a page count
     if (pageCountTriedIds.has(activeId)) return; // already attempted this session
@@ -1897,7 +1980,7 @@ export default function Hushthorn() {
         { key: "all", label: "All" },
         { key: "iown", label: "I own" },
         { key: "othersown", label: "Others own" },
-        { key: "nobody", label: "Nobody" },
+        { key: "nobody", label: "Wishlist" },
         { key: "read", label: "Read" },
         { key: "unread", label: "Unread" },
         { key: "audio", label: "🎧 Audio" },
@@ -2055,53 +2138,79 @@ export default function Hushthorn() {
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {gridBooks.map((b) => (
-              <button
-                key={b.id || b.key}
-                onClick={() => setActiveId(b.id)}
-                className="ht-card rounded-md p-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
-              >
-                <div className="aspect-[2/3] rounded-sm overflow-hidden bg-purple-950/60 flex items-center justify-center">
-                  <CoverImage
-                    src={b.coverUrl}
-                    alt={`Cover of ${b.title}`}
-                    className="w-full h-full object-cover"
-                    fallback={<span className="ht-display text-purple-400/60 text-xs px-2 text-center">{b.title}</span>}
-                  />
-                </div>
-                <h3 className="mt-2 text-[15px] font-semibold leading-tight line-clamp-2">{b.title}</h3>
-                <p className="text-sm text-purple-300/70 line-clamp-1 italic">{b.author}</p>
-                <GenreChips genres={b.genres} max={2} className="mt-1" />
-                <div className="mt-1.5 flex flex-col gap-0.5">
-                  <Meter value={b.overall} Icon={Sword} label="Verdict" readOnly size={13} />
-                  <Meter value={b.smut} Icon={Candle} label="Smoulder" readOnly size={13} />
-                </div>
-                <div className="mt-1.5 flex gap-1.5 flex-wrap">
-                  <span className={`ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm ${b.shelf === "owned" ? "bg-indigo-500/30 text-indigo-200" : "bg-pink-500/20 text-pink-200"}`}>
-                    {b.shelf === "owned" ? "Owned" : "Wishlist"}
-                  </span>
-                  <span className={`ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm ${b.read ? "bg-purple-500/30 text-purple-200" : "bg-purple-900/60 text-purple-400"}`}>
-                    {b.read ? "Read" : "Unread"}
-                  </span>
-                  {b.notes.length > 0 && (
-                    <span className="ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm bg-purple-800/50 text-purple-300">
-                      {b.notes.length} note{b.notes.length > 1 ? "s" : ""}
-                    </span>
+            {gridBooks.map((b) => {
+              // UnionBooks (archive entries) have `owners`; personal books have `id`.
+              const isUnion = !!b.owners;
+              const openId = isUnion ? b.key : b.id;
+              return (
+                <button
+                  key={b.id || b.key}
+                  onClick={() => setActiveId(openId)}
+                  className="ht-card rounded-md p-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
+                >
+                  <div className="aspect-[2/3] rounded-sm overflow-hidden bg-purple-950/60 flex items-center justify-center">
+                    <CoverImage
+                      src={b.coverUrl}
+                      alt={`Cover of ${b.title}`}
+                      className="w-full h-full object-cover"
+                      fallback={<span className="ht-display text-purple-400/60 text-xs px-2 text-center">{b.title}</span>}
+                    />
+                  </div>
+                  <h3 className="mt-2 text-[15px] font-semibold leading-tight line-clamp-2">{b.title}</h3>
+                  <p className="text-sm text-purple-300/70 line-clamp-1 italic">{b.author}</p>
+                  <GenreChips genres={b.genres} max={2} className="mt-1" />
+
+                  {isUnion ? (
+                    /* Archive card: WhoHasIt compact + owner count badge */
+                    <div className="mt-1.5">
+                      <WhoHasIt owners={b.owners} meId={me} compact />
+                    </div>
+                  ) : (
+                    /* Personal card: ratings + status badges */
+                    <>
+                      <div className="mt-1.5 flex flex-col gap-0.5">
+                        <Meter value={b.overall} Icon={Sword} label="Verdict" readOnly size={13} />
+                        <Meter value={b.smut} Icon={Candle} label="Smoulder" readOnly size={13} />
+                      </div>
+                      <div className="mt-1.5 flex gap-1.5 flex-wrap">
+                        <span className={`ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm ${b.shelf === "owned" ? "bg-purple-800/60 text-purple-200" : "bg-pink-500/20 text-pink-200"}`}>
+                          {b.shelf === "owned" ? "Owned" : "Wishlist"}
+                        </span>
+                        <span className={`ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm ${b.read ? "bg-purple-500/30 text-purple-200" : "bg-purple-900/60 text-purple-400"}`}>
+                          {b.read ? "Read" : "Unread"}
+                        </span>
+                        {b.notes.length > 0 && (
+                          <span className="ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm bg-purple-800/50 text-purple-300">
+                            {b.notes.length} note{b.notes.length > 1 ? "s" : ""}
+                          </span>
+                        )}
+                        {(b.formats || []).includes("audio") && (
+                          <span className="ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm bg-cyan-500/20 text-cyan-200">
+                            🎧 Audio
+                          </span>
+                        )}
+                      </div>
+                      <CardProgress book={b} />
+                    </>
                   )}
-                  {(b.formats || []).includes("audio") && (
-                    <span className="ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm bg-cyan-500/20 text-cyan-200">
-                      🎧 Audio
-                    </span>
-                  )}
-                </div>
-                <CardProgress book={b} />
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
         )}
       </main>
 
-      {addOpen && <AddBookModal onAdd={addBook} currentLibraryId={currentLibraryId} onAddMany={importBooks} onClose={() => setAddOpen(false)} session={session} books={books} />}
+      {addOpen && (
+        <AddBookModal
+          onAdd={addBook}
+          currentLibraryId={currentLibraryId}
+          onAddMany={importBooks}
+          onClose={() => { setAddOpen(false); setAddSeed(null); }}
+          session={session}
+          books={books}
+          seed={addSeed}
+        />
+      )}
       {avatarOpen && (
         <AvatarPage
           avatar={avatar}
@@ -2116,10 +2225,19 @@ export default function Hushthorn() {
         <DetailPanel
           book={activeBook}
           onClose={() => setActiveId(null)}
-          onUpdate={(patch) => updateBook(activeBook.id, patch)}
-          onRemove={() => removeBook(activeBook.id)}
+          onUpdate={(patch) => {
+            // UnionBooks update via mineBookId (my personal copy); personal books
+            // update directly by id. If there is no mineBookId the book is not
+            // mine — the panel offers "Add to my library" instead of edits.
+            const id = activeBook.mineBookId ?? activeBook.id;
+            if (id) updateBook(id, patch);
+          }}
+          onRemove={() => removeBook(activeBook.mineBookId ?? activeBook.id)}
           session={session}
           archives={archives}
+          me={me}
+          setHidden={setHidden}
+          onOpenAdd={(seed) => { setAddSeed(seed); setAddOpen(true); }}
         />
       )}
 
@@ -3316,38 +3434,40 @@ function AuthPage() {
 
 /* ── add book modal ────────────────────────────────────────── */
 
-function AddBookModal({ onAdd, currentLibraryId = null, onAddMany, onClose, session, books = [] }) {
+// `seed` — optional prefill from a UnionBook's {title,author,coverUrl,genres}.
+// When present the modal opens in scan/review mode with the fields pre-populated
+// so the user only picks format and shelf before inscribing.
+function AddBookModal({ onAdd, currentLibraryId = null, onAddMany, onClose, session, books = [], seed = null }) {
   // Union model: adding always targets the reader's OWN personal library via
-  // `onAdd`; the book then appears in any archive automatically (the archive is a
-  // lens over members' libraries). The old per-archive add + format chooser is
-  // gone; Task 3 removes the remaining archive-only chrome from this modal.
-  const inArchive = currentLibraryId != null;
-  // Which editions the adder owns — Print is always on. (Legacy format chooser
-  // still renders in `inArchive`; Task 3 removes it. Harmless in the meantime.)
-  const [myFormats, setMyFormats] = useState(['print']);
-  const toggleFormat = (f) => {
-    if (f === 'print') return; // Print is the required minimum; not toggleable.
-    setMyFormats((prev) => prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]);
-  };
+  // `onAdd`; the book then appears in any archive automatically. The archive
+  // format chooser and "in archive" copy have been removed (Task 3 cleanup).
   // Every confirmed book goes to my personal library.
   const commitAdd = (book) => {
     onAdd(book);
   };
   const [mode, setMode] = useState(() => {
+    // Seed prefill: always open in scan/review so the pre-filled fields show.
+    if (seed) return "scan";
     // Mobile (coarse pointer + narrow viewport) defaults to Scan; web to Search.
     if (typeof window !== "undefined" && window.matchMedia &&
         window.matchMedia("(pointer: coarse)").matches &&
         window.matchMedia("(max-width: 640px)").matches) return "scan";
     return "search";
   }); // search | scan
-  const [scanView, setScanView] = useState("capture"); // capture | review
+  const [scanView, setScanView] = useState(seed ? "review" : "capture"); // capture | review
   const [scanMultiple, setScanMultiple] = useState(false);
   const [queue, setQueue] = useState([]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [manual, setManual] = useState({ title: "", author: "", coverUrl: "", genres: [], pageCount: null });
+  // Prefill from seed (UnionBook "Add to my library" path). Applied once on mount;
+  // also switches to the scan/review mode so the user sees the filled fields.
+  const [manual, setManual] = useState(() =>
+    seed
+      ? { title: seed.title || "", author: seed.author || "", coverUrl: seed.coverUrl || "", genres: seed.genres || [], pageCount: null }
+      : { title: "", author: "", coverUrl: "", genres: [], pageCount: null }
+  );
   const [genreInput, setGenreInput] = useState("");
   const [scanning, setScanning] = useState(false);
   const [scanNotice, setScanNotice] = useState("");
@@ -3938,37 +4058,6 @@ function AddBookModal({ onAdd, currentLibraryId = null, onAddMany, onClose, sess
         <ModeTab active={mode === "scan"} onClick={() => setMode("scan")}>Scan or upload</ModeTab>
       </div>
 
-      {/* Archive add: which editions do you own? Print is the required floor;
-          Ebook/Audio are opt-in. Audio stays cyan per the design system. Shown
-          only when inscribing into a shared archive. */}
-      {inArchive && (
-        <div className="mb-4">
-          <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1.5">Which formats do you own?</p>
-          <div className="flex gap-2 flex-wrap">
-            {[
-              { f: 'print', label: '📖 Print', on: 'border-pink-400/70 bg-pink-400/10 text-pink-200', off: 'border-purple-700/40 text-purple-400 hover:border-purple-500/60' },
-              { f: 'ebook', label: '📱 Ebook', on: 'border-pink-400/70 bg-pink-400/10 text-pink-200', off: 'border-purple-700/40 text-purple-400 hover:border-purple-500/60' },
-              { f: 'audio', label: '🎧 Audio', on: 'border-cyan-400/70 bg-cyan-400/10 text-cyan-200', off: 'border-purple-700/40 text-purple-400 hover:border-purple-500/60' },
-            ].map(({ f, label, on, off }) => {
-              const active = myFormats.includes(f);
-              const locked = f === 'print';
-              return (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => toggleFormat(f)}
-                  aria-pressed={active}
-                  disabled={locked}
-                  className={`ht-display text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-sm border transition-colors ${active ? on : off} ${locked ? 'cursor-default' : ''}`}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {mode === "search" ? (
         <>
           <input
@@ -4191,21 +4280,11 @@ function AddBookModal({ onAdd, currentLibraryId = null, onAddMany, onClose, sess
           </div>
           {liveStatus && <p className="text-sm text-pink-200/90 italic">{liveStatus}</p>}
 
-          {/* Batch multi-scan lands in My Library (no archive path yet — Task 4
-              deferred it). Hide the toggle inside an archive so a stack can't be
-              imported into the personal library by accident; a single scan into
-              the archive still works via the format chooser above. */}
-          {inArchive ? (
-            <p className="text-xs text-purple-400/70 italic border border-purple-800/40 rounded-sm px-3 py-2 bg-purple-950/40">
-              Batch scanning lands in <span className="text-pink-200">My Library</span>, not this archive. Add tomes here one at a time — switch to My Library to import a stack.
-            </p>
-          ) : (
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" checked={scanMultiple} onChange={(e) => setScanMultiple(e.target.checked)} className="accent-pink-500" />
-              <span className="ht-display text-[10px] uppercase tracking-widest text-purple-200">Scan multiple</span>
-              <span className="text-xs text-purple-400/60 italic">— queue barcodes, add them all at once</span>
-            </label>
-          )}
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input type="checkbox" checked={scanMultiple} onChange={(e) => setScanMultiple(e.target.checked)} className="accent-pink-500" />
+            <span className="ht-display text-[10px] uppercase tracking-widest text-purple-200">Scan multiple</span>
+            <span className="text-xs text-purple-400/60 italic">— queue barcodes, add them all at once</span>
+          </label>
 
           <div className="flex gap-2 flex-wrap">
             {!liveActive ? (
@@ -4754,39 +4833,71 @@ function memberName(members, userId, meId) {
   return m?.username ? `@${m.username}` : "A reader";
 }
 
-// "Who has it" — one row per roster member: avatar · name · the format glyphs
-// that member owns (audio in cyan), or an italic "wants it" when they own none.
-function WhoHasIt({ members = [], ownership = [], meId }) {
-  if (!members.length) return null;
+// "Who has it" — one row per `owners` entry from the UnionBook.
+// `compact` = card-grid mode: shows only the owner count badge, no full rows
+// (fixes spine/card alignment bug #7).
+// Full mode (detail panel): avatar · name · owned-format glyphs (audio in cyan),
+// or italic "wants it" when shelf === 'wishlist'.
+function WhoHasIt({ owners = [], meId, compact = false }) {
+  if (!owners.length) return null;
+
+  if (compact) {
+    // Compact: small owner-count badge only, no layout-busting rows.
+    return (
+      <div className="mt-1 flex items-center gap-1">
+        <span className="ht-display text-[9px] uppercase tracking-widest text-purple-400/70">
+          {owners.length} reader{owners.length === 1 ? "" : "s"}
+        </span>
+        <span className="flex -space-x-1">
+          {owners.slice(0, 3).map((o) => (
+            <span key={o.user_id} className="inline-block rounded-full ring-1 ring-purple-900/60" style={{ width: 14, height: 14 }}>
+              <MiniAvatar av={o.av} size={14} />
+            </span>
+          ))}
+          {owners.length > 3 && (
+            <span className="ht-display text-[8px] text-purple-400/70 pl-1.5">+{owners.length - 3}</span>
+          )}
+        </span>
+      </div>
+    );
+  }
+
   return (
-    <div className="mt-3">
+    <div>
       <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400/80 mb-1.5">
         Who has it
       </p>
       <div className="space-y-1">
-        {members.map((m) => {
-          const owned = FORMAT_GLYPHS.filter((g) =>
-            ownership.some((o) => o.user_id === m.user_id && o.format === g.fmt)
-          );
+        {owners.map((owner) => {
+          const isMe = owner.user_id === meId;
+          const name = isMe ? "You" : `@${owner.username || "reader"}`;
+          const isOwned = owner.shelf === "owned";
+          const fmts = isOwned
+            ? FORMAT_GLYPHS.filter((g) => (owner.formats || []).includes(g.fmt))
+            : [];
           return (
-            <div key={m.user_id} className="flex items-center gap-2">
-              <MiniAvatar av={m.av} size={20} />
+            <div key={owner.user_id} className="flex items-center gap-2">
+              <MiniAvatar av={owner.av} size={20} />
               <span className="flex-1 min-w-0 truncate text-[13px] text-purple-100/90">
-                {m.user_id === meId ? "You" : `@${m.username || "reader"}`}
+                {name}
               </span>
-              {owned.length ? (
-                <span className="flex items-center gap-1.5 text-[13px] leading-none">
-                  {owned.map((g) => (
-                    <span
-                      key={g.fmt}
-                      className={g.cyan ? "text-cyan-300" : ""}
-                      title={g.label}
-                      aria-label={g.label}
-                    >
-                      {g.glyph}
-                    </span>
-                  ))}
-                </span>
+              {isOwned ? (
+                fmts.length ? (
+                  <span className="flex items-center gap-1.5 text-[13px] leading-none">
+                    {fmts.map((g) => (
+                      <span
+                        key={g.fmt}
+                        className={g.cyan ? "text-cyan-300" : ""}
+                        title={g.label}
+                        aria-label={g.label}
+                      >
+                        {g.glyph}
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  <span className="text-[11px] italic text-purple-400/60">owned</span>
+                )
               ) : (
                 <span className="text-[11px] italic text-purple-400/60">wants it</span>
               )}
@@ -4801,6 +4912,8 @@ function WhoHasIt({ members = [], ownership = [], meId }) {
 // A single reveal row (name · Verdict swords · Smoulder candles · percent).
 // Marks render with the app's real Sword/Candle icons via readOnly Meter — never
 // the ⚔/🕯 unicode the sketch used. `progress`-driven percent reuses maxPercent.
+// Each Meter is wrapped in min-w-0 + overflow-hidden so icons never overflow the
+// card width (fix for reveal Meter overflow bug #6).
 function RevealRow({ name, overall, smut, progress, read, formats }) {
   const pct = read
     ? 100
@@ -4808,10 +4921,10 @@ function RevealRow({ name, overall, smut, progress, read, formats }) {
   return (
     <>
       <span className="text-[13px] italic text-purple-300/80 truncate">{name}</span>
-      <span className="flex items-center">
+      <span className="flex items-center min-w-0 overflow-hidden">
         <Meter value={overall} Icon={Sword} label="Verdict" readOnly size={13} />
       </span>
-      <span className="flex items-center">
+      <span className="flex items-center min-w-0 overflow-hidden">
         <Meter value={smut} Icon={Candle} label="Smoulder" readOnly size={13} />
       </span>
       <span className="text-[12px] tabular-nums text-purple-300/70 text-right">{pct}%</span>
@@ -4819,38 +4932,50 @@ function RevealRow({ name, overall, smut, progress, read, formats }) {
   );
 }
 
-// The reveal grid. First row is always You (your own marks + your progress).
-// Then every OTHER member: their marks if they appear in `reveals` (opted in),
-// else an italic "hasn't shared." Names join reveals[].user_id ↔ members[].
+// The reveal grid. Sources co-member rows from `book.owners` (filtered to
+// user_id !== me). The "You" row is shown ONLY when `book.mineBookId` is set
+// (I own the title) — sourced from `book.overall/smut/progress/read`. When I
+// don't own the title there is no You row; "Add to my library" is the CTA.
+// Co-member rows show their `book.reveals` entry when present, else a note that
+// they haven't shared. Notes are NEVER shown for co-members (reveals carry none).
 function RevealGrid({ book, meId }) {
-  const members = book.members || [];
+  const owners  = book.owners  || [];
   const reveals = book.reveals || [];
-  const others = members.filter((m) => m.user_id !== meId);
+  // Co-members = everyone in owners who is NOT me.
+  const others  = owners.filter((o) => o.user_id !== meId);
+  const iMine   = !!book.mineBookId;
+
+  if (!iMine && others.length === 0) return null;
+
   return (
     <div className="mt-3 pt-2.5 border-t border-purple-700/25">
       <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400/80 mb-1.5">
         Ratings &amp; progress
       </p>
+      {/* min-w-0 + overflow-hidden on the grid container prevents Meter overflow */}
       <div
-        className="grid items-center gap-x-2.5 gap-y-1"
+        className="grid items-center gap-x-2.5 gap-y-1 min-w-0 overflow-hidden"
         style={{ gridTemplateColumns: "minmax(52px,auto) auto auto 1fr" }}
       >
-        {/* You — always shown, sourced from my merged private state. */}
-        <RevealRow
-          name="You"
-          overall={book.overall}
-          smut={book.smut}
-          progress={book.progress}
-          read={book.read}
-          formats={book.formats}
-        />
-        {others.map((m) => {
-          const r = reveals.find((x) => x.user_id === m.user_id);
+        {/* You — only when I own the title, sourced from my merged private state. */}
+        {iMine && (
+          <RevealRow
+            name="You"
+            overall={book.overall}
+            smut={book.smut}
+            progress={book.progress}
+            read={book.read}
+            formats={book.formats}
+          />
+        )}
+        {others.map((owner) => {
+          const name = `@${owner.username || "reader"}`;
+          const r = reveals.find((x) => x.user_id === owner.user_id);
           if (r) {
             return (
               <RevealRow
-                key={m.user_id}
-                name={memberName(members, m.user_id, meId)}
+                key={owner.user_id}
+                name={name}
                 overall={r.overall}
                 smut={r.smut}
                 progress={r.progress}
@@ -4860,9 +4985,9 @@ function RevealGrid({ book, meId }) {
             );
           }
           return (
-            <Fragment key={m.user_id}>
+            <Fragment key={owner.user_id}>
               <span className="text-[13px] italic text-purple-300/80 truncate">
-                {memberName(members, m.user_id, meId)}
+                {name}
               </span>
               <span className="col-start-2 col-end-5 text-[12px] italic text-purple-400/60">
                 hasn&rsquo;t shared their marks
@@ -4877,24 +5002,145 @@ function RevealGrid({ book, meId }) {
 
 /* ── detail panel ──────────────────────────────────────────── */
 
-// Union model, Task 2: the detail panel is the single PERSONAL path. Every book
-// is my own owner-only row, so this is the pre-Phase-2 detail. Task 3 layers the
-// archive-entry variant on top (Who-has-it + reveal + a "Hide from shared
-// archives" toggle for my book, or a read-only "Add to my library" for a
-// co-member-only title). `archives` is accepted for that Task-3 wiring.
-function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = [] }) {
+// Branches on whether `book` is a UnionBook (has `owners`) or a personal book
+// (has `id`). The personal path is unchanged. The archive path shows WhoHasIt +
+// RevealGrid, my private marks with a "Hide from shared archives" toggle (when I
+// own the title), or a read-only view with "Add to my library" (when I don't).
+//
+// Props added in Task 3:
+//   `me`        — session.user.id for archive branch ownership checks
+//   `setHidden` — toggles hidden_from_archives on my book row
+//   `onOpenAdd` — opens AddBookModal prefilled from the UnionBook
+function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = [], me, setHidden, onOpenAdd }) {
+  const isUnion = !!book.owners;
+  const isMine  = isUnion ? !!book.mineBookId : true; // personal books are always mine
+
+  // "Hide from shared archives" local toggle state — initialised from my merged
+  // copy of the book's hidden flag. Tracks the optimistic value during the write.
+  const [hiddenLocal, setHiddenLocal] = useState(!!book.hidden);
+  useEffect(() => { setHiddenLocal(!!book.hidden); }, [book.hidden]);
+
+  const toggleHidden = () => {
+    const next = !hiddenLocal;
+    setHiddenLocal(next);
+    if (setHidden && book.mineBookId) setHidden(book.mineBookId, next);
+  };
+
+  // Header is shared between both variants.
+  const header = (
+    <div className="flex items-start justify-between mb-4 gap-3">
+      <div>
+        <h2 className="ht-display text-2xl text-pink-100 leading-tight">{book.title}</h2>
+        <p className="text-[15px] text-purple-300/80 mt-0.5 italic">
+          {book.author} {book.year ? `· ${book.year}` : ""}
+        </p>
+        <GenreChips genres={book.genres} max={4} className="mt-1.5" />
+      </div>
+      <button onClick={onClose} className="text-purple-300 hover:text-pink-300 text-xl px-2 flex-shrink-0" aria-label="Close">✕</button>
+    </div>
+  );
+
+  // ── Archive variant ──────────────────────────────────────────────────────────
+  if (isUnion) {
+    return (
+      <Overlay onClose={onClose} label={book.title} wide>
+        {header}
+
+        <div className="flex flex-col sm:flex-row gap-5">
+          {/* Left column: cover + social view */}
+          <div className="sm:w-52 flex-shrink-0 space-y-3">
+            <div className="aspect-[2/3] rounded-sm overflow-hidden bg-purple-950/60 flex items-center justify-center">
+              <CoverImage
+                src={book.coverUrl}
+                alt={`Cover of ${book.title}`}
+                className="w-full h-full object-cover"
+                fallback={<span className="ht-display text-purple-400/60 text-xs px-2 text-center">{book.title}</span>}
+              />
+            </div>
+
+            {/* WhoHasIt — owners list */}
+            <WhoHasIt owners={book.owners} meId={me} />
+
+            {/* Add to my library — only when this title is NOT mine yet */}
+            {!isMine && onOpenAdd && (
+              <button
+                onClick={() => onOpenAdd({ title: book.title, author: book.author, coverUrl: book.coverUrl, genres: book.genres })}
+                className="ht-display w-full py-2 rounded-sm border border-pink-400/50 bg-pink-500/15 hover:bg-pink-500/25 text-pink-200 text-[10px] uppercase tracking-wide transition-colors"
+              >
+                + Add to my library
+              </button>
+            )}
+          </div>
+
+          {/* Right column: my marks (if I own it) + RevealGrid */}
+          <div className="flex-1 min-w-0 space-y-3">
+            {isMine ? (
+              <>
+                {/* My private marks — identical to the personal panel */}
+                <div className="ht-card rounded-md p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <span className="ht-display text-xs uppercase text-purple-200 font-semibold">Verdict ⚔</span>
+                    <Meter value={book.overall} onChange={(v) => onUpdate({ overall: v })} Icon={Sword} label="Verdict" />
+                  </div>
+                  <div className="ht-rule" aria-hidden="true" />
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <span className="ht-display text-xs uppercase text-pink-200 font-semibold">Smoulder 🕯️</span>
+                    <Meter value={book.smut} onChange={(v) => onUpdate({ smut: v })} Icon={Candle} label="Smoulder" />
+                  </div>
+                  <p className="text-sm text-purple-400/60 italic">
+                    Your private marks — only you see these unless you share.
+                  </p>
+                </div>
+
+                <ProgressEditor book={book} onUpdate={onUpdate} />
+
+                {/* Hide from shared archives toggle */}
+                <div className="rounded-sm border border-purple-700/40 bg-purple-950/40 p-2.5">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={hiddenLocal}
+                    onClick={toggleHidden}
+                    className="flex items-center gap-2.5 w-full text-left"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-sm border transition-colors ${
+                        hiddenLocal ? "bg-pink-600/70 border-pink-400/70" : "bg-purple-900/70 border-purple-700/60"
+                      }`}
+                    >
+                      <span className={`inline-block h-3.5 w-3.5 rounded-sm bg-purple-50 transition-transform ${hiddenLocal ? "translate-x-4" : "translate-x-0.5"}`} />
+                    </span>
+                    <span className="ht-display text-[10px] uppercase tracking-wide text-purple-100">
+                      Hide from shared archives
+                    </span>
+                  </button>
+                  <p className="mt-1 text-[11px] text-purple-400/60 italic pl-[2.375rem]">
+                    When hidden, co-members cannot see this tome in the archive union.
+                  </p>
+                </div>
+              </>
+            ) : (
+              /* Not my title — read-only notice */
+              <div className="ht-card rounded-md p-4">
+                <p className="text-[13px] text-purple-300/70 italic">
+                  This tome belongs to another keeper. Add it to your own library to inscribe marks and marginalia.
+                </p>
+              </div>
+            )}
+
+            {/* RevealGrid — always shown (You row only if I own the title) */}
+            <RevealGrid book={book} meId={me} />
+          </div>
+        </div>
+      </Overlay>
+    );
+  }
+
+  // ── Personal variant (unchanged) ─────────────────────────────────────────────
   return (
     <Overlay onClose={onClose} label={book.title} wide>
-      <div className="flex items-start justify-between mb-4 gap-3">
-        <div>
-          <h2 className="ht-display text-2xl text-pink-100 leading-tight">{book.title}</h2>
-          <p className="text-[15px] text-purple-300/80 mt-0.5 italic">
-            {book.author} {book.year ? `· ${book.year}` : ""}
-          </p>
-          <GenreChips genres={book.genres} max={4} className="mt-1.5" />
-        </div>
-        <button onClick={onClose} className="text-purple-300 hover:text-pink-300 text-xl px-2 flex-shrink-0" aria-label="Close">✕</button>
-      </div>
+      {header}
 
       <div className="flex flex-col sm:flex-row gap-5">
         <div className="sm:w-52 flex-shrink-0">
@@ -4929,7 +5175,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = []
         <div className="flex-1 min-w-0">
           <div className="ht-card rounded-md p-4 space-y-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <span className="ht-display text-xs uppercase text-indigo-200 font-semibold">Verdict ⚔</span>
+              <span className="ht-display text-xs uppercase text-purple-200 font-semibold">Verdict ⚔</span>
               <Meter value={book.overall} onChange={(v) => onUpdate({ overall: v })} Icon={Sword} label="Verdict" />
             </div>
             <div className="ht-rule" aria-hidden="true" />
