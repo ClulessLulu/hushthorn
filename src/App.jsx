@@ -293,8 +293,8 @@ function GenreChips({ genres, max = 3, className = "" }) {
 
 /* ── covers ────────────────────────────────────────────────── */
 
-// The artifact sandbox blocks <img> from external domains, so covers are
-// fetched as bytes and rendered as data URLs instead. Cached per session.
+// Covers are fetched as bytes and rendered as data URLs so they can be cached
+// per session and passed through the cover-host allowlist below. Cached per session.
 const coverCache = new Map();
 
 // Only fetch cover images from known cover hosts. A co-member's cover_url is
@@ -561,7 +561,6 @@ const FORMAT_META = {
   ebook: { label: "Ebook", glyph: "📱", bar: "bg-indigo-400/85", text: "text-indigo-200", ring: "focus:border-indigo-400" },
   audio: { label: "Audio", glyph: "🎧", bar: "bg-cyan-400/85", text: "text-cyan-200", ring: "focus:border-cyan-400" },
 };
-const FORMAT_ORDER = ["print", "ebook", "audio"];
 
 // Coerce any value to a finite number >= 0 (null/NaN/strings → 0).
 function num(v) {
@@ -591,20 +590,6 @@ function formatPercent(book, fmt) {
 function maxPercent(book) {
   const fmts = (book && book.formats) || ["print"];
   return fmts.reduce((m, f) => Math.max(m, formatPercent(book, f)), 0);
-}
-
-// Furthest *unfinished* format → { fmt, pct }, or null when nothing is in
-// progress. A finished format (100%) is skipped so a half-read audiobook still
-// surfaces even when the print copy is done.
-function activeProgress(book) {
-  const fmts = (book && book.formats) || ["print"];
-  let best = null;
-  for (const f of fmts) {
-    const pct = formatPercent(book, f);
-    if (pct <= 0 || pct >= 100) continue;
-    if (!best || pct > best.pct) best = { fmt: f, pct };
-  }
-  return best;
 }
 
 /* ── Snap-to-update: Claude-vision progress reader ─────────────
@@ -1028,10 +1013,9 @@ function ProgressEditor({ book, onUpdate }) {
 
 /* ── spine + shelf ─────────────────────────────────────────── */
 
-// Edge-glow tint per format — violet print / indigo ebook / cyan audio.
+// Edge-glow tint per spine rail — reading rail (violet) / audio rail (cyan).
 const SPINE_GLOW = {
   print: "rgba(167,139,250,0.9)",
-  ebook: "rgba(129,140,248,0.9)",
   audio: "rgba(34,211,238,0.95)",
 };
 
@@ -1119,7 +1103,7 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
           style={{ background: book.overall >= 5 ? "#fbbf24" : book.overall > 0 ? "#a5b4fc" : "rgba(255,255,255,0.15)" }}
         />
       )}
-      {/* audio ring — dormant until books carry a formats array */}
+      {/* audio ring — shown when the tome carries the audio format */}
       {hasAudio && (
         <span className="mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0 border border-cyan-300/90 bg-transparent" />
       )}
@@ -1387,14 +1371,23 @@ function Meter({ value, onChange, Icon, label, readOnly = false, size }) {
 
 /* ── main app ──────────────────────────────────────────────── */
 
+// Full-screen "loading" gate shared by the auth-ready and profile-ready waits.
+function ArchiveLoading() {
+  return (
+    <div className="ht-bg ht-body" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <style>{FONT_CSS}</style>
+      <div className="ht-frame" aria-hidden="true" />
+      <p className="ht-display text-purple-300/60 text-sm uppercase tracking-widest">Opening the archive…</p>
+    </div>
+  );
+}
+
 export default function Hushthorn() {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   // Shared-library archive switcher (Phase 2). `currentLibraryId` null = the
   // personal library (unchanged behaviour). `archives` is the list of shared
   // archives the user belongs to, each with the user's own membership role.
-  // No UI sets `currentLibraryId` yet (Task 6 wires the switcher), so the app
-  // renders exactly as before until then.
   const [currentLibraryId, setCurrentLibraryId] = useState(null);
   const [archives, setArchives] = useState([]);
   // Books loaded for the active shared archive (empty while personal).
@@ -1493,7 +1486,7 @@ export default function Hushthorn() {
       .finally(() => { setDataLoading(false); setProfileReady(true); });
   }, [session]);
 
-  // ── shared archive union read model (Union model, Task 2) ───────────
+  // ── shared archive union read model (Union model) ───────────
   // An archive is a *lens*: it merges every member's PERSONAL library, deduped
   // by normalized title+author, and tags each entry with who owns it. Books stay
   // personal (owner-only `books` rows); co-members are read ONLY through the two
@@ -1834,8 +1827,6 @@ export default function Hushthorn() {
     if (shelfFilter === "owned") return b.shelf === "owned";
     if (shelfFilter === "wishlist") return b.shelf === "wishlist";
     // Archive-only ownership filters (non-exclusive; computed from `owners`).
-    // Task 3 rebuilds the tab set (I own / Others own / Wishlist); these keep the
-    // current tabs functional against the UnionBook shape in the meantime.
     if (shelfFilter === "iown") return (b.owners || []).some((o) => o.user_id === me && o.shelf === "owned");
     if (shelfFilter === "othersown") return (b.owners || []).some((o) => o.user_id !== me && o.shelf === "owned");
     if (shelfFilter === "nobody") return !(b.owners || []).some((o) => o.shelf === "owned");
@@ -2059,21 +2050,9 @@ export default function Hushthorn() {
         { key: "audio", label: "🎧 Audio" },
       ];
 
-  if (!authReady) return (
-    <div className="ht-bg ht-body" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <style>{FONT_CSS}</style>
-      <div className="ht-frame" aria-hidden="true" />
-      <p className="ht-display text-purple-300/60 text-sm uppercase tracking-widest">Opening the archive…</p>
-    </div>
-  );
+  if (!authReady) return <ArchiveLoading />;
   if (!session) return <AuthPage />;
-  if (!profileReady) return (
-    <div className="ht-bg ht-body" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <style>{FONT_CSS}</style>
-      <div className="ht-frame" aria-hidden="true" />
-      <p className="ht-display text-purple-300/60 text-sm uppercase tracking-widest">Opening the archive…</p>
-    </div>
-  );
+  if (!profileReady) return <ArchiveLoading />;
   if (!profile?.username) return (
     <UsernameGate
       session={session}
@@ -2276,7 +2255,6 @@ export default function Hushthorn() {
       {addOpen && (
         <AddBookModal
           onAdd={addBook}
-          currentLibraryId={currentLibraryId}
           onAddMany={importBooks}
           onClose={() => { setAddOpen(false); setAddSeed(null); }}
           session={session}
@@ -2314,7 +2292,6 @@ export default function Hushthorn() {
           }}
           onRemove={() => { const rid = activeBook.mineBookId ?? activeBook.id; if (rid) removeBook(rid); }}
           session={session}
-          archives={archives}
           me={me}
           setHidden={setHidden}
           onOpenAdd={(seed) => { setAddSeed(seed); setAddOpen(true); }}
@@ -3519,14 +3496,11 @@ function AuthPage() {
 // `seed` — optional prefill from a UnionBook's {title,author,coverUrl,genres}.
 // When present the modal opens in scan/review mode with the fields pre-populated
 // so the user only picks format and shelf before inscribing.
-function AddBookModal({ onAdd, currentLibraryId = null, onAddMany, onClose, session, books = [], seed = null }) {
+function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = null }) {
   // Union model: adding always targets the reader's OWN personal library via
   // `onAdd`; the book then appears in any archive automatically. The archive
-  // format chooser and "in archive" copy have been removed (Task 3 cleanup).
-  // Every confirmed book goes to my personal library.
-  const commitAdd = (book) => {
-    onAdd(book);
-  };
+  // format chooser and "in archive" copy have been removed. Every confirmed
+  // book goes to my personal library.
   const [mode, setMode] = useState(() => {
     // Seed prefill: always open in scan/review so the pre-filled fields show.
     if (seed) return "scan";
@@ -3675,10 +3649,10 @@ function AddBookModal({ onAdd, currentLibraryId = null, onAddMany, onClose, sess
     };
     // Already in the archive? Confirm before adding a separate copy.
     if (existingByTitle(doc.title)) {
-      setPendingDup({ title: doc.title, run: () => commitAdd(book) });
+      setPendingDup({ title: doc.title, run: () => onAdd(book) });
       return;
     }
-    commitAdd(book);
+    onAdd(book);
   };
 
   // Fetch a Google Books cover for a title — runs regardless of whether Claude succeeds.
@@ -4096,7 +4070,7 @@ function AddBookModal({ onAdd, currentLibraryId = null, onAddMany, onClose, sess
     const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
     const pc = manual.pageCount;
     const validPageCount = (typeof pc === "number" && Number.isInteger(pc) && pc > 0) ? pc : null;
-    commitAdd({
+    onAdd({
       title: manual.title.trim(),
       author: manual.author.trim() || "Unknown author",
       year: null,
@@ -4893,8 +4867,8 @@ function CoverEditor({ book, onUpdate, session }) {
 }
 
 /* ── shared-archive card blocks (union model) ─────────────────
-   Reusable pieces for an archive entry's card/detail (rebuilt & wired by Task 3
-   against the UnionBook shape). "Who has it" = one row per owner with the
+   Reusable pieces for an archive entry's card/detail, against the UnionBook
+   shape. "Who has it" = one row per owner with the
    editions that owner has; the reveal grid = an aligned grid of everyone's
    Verdict / Smoulder / % where you always see your own marks and co-members
    appear only if they opted in. Notes are NEVER rendered here (the reveal never
@@ -5082,11 +5056,11 @@ function RevealGrid({ book, meId }) {
 // RevealGrid, my private marks with a "Hide from shared archives" toggle (when I
 // own the title), or a read-only view with "Add to my library" (when I don't).
 //
-// Props added in Task 3:
+// Archive-branch props:
 //   `me`        — session.user.id for archive branch ownership checks
 //   `setHidden` — toggles hidden_from_archives on my book row
 //   `onOpenAdd` — opens AddBookModal prefilled from the UnionBook
-function DetailPanel({ book, onClose, onUpdate, onRemove, session, archives = [], me, setHidden, onOpenAdd }) {
+function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden, onOpenAdd }) {
   const isUnion = !!book.owners;
   const isMine  = isUnion ? !!book.mineBookId : true; // personal books are always mine
 

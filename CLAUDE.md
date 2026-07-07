@@ -14,9 +14,10 @@ living alongside the developer's other app, Kindled.
 
 ## Project structure
 
-- `src/App.jsx` — the entire app in one ~3.3k-line file: all components, helpers
-  (`callClaude`, `cleanGenres`, `noteFingerprint`, `fetchByIsbn`), the shared
-  `Overlay` modal, and the `FONT_CSS` `<style>` block. Navigate by search.
+- `src/App.jsx` — the entire app in one ~5.5k-line file: all components, helpers
+  (`callClaude`, `cleanGenres`, `noteFingerprint`), the shared `Overlay` modal,
+  and the `FONT_CSS` `<style>` block. `fetchByIsbn` is a local helper inside
+  `AddBookModal`, not a top-level one. Navigate by search.
 - `src/main.jsx` — entry; renders `<App/>` in `<React.StrictMode>` (double-invokes
   effects in dev — keep imperative setup like camera start idempotent).
 - `src/lib/supabase.js` — Supabase client. `src/index.css` — Tailwind entry.
