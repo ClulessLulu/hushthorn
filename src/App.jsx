@@ -1927,7 +1927,7 @@ export default function Hushthorn() {
   // again (union model), so there is a single personal write path — marks and
   // metadata all live on the owner's own row. `hidden` maps to the per-book
   // `hidden_from_archives` flag that removes a book from the archive union.
-  const FIELD_MAP = { coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', progress: 'progress', hidden: 'hidden_from_archives' };
+  const FIELD_MAP = { title: 'title', author: 'author', coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', progress: 'progress', hidden: 'hidden_from_archives' };
 
   const updateBook = async (id, patch) => {
     // Handle notes diff — detects adds and/or deletes by comparing ID sets
@@ -5287,7 +5287,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
   // Editable details card — title/author/genres staged in `buf`. Read-only
   // books (!isMine) get neither this card nor the save bar.
   const editable = isMine ? (
-    <div className={`ht-card rounded-md p-4 space-y-3 ${isDirty ? "border-pink-400/50" : ""}`}>
+    <div className={`ht-card rounded-md p-4 space-y-3 ${isDirty ? "!border-pink-400/50" : ""}`}>
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="ht-display text-xs uppercase text-purple-200 font-semibold">Edit details</span>
         {isDirty && (
