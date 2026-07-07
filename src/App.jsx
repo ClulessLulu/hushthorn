@@ -342,19 +342,12 @@ function CoverImage({ src, alt, className, fallback }) {
     if (src.startsWith("data:") || src.startsWith("blob:")) { setResolved(src); return; }
     if (!isAllowedCoverSrc(src)) { setFailed(true); return; }
     if (coverCache.has(src)) { setResolved(coverCache.get(src)); return; }
+    // Guards above stay synchronous (no flash of empty state on a cache hit);
+    // only the actual network fetch goes through the shared coverToDataUrl,
+    // which re-checks the allowlist and seeds coverCache.
     setResolved("");
-    fetch(src)
-      .then((r) => { if (!r.ok) throw new Error("cover fetch failed"); return r.blob(); })
-      .then((blob) => new Promise((res, rej) => {
-        const fr = new FileReader();
-        fr.onload = () => res(fr.result);
-        fr.onerror = rej;
-        fr.readAsDataURL(blob);
-      }))
-      .then((dataUrl) => {
-        coverCache.set(src, dataUrl);
-        if (!cancelled) setResolved(dataUrl);
-      })
+    coverToDataUrl(src)
+      .then((dataUrl) => { if (!cancelled) setResolved(dataUrl); })
       .catch(() => { if (!cancelled) setFailed(true); });
     return () => { cancelled = true; };
   }, [src]);
@@ -422,9 +415,10 @@ function sampleCoverColor(dataUrl) {
   });
 }
 
-// Resolve a cover URL to a dataURL: pass through data:, reuse the CoverImage
+// Resolve a cover URL to a dataURL: pass through data:, reuse the shared
 // coverCache, else fetch → blob → dataURL (and seed the cache). Throws on
-// failure. Shared by useSpineColor and the add/cover-change write points.
+// failure (including a disallowed cover host). Shared by CoverImage,
+// useSpineColor (via computeSpineColor), and the add/cover-change write points.
 async function coverToDataUrl(url) {
   if (!url) throw new Error("no cover");
   if (url.startsWith("data:")) return url;
@@ -454,6 +448,28 @@ async function computeSpineColor(url) {
   } catch { return null; }
 }
 
+// Upload a user-captured cover photo (dataURL) to the `covers` storage bucket
+// as {auth.uid()}/{uuid}.{ext}. Returns the public URL, or null on ANY failure
+// so callers can fall back to the API/web cover. Shared by AddBookModal's
+// commitManual and CoverEditor's save.
+async function uploadCoverPhoto(session, dataUrl) {
+  try {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
+    const path = `${session.user.id}/${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage.from("covers").upload(path, blob, { contentType: blob.type });
+    if (error) return null;
+    const { data: { publicUrl } } = supabase.storage.from("covers").getPublicUrl(path);
+    return publicUrl;
+  } catch { return null; }
+}
+
+// Valid page counts are positive integers; anything else (0, negative, float,
+// string, null, undefined) coerces to null. Shared by the add/scan paths and
+// the lazy backfill.
+const asPageCount = (v) => (typeof v === "number" && Number.isInteger(v) && v > 0) ? v : null;
+
 // Lazy page-count resolver for existing print books that have no page count.
 // Primary: Open Library search.json (no quota). Fallback: Google Books.
 // Always returns a positive integer or null — NEVER throws.
@@ -475,8 +491,8 @@ async function fetchPageCount(title, author) {
       );
       if (olRes.ok) {
         const olData = await olRes.json();
-        const med = olData.docs?.[0]?.number_of_pages_median;
-        if (typeof med === "number" && Number.isInteger(med) && med > 0) return med;
+        const med = asPageCount(olData.docs?.[0]?.number_of_pages_median);
+        if (med !== null) return med;
       }
     } catch { /* OL unreachable — fall through to GB */ }
     // --- Google Books (fallback) ---
@@ -486,8 +502,8 @@ async function fetchPageCount(title, author) {
       );
       if (gbRes.ok) {
         const gbData = await gbRes.json();
-        const pc = gbData.items?.[0]?.volumeInfo?.pageCount;
-        if (typeof pc === "number" && Number.isInteger(pc) && pc > 0) return pc;
+        const pc = asPageCount(gbData.items?.[0]?.volumeInfo?.pageCount);
+        if (pc !== null) return pc;
       }
     } catch { /* GB unreachable — fall through to null */ }
     return null;
@@ -510,15 +526,13 @@ function useSpineColor(book, onPersist) {
     if (key && spineColorCache.has(key)) { setColor(spineColorCache.get(key)); return; }
     if (!key) { setColor(genreFallbackColor(book)); return; }
     (async () => {
-      try {
-        const dataUrl = await coverToDataUrl(key);
-        const c = await sampleCoverColor(dataUrl);
-        spineColorCache.set(key, c);
-        if (cancelled) return;
-        setColor(c);
-        // One-shot lazy backfill — only for books whose spineColor is null.
-        if (onPersist) onPersist(c);
-      } catch { /* keep the genre fallback; no DB write */ }
+      // computeSpineColor resolves + samples the cover and seeds
+      // spineColorCache; null on any failure → keep the genre fallback, no DB write.
+      const c = await computeSpineColor(key);
+      if (cancelled || !c) return;
+      setColor(c);
+      // One-shot lazy backfill — only for books whose spineColor is null.
+      if (onPersist) onPersist(c);
     })();
     return () => { cancelled = true; };
   }, [key, book.spineColor]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -569,12 +583,29 @@ function matchesQuery(book, q) {
    and never throw, so an old book with `progress: {}` (or null) just reads 0%.
 ─────────────────────────────────────────────────────────────── */
 
-// Format display metadata. `bar`/`text` are the sanctioned accents:
-// violet print, indigo ebook, cyan audio (cyan reserved for audio).
+// Format display metadata — the single source of truth for per-format labels,
+// glyphs, and the sanctioned accents (violet print / indigo ebook / cyan audio;
+// cyan reserved for audio). `bar`/`text`/`ring` style the progress UI, `cyan`
+// marks the audio-only cyan tint for inline glyphs (WhoHasIt), and `chipOn`
+// is the active-chip styling for FormatToggles. FORMAT_GLYPHS and
+// FORMAT_OPTIONS (further down) are derived views of this table — adding a
+// format here is the only edit needed (plus SPINE_GLOW if it gets a rail).
 const FORMAT_META = {
-  print: { label: "Print", glyph: "📖", bar: "bg-violet-400/85", text: "text-violet-200", ring: "focus:border-violet-400" },
-  ebook: { label: "Ebook", glyph: "📱", bar: "bg-indigo-400/85", text: "text-indigo-200", ring: "focus:border-indigo-400" },
-  audio: { label: "Audio", glyph: "🎧", bar: "bg-cyan-400/85", text: "text-cyan-200", ring: "focus:border-cyan-400" },
+  print: {
+    label: "Print", glyph: "📖", cyan: false,
+    bar: "bg-violet-400/85", text: "text-violet-200", ring: "focus:border-violet-400",
+    chipOn: "bg-violet-600/40 border-violet-400/60 text-violet-100",
+  },
+  ebook: {
+    label: "Ebook", glyph: "📱", cyan: false,
+    bar: "bg-indigo-400/85", text: "text-indigo-200", ring: "focus:border-indigo-400",
+    chipOn: "bg-indigo-600/40 border-indigo-400/60 text-indigo-100",
+  },
+  audio: {
+    label: "Audio", glyph: "🎧", cyan: true,
+    bar: "bg-cyan-400/85", text: "text-cyan-200", ring: "focus:border-cyan-400",
+    chipOn: "bg-cyan-600/30 border-cyan-400/60 text-cyan-200",
+  },
 };
 
 // Coerce any value to a finite number >= 0 (null/NaN/strings → 0).
@@ -1974,8 +2005,8 @@ export default function Hushthorn() {
     pageCountTriedIds.add(activeId);
     (async () => {
       try {
-        const count = await fetchPageCount(book.title, book.author);
-        if (typeof count === "number" && Number.isInteger(count) && count > 0) {
+        const count = asPageCount(await fetchPageCount(book.title, book.author));
+        if (count !== null) {
           await updateBook(activeId, {
             progress: {
               ...book.progress,
@@ -3639,8 +3670,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
   const pick = async (doc, shelf) => {
     const coverUrl = doc._coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : "");
     const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
-    const rawPageCount = doc.pageCount;
-    const pageCount = (typeof rawPageCount === "number" && Number.isInteger(rawPageCount) && rawPageCount > 0) ? rawPageCount : null;
+    const pageCount = asPageCount(doc.pageCount);
     const book = {
       title: doc.title,
       author: doc.author_name?.[0] || "Unknown author",
@@ -3960,8 +3990,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
       // "no cover found", and the user can capture or upload one.
       let coverUrl = doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : "";
       if (!coverUrl) coverUrl = await fetchGoogleCover(isbn);
-      const rawPageCount = doc.number_of_pages_median;
-      const pageCount = (typeof rawPageCount === "number" && Number.isInteger(rawPageCount) && rawPageCount > 0) ? rawPageCount : null;
+      const pageCount = asPageCount(doc.number_of_pages_median);
       return {
         isbn,
         title: doc.title,
@@ -4020,8 +4049,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
 
   const addBatch = () => {
     const items = queue.filter((q) => !q.inArchive).map((q) => {
-      const pc = q.pageCount;
-      const validPageCount = (typeof pc === "number" && Number.isInteger(pc) && pc > 0) ? pc : null;
+      const validPageCount = asPageCount(q.pageCount);
       return {
         title: q.title,
         author: q.author || "Unknown author",
@@ -4078,22 +4106,15 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
   const commitManual = async (shelf) => {
     let coverUrl = manual.coverUrl;
     if (coverChoice === "photo" && photoPreview && session) {
-      try {
-        const res = await fetch(photoPreview);
-        const blob = await res.blob();
-        const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
-        const path = `${session.user.id}/${crypto.randomUUID()}.${ext}`;
-        const { error } = await supabase.storage.from("covers").upload(path, blob, { contentType: blob.type });
-        if (!error) {
-          const { data: { publicUrl } } = supabase.storage.from("covers").getPublicUrl(path);
-          coverUrl = publicUrl;
-        }
-      } catch { /* fall back to API cover */ }
+      const uploaded = await uploadCoverPhoto(session, photoPreview);
+      if (uploaded) coverUrl = uploaded;
+      // Don't fail the add over a lost photo — but say so instead of
+      // letting the reader believe their photo was kept.
+      else setScanNotice("Couldn't save your photo — using the web cover instead.");
     }
     // Best-effort spine color from the resolved cover; null on any failure.
     const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
-    const pc = manual.pageCount;
-    const validPageCount = (typeof pc === "number" && Number.isInteger(pc) && pc > 0) ? pc : null;
+    const validPageCount = asPageCount(manual.pageCount);
     onAdd({
       title: manual.title.trim(),
       author: manual.author.trim() || "Unknown author",
@@ -4742,15 +4763,8 @@ function CoverEditor({ book, onUpdate, session }) {
     try {
       let coverUrl = apiCoverUrl || book.coverUrl;
       if (coverChoice === "photo" && photoPreview && session) {
-        const res = await fetch(photoPreview);
-        const blob = await res.blob();
-        const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
-        const path = `${session.user.id}/${crypto.randomUUID()}.${ext}`;
-        const { error } = await supabase.storage.from("covers").upload(path, blob, { contentType: blob.type });
-        if (!error) {
-          const { data: { publicUrl } } = supabase.storage.from("covers").getPublicUrl(path);
-          coverUrl = publicUrl;
-        }
+        // Graceful fallback: a failed upload keeps the API/current cover.
+        coverUrl = (await uploadCoverPhoto(session, photoPreview)) || coverUrl;
       }
       // Resample the spine color for the new cover; null on any failure.
       const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
@@ -4898,13 +4912,12 @@ function CoverEditor({ book, onUpdate, session }) {
    appear only if they opted in. Notes are NEVER rendered here (the reveal never
    carries them). */
 
-// Per-format ownership glyphs. Audio keeps the app's cyan-for-audio rule; the
-// glyph itself lives in a cyan span so the tint reads as "audio" even inline.
-const FORMAT_GLYPHS = [
-  { fmt: "print", glyph: "📖", label: "Print", cyan: false },
-  { fmt: "ebook", glyph: "📱", label: "Ebook", cyan: false },
-  { fmt: "audio", glyph: "🎧", label: "Audio", cyan: true },
-];
+// Per-format ownership glyphs, derived from FORMAT_META (the source of truth).
+// Audio keeps the app's cyan-for-audio rule; the glyph itself lives in a cyan
+// span so the tint reads as "audio" even inline.
+const FORMAT_GLYPHS = Object.entries(FORMAT_META).map(
+  ([fmt, m]) => ({ fmt, glyph: m.glyph, label: m.label, cyan: m.cyan })
+);
 
 // "Who has it" — one row per `owners` entry from the UnionBook.
 // `compact` = card-grid mode: shows only the owner count badge, no full rows
@@ -5275,11 +5288,10 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
 // in the sanctioned per-format accents (violet print · indigo ebook · cyan audio).
 // A tome must keep at least one format (reading progress is keyed by format), so
 // the last remaining chip can't be switched off.
-const FORMAT_OPTIONS = [
-  { fmt: "print", label: "Print", on: "bg-violet-600/40 border-violet-400/60 text-violet-100" },
-  { fmt: "ebook", label: "Ebook", on: "bg-indigo-600/40 border-indigo-400/60 text-indigo-100" },
-  { fmt: "audio", label: "Audio", on: "bg-cyan-600/30 border-cyan-400/60 text-cyan-200" },
-];
+// Derived from FORMAT_META (the source of truth); `on` = FORMAT_META.chipOn.
+const FORMAT_OPTIONS = Object.entries(FORMAT_META).map(
+  ([fmt, m]) => ({ fmt, label: m.label, on: m.chipOn })
+);
 function FormatToggles({ book, onUpdate }) {
   const fmts = (book.formats && book.formats.length) ? book.formats : ["print"];
   const toggle = (fmt) => {
