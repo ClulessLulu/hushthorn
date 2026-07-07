@@ -125,7 +125,7 @@ const FONT_CSS = `
   50% { box-shadow: 0 0 0 10px rgba(244,114,182,0); }
 }
 .ht-recording { animation: ht-pulse 1.4s ease infinite; }
-@media (prefers-reduced-motion: reduce) { .ht-recording { animation: none; } .ht-card { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .ht-recording { animation: none; } .ht-card { transition: none; } .ht-saved-flash, .ht-save-bar { animation: none; } }
 
 /* per-format progress sliders — sanctioned accents: violet print, indigo
    ebook, cyan audio (cyan is reserved for audio). Sharp 2px track + thumb. */
@@ -1409,7 +1409,7 @@ function SavedFlash({ show }) {
   }, [show]);
   if (!visible) return null;
   return (
-    <span key={show} className="ht-saved-flash text-[9px] uppercase tracking-wide text-indigo-300 px-1.5 py-0.5 rounded-sm ml-1">
+    <span key={show} className="ht-display ht-saved-flash text-[9px] uppercase tracking-wide text-indigo-300 px-1.5 py-0.5 rounded-sm ml-1">
       saved
     </span>
   );
@@ -5609,10 +5609,12 @@ function ToggleRow({ label, action, onClick }) {
   return (
     <div className="flex items-center justify-between gap-2 text-sm">
       <span className="text-purple-300/80 italic min-w-0 truncate">{label}</span>
-      <button onClick={handleClick} className="ht-display text-[10px] uppercase px-2 py-1 rounded-sm bg-purple-800/50 hover:bg-purple-700/70 text-purple-100 whitespace-nowrap flex-shrink-0">
-        {action}
-      </button>
-      <SavedFlash show={flash} />
+      <span className="flex items-center gap-1 flex-shrink-0">
+        <button onClick={handleClick} className="ht-display text-[10px] uppercase px-2 py-1 rounded-sm bg-purple-800/50 hover:bg-purple-700/70 text-purple-100 whitespace-nowrap flex-shrink-0">
+          {action}
+        </button>
+        <SavedFlash show={flash} />
+      </span>
     </div>
   );
 }
