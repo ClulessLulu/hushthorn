@@ -280,6 +280,24 @@ function GenreChips({ genres, max = 3, className = "" }) {
 // The artifact sandbox blocks <img> from external domains, so covers are
 // fetched as bytes and rendered as data URLs instead. Cached per session.
 const coverCache = new Map();
+
+// Only fetch cover images from known cover hosts. A co-member's cover_url is
+// attacker-controllable via the shared archive; without this, viewing a shared
+// shelf would fetch an arbitrary URL from the victim's browser (SSRF-lite /
+// pixel-tracking / DoS). data:/blob: are local and always allowed.
+let SUPABASE_HOST = "";
+try { SUPABASE_HOST = new URL(import.meta.env.VITE_SUPABASE_URL).hostname.toLowerCase(); } catch { /* env may be unset in some builds */ }
+const COVER_HOST_ALLOW = ["openlibrary.org", "google.com", "googleusercontent.com", "googleapis.com"];
+function isAllowedCoverSrc(src) {
+  if (!src) return false;
+  if (src.startsWith("data:") || src.startsWith("blob:")) return true;
+  try {
+    const h = new URL(src).hostname.toLowerCase();
+    return (SUPABASE_HOST && h === SUPABASE_HOST) ||
+      COVER_HOST_ALLOW.some((d) => h === d || h.endsWith("." + d));
+  } catch { return false; }
+}
+
 function CoverImage({ src, alt, className, fallback }) {
   const [resolved, setResolved] = useState(() =>
     src && (src.startsWith("data:") || src.startsWith("blob:")) ? src : coverCache.get(src) || ""
@@ -291,6 +309,7 @@ function CoverImage({ src, alt, className, fallback }) {
     setFailed(false);
     if (!src) { setResolved(""); return; }
     if (src.startsWith("data:") || src.startsWith("blob:")) { setResolved(src); return; }
+    if (!isAllowedCoverSrc(src)) { setFailed(true); return; }
     if (coverCache.has(src)) { setResolved(coverCache.get(src)); return; }
     setResolved("");
     fetch(src)
@@ -378,6 +397,7 @@ function sampleCoverColor(dataUrl) {
 async function coverToDataUrl(url) {
   if (!url) throw new Error("no cover");
   if (url.startsWith("data:")) return url;
+  if (!isAllowedCoverSrc(url)) throw new Error("cover host not allowed");
   if (coverCache.has(url)) return coverCache.get(url);
   const r = await fetch(url);
   if (!r.ok) throw new Error("cover fetch failed");
@@ -3384,8 +3404,10 @@ function AuthPage() {
       // instead of the obfuscated path above — theme it to match.
       if (mode === 'signup' && /already\s*(registered|exists)/i.test(err.message || '')) {
         setError('That email is already registered. Sign in instead, or use a different one.');
+      } else if (/invalid login credentials|invalid credentials/i.test(err.message || '')) {
+        setError('That email or password is incorrect. Try again.');
       } else {
-        setError(err.message);
+        setError('The archive could not be reached. Check your connection and try again.');
       }
     } finally {
       setLoading(false);
