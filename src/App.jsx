@@ -1397,7 +1397,17 @@ function ArchiveSwitcher({ current, archives = [], onSwitch }) {
 // Quiet "saved" confirmation for instant-save controls. Render with a changing
 // `show` key each time the value persists; the pill fades over 0.6s.
 function SavedFlash({ show }) {
-  if (!show) return null;
+  // `show` is a monotonic bump counter. Auto-hide ~0.65s after each bump so the
+  // pill is genuinely transient (the CSS fades only the background, not the text)
+  // and never leaves a permanent third flex child that shifts sibling layout.
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    if (!show) return;
+    setVisible(true);
+    const id = setTimeout(() => setVisible(false), 650);
+    return () => clearTimeout(id);
+  }, [show]);
+  if (!visible) return null;
   return (
     <span key={show} className="ht-saved-flash text-[9px] uppercase tracking-wide text-indigo-300 px-1.5 py-0.5 rounded-sm ml-1">
       saved
