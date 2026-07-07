@@ -46,6 +46,21 @@ async function callClaude(body) {
   return res.json();
 }
 
+// Extract and parse the strict-JSON payload from a Claude Messages response.
+// Shared by every AI feature (progress shots, the Oracle, divine-details,
+// cover scan): join the text blocks, strip ``` / ```json fences, slice to the
+// outermost {…} or […], JSON.parse. bracket: "{" for an object, "[" for an
+// array. Returns the parsed value or throws — each caller keeps its own
+// try/catch and per-feature manual-entry fallback.
+function parseClaudeJson(data, bracket = "{") {
+  const close = bracket === "[" ? "]" : "}";
+  const text = (data?.content || []).filter((c) => c?.type === "text").map((c) => c.text).join("\n");
+  const clean = text.replace(/```json|```/g, "").trim();
+  const start = clean.indexOf(bracket), end = clean.lastIndexOf(close);
+  if (start === -1 || end < start) throw new Error("no JSON payload");
+  return JSON.parse(clean.slice(start, end + 1));
+}
+
 /* ───────────────────────── Hushthorn ─────────────────────────
    Gothic century book archive · demo build
    Shelves: Owned / Wishlist · Read / Unread
@@ -670,17 +685,9 @@ async function readProgressShot(dataUrl, fmt) {
         ],
       }],
     });
-    // Defensive parse, same contract as scanCover: pull text from content,
-    // strip ``` / ```json fences, slice to the outermost { … }, parse.
-    const text = (data && data.content || [])
-      .filter((c) => c && c.type === "text")
-      .map((c) => c.text)
-      .join("\n");
-    const clean = text.replace(/```json|```/g, "").trim();
-    const start = clean.indexOf("{");
-    const end = clean.lastIndexOf("}");
-    if (start === -1 || end === -1 || end < start) return null;
-    const parsed = JSON.parse(clean.slice(start, end + 1));
+    // Defensive parse, same contract as scanCover — shared parseClaudeJson
+    // throws on a missing payload, and the catch below degrades that to null.
+    const parsed = parseClaudeJson(data, "{");
     return shapeProgressShot(parsed, fmt);
   } catch {
     // Network error, non-2xx (callClaude throws), non-JSON, empty content —
@@ -2576,14 +2583,7 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
           max_tokens: 1000,
           messages: [{ role: "user", content: prompt }],
       });
-      const text = (data.content || [])
-        .filter((c) => c.type === "text")
-        .map((c) => c.text)
-        .join("\n");
-      const clean = text.replace(/```json|```/g, "").trim();
-      const start = clean.indexOf("[");
-      const end = clean.lastIndexOf("]");
-      const parsed = JSON.parse(clean.slice(start, end + 1));
+      const parsed = parseClaudeJson(data, "[");
       if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("empty");
 
       // fetch covers from Open Library, best-effort per book
@@ -3545,9 +3545,17 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
   const scanMultipleRef = useRef(scanMultiple);
   const queueRef = useRef(queue);
   const booksRef = useRef(books);
+  const manualRef = useRef(manual);
   useEffect(() => { scanMultipleRef.current = scanMultiple; }, [scanMultiple]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { booksRef.current = books; }, [books]);
+  useEffect(() => { manualRef.current = manual; }, [manual]);
+  // A scan/barcode path that sets the title programmatically AND calls
+  // divineDetails directly stashes that title here; the debounced title
+  // effect skips (and clears) exactly one matching run so the same book
+  // isn't divined twice. Typed titles are never stashed, so the normal
+  // typeahead debounce is untouched.
+  const divinedTitleRef = useRef(null);
   const [photoPreview, setPhotoPreview] = useState("");
   const [coverChoice, setCoverChoice] = useState("api"); // "api" | "photo"
   const [cropSrc, setCropSrc] = useState("");
@@ -3670,15 +3678,20 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
   };
 
   // Ask Claude for the book's author + genres from the title.
-  const divineDetails = async (title, author) => {
+  // `knownCoverUrl` — optional freshest coverUrl from a caller that just queued
+  // a setManual the mirror ref can't see yet (the barcode path); when omitted,
+  // the latest committed value is read from manualRef. The decision to fetch
+  // lives OUT here because state updaters must stay pure — StrictMode
+  // double-invokes them in dev, which used to fire a duplicate cover fetch.
+  const divineDetails = async (title, author, knownCoverUrl) => {
     if (!title.trim()) return;
     setGenreLoading(true);
-    // Fetch cover from Google Books immediately, independent of Claude
-    setManual((m) => {
-      if (m.coverUrl && !m.coverUrl.startsWith("data:")) return m;
-      fetchGoogleBooksCover(title);
-      return m;
-    });
+    // Fetch cover from Google Books immediately, independent of Claude — but
+    // never clobber an existing real cover (only fetch when there's no cover
+    // yet or only a data: photo; the setter inside fetchGoogleBooksCover
+    // re-checks against the latest state before applying).
+    const coverUrl = knownCoverUrl !== undefined ? knownCoverUrl : manualRef.current.coverUrl;
+    if (!(coverUrl && !coverUrl.startsWith("data:"))) fetchGoogleBooksCover(title);
     try {
       const data = await callClaude({
           model: "claude-sonnet-4-6",
@@ -3688,9 +3701,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
             content: `For the book titled "${title.trim()}"${author?.trim() ? ` by ${author.trim()}` : ""}: identify the author (if you recognize the book) and its genres. If you don't recognize it, set author to null and infer plausible genres from the title. Respond with ONLY a valid JSON object, nothing else: {"author": string or null, "genres": array of 2 to 4 short genre strings}.`,
           }],
       });
-      const text = (data.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
-      const clean = text.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}") + 1));
+      const parsed = parseClaudeJson(data, "{");
       setManual((m) => {
         const have = new Set(m.genres.map((g) => g.toLowerCase()));
         const fresh = (Array.isArray(parsed.genres) ? parsed.genres : [])
@@ -3712,6 +3723,12 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
   useEffect(() => {
     const title = manual.title.trim();
     if (title.length < 3) return;
+    // Scan/barcode paths set the title programmatically and divine directly;
+    // skip the single debounce cycle that set caused (clear the stash either
+    // way so a stale value can never suppress a future typed title).
+    const skip = divinedTitleRef.current === title;
+    divinedTitleRef.current = null;
+    if (skip) return;
     const timer = setTimeout(() => divineDetails(title, manual.author), 700);
     return () => clearTimeout(timer);
   }, [manual.title]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -3779,10 +3796,11 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
             ],
           }],
       });
-      const text = (data.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
-      const clean = text.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}") + 1));
+      const parsed = parseClaudeJson(data, "{");
       if (parsed.title) {
+        // Divining directly below — stash the title so the debounced title
+        // effect doesn't fire a second divine for the same book.
+        divinedTitleRef.current = parsed.title.trim();
         setManual((m) => ({ ...m, title: parsed.title, author: parsed.author || m.author }));
         setScanNotice("The scribe read the cover — check the details, then divine or adjust the genres.");
         divineDetails(parsed.title, parsed.author || "");
@@ -3983,7 +4001,13 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
           pageCount: data.pageCount ?? null,
         }));
         setScanNotice("Matched from the barcode — confirm the details, then inscribe.");
-        if (data.genres.length === 0) divineDetails(data.title, data.author || "");
+        if (data.genres.length === 0) {
+          // Divining directly — stash the title so the debounced title effect
+          // doesn't fire a second divine; pass the coverUrl we just set (the
+          // mirror ref hasn't seen this render's setManual yet).
+          divinedTitleRef.current = data.title.trim();
+          divineDetails(data.title, data.author || "", data.coverUrl);
+        }
         setScanView("review");
       } else {
         setLiveStatus("That barcode wasn't in the archives. Try capturing the cover instead.");
