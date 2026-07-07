@@ -95,6 +95,9 @@ hushthorn/
 
 ## Known TODOs
 
+- **Enable Supabase leaked-password protection** (Auth → check passwords against
+  HaveIBeenPwned) — deferred for now: it's a paid-plan feature and the app only
+  has a handful of test users. Revisit before opening up to real users.
 - Persistence (Supabase: books, notes, genres tables + auth)
 - Split `App.jsx` into modules (`components/`, `lib/claude.js`, `lib/openLibrary.js`)
 - Genre quality: Open Library subjects are noisy — `cleanGenres()` filters junk,
