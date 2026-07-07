@@ -3763,9 +3763,9 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
     return () => clearTimeout(timer);
   }, [manual.title]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Title typeahead for photo mode
+  // Title typeahead — Google Books suggestions while typing in the scan/review form.
   useEffect(() => {
-    if (mode !== "photo") return;
+    if (!(mode === "scan" && scanView === "review")) return;
     const q = manual.title.trim();
     if (q.length < 2) { setTitleSuggs([]); return; }
     const timer = setTimeout(async () => {
@@ -3788,11 +3788,11 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
       } catch { setTitleSuggs([]); }
     }, 350);
     return () => clearTimeout(timer);
-  }, [manual.title, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [manual.title, mode, scanView]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Author typeahead for photo mode
+  // Author typeahead — Google Books author suggestions in the scan/review form.
   useEffect(() => {
-    if (mode !== "photo") return;
+    if (!(mode === "scan" && scanView === "review")) return;
     const q = manual.author.trim();
     if (q.length < 2) { setAuthorSuggs([]); return; }
     const timer = setTimeout(async () => {
@@ -3806,7 +3806,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
       } catch { setAuthorSuggs([]); }
     }, 350);
     return () => clearTimeout(timer);
-  }, [manual.author, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [manual.author, mode, scanView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ask Claude to read the cover photo and pull out title + author.
   const scanCover = async (dataUrl) => {
