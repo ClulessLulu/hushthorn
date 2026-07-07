@@ -2360,6 +2360,7 @@ export default function Hushthorn() {
       )}
       {activeBook && (
         <DetailPanel
+          key={activeBook.id || activeBook.key}
           book={activeBook}
           onClose={() => setActiveId(null)}
           onUpdate={async (patch) => {
@@ -2371,8 +2372,9 @@ export default function Hushthorn() {
             await updateBook(id, patch);
             // formats/shelf reshape the union entry's owners[] + top-level union,
             // which the lightweight in-place mirror can't recompute — reload so the
-            // archive card / WhoHasIt reflect the change immediately.
-            if (currentLibraryId != null && ('formats' in patch || 'shelf' in patch)) {
+            // archive card / WhoHasIt reflect the change immediately. title/author
+            // edits re-key the union entry too (it's keyed by title).
+            if (currentLibraryId != null && ('formats' in patch || 'shelf' in patch || 'title' in patch || 'author' in patch)) {
               refreshArchiveUnion();
             }
           }}
@@ -5254,6 +5256,102 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
   const isUnion = !!book.owners;
   const isMine  = isUnion ? !!book.mineBookId : true; // personal books are always mine
 
+  // Buffered title/author/genres — edits stage here and only reach onUpdate
+  // (and the DB) on Save & Close. The `key` at the render site resets this
+  // state whenever a different book is opened. Read-only (!isMine) books
+  // never see the editable card or the save bar, so isDirty is gated on isMine.
+  const [buf, setBuf] = useState({
+    title: book.title || "",
+    author: book.author || "",
+    genres: book.genres || [],
+  });
+  const [genreInput, setGenreInput] = useState("");
+  const isDirty = isMine && (
+    buf.title !== (book.title || "") ||
+    buf.author !== (book.author || "") ||
+    JSON.stringify(buf.genres) !== JSON.stringify(book.genres || [])
+  );
+  const discard = () => { setBuf({ title: book.title || "", author: book.author || "", genres: book.genres || [] }); setGenreInput(""); };
+  const saveAndClose = () => {
+    onUpdate({ title: buf.title.trim(), author: buf.author.trim(), genres: buf.genres });
+    onClose();
+  };
+  const addGenre = () => {
+    const g = genreInput.trim();
+    if (!g || buf.genres.some((x) => x.toLowerCase() === g.toLowerCase())) return;
+    setBuf((b) => ({ ...b, genres: [...b.genres, g].slice(0, 6) }));
+    setGenreInput("");
+  };
+  const removeGenre = (g) => setBuf((b) => ({ ...b, genres: b.genres.filter((x) => x !== g) }));
+
+  // Editable details card — title/author/genres staged in `buf`. Read-only
+  // books (!isMine) get neither this card nor the save bar.
+  const editable = isMine ? (
+    <div className={`ht-card rounded-md p-4 space-y-3 ${isDirty ? "border-pink-400/50" : ""}`}>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="ht-display text-xs uppercase text-purple-200 font-semibold">Edit details</span>
+        {isDirty && (
+          <span className="ht-display text-[9px] uppercase px-2 py-0.5 rounded-sm bg-pink-500/30 text-pink-200">
+            Unsaved changes
+          </span>
+        )}
+      </div>
+      <input
+        value={buf.title}
+        onChange={(e) => setBuf((b) => ({ ...b, title: e.target.value }))}
+        placeholder="Title"
+        className="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400"
+      />
+      <input
+        value={buf.author}
+        onChange={(e) => setBuf((b) => ({ ...b, author: e.target.value }))}
+        placeholder="Author"
+        className="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400"
+      />
+      <div className="space-y-1.5">
+        <span className="ht-display text-[10px] uppercase text-purple-300 font-semibold">Genres</span>
+        {buf.genres.length > 0 && (
+          <div className="flex gap-1.5 flex-wrap">
+            {buf.genres.map((g) => (
+              <span key={g} className="ht-display text-[9px] uppercase pl-1.5 pr-1 py-0.5 rounded-sm border border-purple-500/40 bg-purple-900/40 text-purple-200/90 flex items-center gap-1">
+                {g}
+                <button onClick={() => removeGenre(g)} aria-label={`Remove genre ${g}`} className="text-purple-400 hover:text-pink-300 px-0.5">✕</button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <input
+            value={genreInput}
+            onChange={(e) => setGenreInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addGenre(); } }}
+            placeholder="Add a genre…"
+            className="flex-1 bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400"
+          />
+          <button onClick={addGenre} disabled={!genreInput.trim()} className="ht-display text-[10px] uppercase px-3 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100">
+            Add
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  // Sticky save bar — last child inside the Overlay's scroll container so
+  // `sticky bottom-0` pins it to the bottom of the panel, not the viewport.
+  const saveBar = isDirty && (
+    <div className="ht-save-bar sticky bottom-0 -mx-1 mt-4 flex justify-center gap-3 py-3"
+         style={{ background: "linear-gradient(180deg, transparent, rgba(12,7,20,0.96) 35%)" }}>
+      <button onClick={discard}
+        className="ht-display px-5 py-2.5 rounded-sm bg-purple-800/70 hover:bg-purple-700 text-purple-100 text-xs font-semibold uppercase">
+        Discard changes
+      </button>
+      <button onClick={saveAndClose}
+        className="ht-display px-6 py-2.5 rounded-sm bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-400 hover:to-pink-400 text-white text-xs font-semibold uppercase shadow-lg">
+        Save &amp; Close
+      </button>
+    </div>
+  );
+
   // "Hide from shared archives" local toggle state — initialised from my merged
   // copy of the book's hidden flag. Tracks the optimistic value during the write.
   const [hiddenLocal, setHiddenLocal] = useState(!!book.hidden);
@@ -5331,6 +5429,8 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
                   </p>
                 </div>
 
+                {editable}
+
                 <ProgressEditor book={book} onUpdate={onUpdate} />
 
                 {/* Formats I have — editing my editions refreshes the union. */}
@@ -5377,11 +5477,13 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
             <RevealGrid book={book} meId={me} />
           </div>
         </div>
+
+        {saveBar}
       </Overlay>
     );
   }
 
-  // ── Personal variant (unchanged) ─────────────────────────────────────────────
+  // ── Personal variant ─────────────────────────────────────────────────────────
   return (
     <Overlay onClose={onClose} label={book.title} wide>
       {header}
@@ -5422,6 +5524,8 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
             </p>
           </div>
 
+          <div className="mt-4">{editable}</div>
+
           <ProgressEditor book={book} onUpdate={onUpdate} />
 
           {/* Formats I have — same right-column placement (after progress) as the
@@ -5433,6 +5537,8 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
           <NotesSection book={book} onUpdate={onUpdate} />
         </div>
       </div>
+
+      {saveBar}
     </Overlay>
   );
 }
