@@ -156,6 +156,17 @@ const FONT_CSS = `
 .ht-range-indigo::-moz-range-thumb { background: #818cf8; }
 .ht-range-cyan::-webkit-slider-thumb { background: #22d3ee; }
 .ht-range-cyan::-moz-range-thumb { background: #22d3ee; }
+
+@keyframes ht-flash {
+  0% { background: rgba(168,139,250,0.35); }
+  100% { background: transparent; }
+}
+.ht-saved-flash { animation: ht-flash 0.6s ease-out; }
+@keyframes ht-slide-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.ht-save-bar { animation: ht-slide-up 0.25s ease-out; }
 `;
 
 /* ── image crop utility ─────────────────────────────────────── */
@@ -1383,7 +1394,19 @@ function ArchiveSwitcher({ current, archives = [], onSwitch }) {
 
 /* ── rating meters ─────────────────────────────────────────── */
 
+// Quiet "saved" confirmation for instant-save controls. Render with a changing
+// `show` key each time the value persists; the pill fades over 0.6s.
+function SavedFlash({ show }) {
+  if (!show) return null;
+  return (
+    <span key={show} className="ht-saved-flash text-[9px] uppercase tracking-wide text-indigo-300 px-1.5 py-0.5 rounded-sm ml-1">
+      saved
+    </span>
+  );
+}
+
 function Meter({ value, onChange, Icon, label, readOnly = false, size }) {
+  const [flash, setFlash] = useState(0);
   return (
     <div className="flex items-center gap-1" role={readOnly ? undefined : "radiogroup"} aria-label={label}>
       {[1, 2, 3, 4, 5].map((n) => (
@@ -1391,13 +1414,14 @@ function Meter({ value, onChange, Icon, label, readOnly = false, size }) {
           key={n}
           type="button"
           disabled={readOnly}
-          onClick={() => onChange && onChange(n === value ? 0 : n)}
+          onClick={() => { if (onChange) { onChange(n === value ? 0 : n); setFlash((f) => f + 1); } }}
           className={`p-0.5 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${readOnly ? "cursor-default" : "cursor-pointer hover:scale-110 transition-transform"}`}
           aria-label={`${label}: ${n} of 5`}
         >
           <Icon filled={n <= value} size={size} />
         </button>
       ))}
+      {!readOnly && <SavedFlash show={flash} />}
     </div>
   );
 }
@@ -5412,16 +5436,19 @@ const FORMAT_OPTIONS = Object.entries(FORMAT_META).map(
   ([fmt, m]) => ({ fmt, label: m.label, on: m.chipOn })
 );
 function FormatToggles({ book, onUpdate }) {
+  const [flash, setFlash] = useState(0);
   const fmts = (book.formats && book.formats.length) ? book.formats : ["print"];
   const toggle = (fmt) => {
     const has = fmts.includes(fmt);
     if (has && fmts.length === 1) return; // keep at least one format
     onUpdate({ formats: has ? fmts.filter((f) => f !== fmt) : [...fmts, fmt] });
+    setFlash((f) => f + 1);
   };
   return (
     <div>
-      <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400/80 mb-1.5">
+      <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400/80 mb-1.5 flex items-center gap-1">
         Formats I have
+        <SavedFlash show={flash} />
       </p>
       <div className="flex gap-1.5">
         {FORMAT_OPTIONS.map((o) => {
@@ -5449,12 +5476,18 @@ function FormatToggles({ book, onUpdate }) {
 }
 
 function ToggleRow({ label, action, onClick }) {
+  const [flash, setFlash] = useState(0);
+  const handleClick = () => {
+    onClick();
+    setFlash((f) => f + 1);
+  };
   return (
     <div className="flex items-center justify-between gap-2 text-sm">
       <span className="text-purple-300/80 italic min-w-0 truncate">{label}</span>
-      <button onClick={onClick} className="ht-display text-[10px] uppercase px-2 py-1 rounded-sm bg-purple-800/50 hover:bg-purple-700/70 text-purple-100 whitespace-nowrap flex-shrink-0">
+      <button onClick={handleClick} className="ht-display text-[10px] uppercase px-2 py-1 rounded-sm bg-purple-800/50 hover:bg-purple-700/70 text-purple-100 whitespace-nowrap flex-shrink-0">
         {action}
       </button>
+      <SavedFlash show={flash} />
     </div>
   );
 }
