@@ -1778,61 +1778,44 @@ export default function Hushthorn() {
     sortSaveTimer.current = setTimeout(() => savePrefs({ pref_sort: next }), 400);
   };
 
-  // Smart-merge imported books: update existing entries, add new ones.
+  // Smart-merge imported books (The Binding + scanner batch add): update
+  // existing entries, add new ones. The merge decision itself is pure
+  // (`mergeImport`, unit-tested in tests/import-dedupe-unit.mjs); this wrapper
+  // applies it to local state immediately, then persists every side of it —
+  // new `books` rows WITH their `notes`, and for merged books the changed
+  // fields plus only the genuinely-new notes. Re-importing the same file is
+  // idempotent: fingerprint dedupe yields zero additions and zero updates, so
+  // nothing is written. Returns true only when every write landed —
+  // PairSection.doImport reflects that in its success/failure copy.
   const importBooks = async (items) => {
-    let additions = [];
-    setBooks((prev) => {
-      const updated = prev.map((b) => ({ ...b, notes: [...b.notes] }));
-      const byTitle = new Map(updated.map((b) => [b.title.toLowerCase(), b]));
-      const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      const newAdditions = [];
-      for (const item of items) {
-        const key = item.title.toLowerCase();
-        const newNotes = (item.notes || []).map((n) => ({
-          id: crypto.randomUUID(),
-          page: n.page || "",
-          isQuote: !!n.isQuote,
-          text: n.text,
-          isVoice: false,
-          isTime: false,
-          date: today,
-        }));
-        const existing = byTitle.get(key);
-        if (existing) {
-          const have = new Set(existing.notes.map((n) => n.text));
-          existing.notes = [...newNotes.filter((n) => !have.has(n.text)), ...existing.notes];
-          existing.read = existing.read || !!item.read;
-          if (item.shelf === "owned") existing.shelf = "owned";
-          if (!existing.overall && item.overall) existing.overall = item.overall;
-          if ((!existing.genres || existing.genres.length === 0) && item.genres?.length) existing.genres = item.genres;
-          if (!existing.coverUrl && item.coverUrl) existing.coverUrl = item.coverUrl;
-        } else {
-          newAdditions.push({
-            id: crypto.randomUUID(),
-            title: item.title,
-            author: item.author || "Unknown author",
-            year: null,
-            coverUrl: item.coverUrl || "",
-            genres: item.genres || [],
-            shelf: item.shelf || "owned",
-            read: !!item.read,
-            overall: item.overall || 0,
-            smut: 0,
-            formats: ['print'],
-            progress: item.progress || {},
-            notes: newNotes,
-          });
-        }
-      }
-      additions = newAdditions;
-      return [...newAdditions, ...updated];
+    const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const { next, additions, updates } = mergeImport(books, items, today, () => crypto.randomUUID());
+    // Optimistic: the shelf reflects the import at once (existing UX). On a
+    // write failure below we keep the local rows for this session and report
+    // failure — re-importing after the fault is safe (dedupe absorbs it).
+    setBooks(next);
+    if (!additions.length && !updates.length) return true; // idempotent re-import: nothing to write
+
+    const uid = session.user.id;
+    const toNoteRow = (n, bookId) => ({
+      id: n.id,
+      book_id: bookId,
+      user_id: uid,
+      page: n.page,
+      is_quote: n.isQuote,
+      text: n.text,
+      is_voice: n.isVoice,
+      is_time: n.isTime ?? false,
+      date: n.date,
     });
-    // Write new books to Supabase
+    let ok = true;
+
+    // New books: insert the rows first (notes carry a book_id FK), then notes.
     if (additions.length) {
-      await supabase.from('books').insert(
+      const { error } = await supabase.from('books').insert(
         additions.map(b => ({
           id: b.id,
-          user_id: session.user.id,
+          user_id: uid,
           title: b.title,
           author: b.author,
           year: b.year ?? null,
@@ -1846,7 +1829,33 @@ export default function Hushthorn() {
           progress: b.progress || {},
         }))
       );
+      if (error) {
+        console.error('import books insert:', error.message);
+        ok = false; // skip their notes too — the book_id FKs don't exist
+      } else {
+        const noteRows = additions.flatMap(b => (b.notes || []).map(n => toNoteRow(n, b.id)));
+        if (noteRows.length) {
+          const { error: nErr } = await supabase.from('notes').insert(noteRows);
+          if (nErr) { console.error('import notes insert:', nErr.message); ok = false; }
+        }
+      }
     }
+
+    // Existing books: UPDATE the changed fields, INSERT the genuinely-new notes.
+    for (const u of updates) {
+      const dbPatch = Object.fromEntries(
+        Object.entries(FIELD_MAP).filter(([k]) => k in u.fields).map(([k, v]) => [v, u.fields[k]])
+      );
+      if (Object.keys(dbPatch).length) {
+        const { error } = await supabase.from('books').update(dbPatch).eq('id', u.id);
+        if (error) { console.error('import merge update:', error.message); ok = false; }
+      }
+      if (u.newNotes.length) {
+        const { error } = await supabase.from('notes').insert(u.newNotes.map(n => toNoteRow(n, u.id)));
+        if (error) { console.error('import merge notes insert:', error.message); ok = false; }
+      }
+    }
+    return ok;
   };
 
   // In a personal library, entries are looked up by `id`; in an archive, entries
@@ -2393,6 +2402,103 @@ function parseGoodreads(csvText) {
   return out;
 }
 
+// Fingerprint a highlight for dedupe: lowercase, strip punctuation and quote
+// glyphs, collapse whitespace. The same passage from different sources
+// (clippings re-export, notebook export, re-import) converges to one stable
+// string — the `noteFingerprint()` invariant documented in CLAUDE.md. Ported
+// from the design prototype (prototype/hushthorn-demo.jsx) with a non-string
+// guard added.
+function noteFingerprint(text) {
+  return (typeof text === "string" ? text : "")
+    .toLowerCase()
+    .replace(/[“”"'‘’.,!?;:—–\-…()]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Pure smart-merge for The Binding / batch add. Given the current shelf and
+// the parsed import items, computes the next local state plus exactly what
+// must be persisted. Books are unique by title (case-insensitive): a match
+// merges into the existing entry — including entries created earlier in the
+// SAME batch, so one file can never mint duplicate rows. Notes dedupe by
+// noteFingerprint(), both against the book's existing marginalia and within
+// the batch (Kindle clippings can repeat a highlight verbatim). Pure — ids
+// and the date stamp are injected — so tests/import-dedupe-unit.mjs can
+// exercise it directly. Returns { next, additions, updates }:
+//   next      — the full next books array (for setBooks)
+//   additions — brand-new book objects with notes attached (INSERT books+notes)
+//   updates   — { id, fields, newNotes } per changed existing book
+//               (UPDATE books when fields is non-empty; INSERT newNotes)
+function mergeImport(prevBooks, items, today, makeId) {
+  const updated = (prevBooks || []).map((b) => ({ ...b, notes: [...(b.notes || [])] }));
+  const byTitle = new Map(updated.map((b) => [b.title.toLowerCase(), b]));
+  const additions = [];
+  const addedIds = new Set(); // books minted earlier in THIS batch
+  const updates = [];
+  for (const item of items || []) {
+    if (!item || typeof item.title !== "string" || !item.title.trim()) continue;
+    const key = item.title.toLowerCase();
+    // Build note objects: drop empty/non-string text (a fingerprint of "" means
+    // no textual content) and dedupe within the batch itself.
+    const seen = new Set();
+    const newNotes = [];
+    for (const n of item.notes || []) {
+      const fp = noteFingerprint(n && n.text);
+      if (!fp || seen.has(fp)) continue;
+      seen.add(fp);
+      newNotes.push({
+        id: makeId(),
+        page: (n && n.page) || "",
+        isQuote: !!(n && n.isQuote),
+        text: n.text,
+        isVoice: false,
+        isTime: false,
+        date: today,
+      });
+    }
+    const existing = byTitle.get(key);
+    if (existing) {
+      const have = new Set((existing.notes || []).map((n) => noteFingerprint(n.text)));
+      const fresh = newNotes.filter((n) => !have.has(noteFingerprint(n.text)));
+      // Only genuine upgrades become fields — an unchanged book yields no write.
+      const fields = {};
+      if (!existing.read && item.read) fields.read = true;
+      if (item.shelf === "owned" && existing.shelf !== "owned") fields.shelf = "owned";
+      if (!existing.overall && item.overall) fields.overall = item.overall;
+      if ((!existing.genres || existing.genres.length === 0) && item.genres?.length) fields.genres = item.genres;
+      if (!existing.coverUrl && item.coverUrl) fields.coverUrl = item.coverUrl;
+      Object.assign(existing, fields);
+      existing.notes = [...fresh, ...existing.notes];
+      if (addedIds.has(existing.id)) {
+        // Same title twice within one file (e.g. casing variants): merged into
+        // the pending addition object — its INSERT already carries this.
+      } else if (fresh.length || Object.keys(fields).length) {
+        updates.push({ id: existing.id, fields, newNotes: fresh });
+      }
+    } else {
+      const book = {
+        id: makeId(),
+        title: item.title,
+        author: item.author || "Unknown author",
+        year: null,
+        coverUrl: item.coverUrl || "",
+        genres: item.genres || [],
+        shelf: item.shelf || "owned",
+        read: !!item.read,
+        overall: item.overall || 0,
+        smut: 0,
+        formats: ["print"],
+        progress: item.progress || {},
+        notes: newNotes,
+      };
+      additions.push(book);
+      addedIds.add(book.id);
+      byTitle.set(key, book); // unique-by-title holds within the batch too
+    }
+  }
+  return { next: [...additions, ...updated], additions, updates };
+}
+
 function PairSection({ books, onImport }) {
   const [preview, setPreview] = useState(null); // { source, items: [{...book, include, existing}] }
   const [busy, setBusy] = useState(false);
@@ -2454,11 +2560,19 @@ function PairSection({ books, onImport }) {
         }
       })
     );
-    onImport(enriched);
+    // Await the merge + Supabase writes so the outcome copy is honest —
+    // importBooks returns false when any row failed to persist.
+    const ok = await onImport(enriched);
     const noteCount = enriched.reduce((n, it) => n + (it.notes?.length || 0), 0);
-    setMessage(
-      `Bound ${enriched.length} book${enriched.length > 1 ? "s" : ""} to the archive${noteCount ? ` with ${noteCount} highlight${noteCount > 1 ? "s" : ""} as marginalia` : ""}.`
-    );
+    if (ok) {
+      setMessage(
+        `Bound ${enriched.length} book${enriched.length > 1 ? "s" : ""} to the archive${noteCount ? ` with ${noteCount} highlight${noteCount > 1 ? "s" : ""} as marginalia` : ""}.`
+      );
+    } else {
+      setError(
+        "Some of that couldn't be bound to the archive. The books are on your shelf for this session — check your connection and upload the same file again. Re-importing never creates duplicates."
+      );
+    }
     setPreview(null);
     setBusy(false);
   };
