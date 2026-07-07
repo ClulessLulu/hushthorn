@@ -1201,15 +1201,11 @@ function SpineShelf({ books, onOpen, query, onPersist }) {
     );
   }
 
-  const readCount = books.filter((b) => b.read).length;
   const rows = [];
   for (let i = 0; i < books.length; i += perRow) rows.push(books.slice(i, i + perRow));
 
   return (
     <div ref={ref} className="max-w-3xl mx-auto">
-      <p className="ht-display text-center text-[10px] uppercase tracking-widest text-purple-300/60 mb-4">
-        {books.length} tome{books.length === 1 ? "" : "s"} · {readCount} read
-      </p>
       {rows.map((row, ri) => (
         <div key={ri}>
           <div className="flex items-end gap-[5px] px-3 min-h-[178px]">
@@ -1888,6 +1884,10 @@ export default function Hushthorn() {
   // shelf dims them (handled per-Spine via the query prop), so it gets `sorted`.
   const sorted = sortBooks(filtered, sortKey);
   const gridBooks = sorted.filter((b) => matchesQuery(b, query));
+  // Books actually shown in the active library view — the grid filters to search
+  // matches, the spine keeps the full set (it dims non-matches). Drives the count
+  // header shown above both layouts.
+  const shelfShown = layout === "spines" ? sorted : gridBooks;
 
   // FIELD_MAP maps in-memory book fields → `books` columns. Books are personal
   // again (union model), so there is a single personal write path — marks and
@@ -2187,7 +2187,7 @@ export default function Hushthorn() {
               : "bg-purple-900/40 text-indigo-300 hover:bg-purple-800/50"
           }`}
         >
-          📖 Kindle
+          📖 Codex
         </button>
         <button
           onClick={() => setAddOpen(true)}
@@ -2211,6 +2211,11 @@ export default function Hushthorn() {
 
       {/* library grid / oracle */}
       <main className="max-w-5xl mx-auto px-5 pb-16">
+        {view === "library" && !dataLoading && shelfShown.length > 0 && (
+          <p className="ht-display text-center text-[10px] uppercase tracking-widest text-purple-300/60 mb-4">
+            {shelfShown.length} tome{shelfShown.length === 1 ? "" : "s"} · {shelfShown.filter((b) => b.read).length} read
+          </p>
+        )}
         {view === "oracle" ? (
           <OracleSection books={books} onAddToWishlist={addBook} />
         ) : view === "pair" ? (
