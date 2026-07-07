@@ -5268,6 +5268,18 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
     progress: bufProgress(),
   });
   const [genreInput, setGenreInput] = useState("");
+  // Re-sync buffered progress when book.progress changes out-of-band (e.g. the
+  // parent's page-count backfill persists pages on open) — but only if the user
+  // hasn't edited progress yet, so genuine buffered edits are never overwritten.
+  const prevBookProgress = useRef(JSON.stringify(book.progress || {}));
+  useEffect(() => {
+    const nextStr = JSON.stringify(book.progress || {});
+    if (nextStr === prevBookProgress.current) return;
+    setBuf((b) => (JSON.stringify(b.progress) === prevBookProgress.current
+      ? { ...b, progress: book.progress || {} }
+      : b));
+    prevBookProgress.current = nextStr;
+  }, [book.progress]); // eslint-disable-line react-hooks/exhaustive-deps
   const isDirty = isMine && (
     buf.title !== (book.title || "") ||
     buf.author !== (book.author || "") ||
@@ -5276,7 +5288,15 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
   );
   const discard = () => { setBuf({ title: book.title || "", author: book.author || "", genres: book.genres || [], progress: bufProgress() }); setGenreInput(""); };
   const saveAndClose = () => {
-    onUpdate({ title: buf.title.trim(), author: buf.author.trim(), genres: buf.genres, progress: buf.progress });
+    // Write only the fields that actually changed: avoids a spurious auto-Read on
+    // a title-only save and needless refreshArchiveUnion / unchanged-column writes.
+    const patch = {};
+    const t = buf.title.trim();
+    if (t !== (book.title || "")) patch.title = t || (book.title || ""); // blank-title guard
+    if (buf.author.trim() !== (book.author || "")) patch.author = buf.author.trim();
+    if (JSON.stringify(buf.genres) !== JSON.stringify(book.genres || [])) patch.genres = buf.genres;
+    if (JSON.stringify(buf.progress) !== JSON.stringify(book.progress || {})) patch.progress = buf.progress;
+    if (Object.keys(patch).length) onUpdate(patch);
     onClose();
   };
   const addGenre = () => {
