@@ -77,6 +77,24 @@ living alongside the developer's other app, Kindled.
   list the test cases (especially idempotency and malformed input) in the PR
   or alongside the code.
 
+## Deferred / future ideas
+
+Most prototype-era features are shipped: spine shelf, per-format reading
+progress, snap-to-update, hybrid save, and the shared library (built as the
+**union model** — an archive merges members' personal libraries through two
+SECURITY DEFINER views; the old Phase-2 `book_personal_state`/`book_ownership`
+design was superseded and dropped). Genuinely unshipped:
+
+- **Spine shelf at scale** — A–Z jump rail for author sort at 100+ books; row
+  virtualization for very large shelves. (The spine shelf itself, cover-sampled
+  spine colors, and the `spine_color` column are already shipped.)
+- **Duplicate-title rename guard** — renaming a book's title to collide with
+  another (unique-by-title) is only softly handled today; a broader uniqueness
+  pass is deferred (flagged in the hybrid-save final review).
+
+See also `docs/TODO.md` (richer signup + 2FA) and `README.md` "Known TODOs"
+(enable Supabase leaked-password protection before real users).
+
 ## Naming note
 
 The prototype calls the heat rating **Spicy** with chili-pepper icons; the repo
