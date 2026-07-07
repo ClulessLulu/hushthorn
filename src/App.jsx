@@ -5260,42 +5260,28 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
   // (and the DB) on Save & Close. The `key` at the render site resets this
   // state whenever a different book is opened. Read-only (!isMine) books
   // never see the editable card or the save bar, so isDirty is gated on isMine.
-  const bufProgress = () => (book.progress && typeof book.progress === "object") ? book.progress : {};
+  // Buffered edit-details fields ONLY. Reading progress saves instantly (like
+  // ratings/toggles) — it is NOT part of the buffer or the save bar.
   const [buf, setBuf] = useState({
     title: book.title || "",
     author: book.author || "",
     genres: book.genres || [],
-    progress: bufProgress(),
   });
   const [genreInput, setGenreInput] = useState("");
-  // Re-sync buffered progress when book.progress changes out-of-band (e.g. the
-  // parent's page-count backfill persists pages on open) — but only if the user
-  // hasn't edited progress yet, so genuine buffered edits are never overwritten.
-  const prevBookProgress = useRef(JSON.stringify(book.progress || {}));
-  useEffect(() => {
-    const nextStr = JSON.stringify(book.progress || {});
-    if (nextStr === prevBookProgress.current) return;
-    setBuf((b) => (JSON.stringify(b.progress) === prevBookProgress.current
-      ? { ...b, progress: book.progress || {} }
-      : b));
-    prevBookProgress.current = nextStr;
-  }, [book.progress]); // eslint-disable-line react-hooks/exhaustive-deps
   const isDirty = isMine && (
     buf.title !== (book.title || "") ||
     buf.author !== (book.author || "") ||
-    JSON.stringify(buf.genres) !== JSON.stringify(book.genres || []) ||
-    JSON.stringify(buf.progress) !== JSON.stringify(book.progress || {})
+    JSON.stringify(buf.genres) !== JSON.stringify(book.genres || [])
   );
-  const discard = () => { setBuf({ title: book.title || "", author: book.author || "", genres: book.genres || [], progress: bufProgress() }); setGenreInput(""); };
+  const discard = () => { setBuf({ title: book.title || "", author: book.author || "", genres: book.genres || [] }); setGenreInput(""); };
   const saveAndClose = () => {
-    // Write only the fields that actually changed: avoids a spurious auto-Read on
-    // a title-only save and needless refreshArchiveUnion / unchanged-column writes.
+    // Write only the fields that actually changed (avoids needless
+    // refreshArchiveUnion / unchanged-column writes).
     const patch = {};
     const t = buf.title.trim();
     if (t !== (book.title || "")) patch.title = t || (book.title || ""); // blank-title guard
     if (buf.author.trim() !== (book.author || "")) patch.author = buf.author.trim();
     if (JSON.stringify(buf.genres) !== JSON.stringify(book.genres || [])) patch.genres = buf.genres;
-    if (JSON.stringify(buf.progress) !== JSON.stringify(book.progress || {})) patch.progress = buf.progress;
     if (Object.keys(patch).length) onUpdate(patch);
     onClose();
   };
@@ -5454,10 +5440,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
 
                 {editable}
 
-                <ProgressEditor
-                  book={{ ...book, progress: buf.progress }}
-                  onUpdate={(patch) => { if ('progress' in patch) setBuf((b) => ({ ...b, progress: patch.progress })); }}
-                />
+                <ProgressEditor book={book} onUpdate={onUpdate} />
 
                 {/* Formats I have — editing my editions refreshes the union. */}
                 <div className="ht-card rounded-md p-4">
@@ -5552,10 +5535,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
 
           <div className="mt-4">{editable}</div>
 
-          <ProgressEditor
-            book={{ ...book, progress: buf.progress }}
-            onUpdate={(patch) => { if ('progress' in patch) setBuf((b) => ({ ...b, progress: patch.progress })); }}
-          />
+          <ProgressEditor book={book} onUpdate={onUpdate} />
 
           {/* Formats I have — same right-column placement (after progress) as the
               archive detail, so editing formats feels identical in both contexts. */}

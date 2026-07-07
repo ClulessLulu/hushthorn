@@ -18,11 +18,11 @@
 - [ ] B-6: Edit Title → close via ✕ (or backdrop) → reopen → shows the SAVED title, not the discarded edit (close = implicit discard).
 - [ ] B-7: The save bar pins to the modal's bottom and scrolls WITH the modal content (not floating over the page/backdrop).
 
-## Progress (buffered — Decision A)
-- [ ] P-1: Change a page number / quick-bump → bar appears; value does NOT persist until Save (reopen before saving → old value).
-- [ ] P-2: Snap-to-update (photo of a page) → parsed value fills the field and shows as a buffered edit (bar up), not yet persisted.
-- [ ] P-3: Set a format to 100% → Save & Close → reopen → progress persisted AND the book now shows Read (auto-Read fired on save).
-- [ ] P-4: Edit progress → Discard → reverts.
+## Progress (INSTANT — Decision A revised)
+- [ ] P-1: Change a page number / quick-bump → persists immediately (no save bar from progress); reopen → new value.
+- [ ] P-2: Snap-to-update (photo of a page) → parsed value writes immediately.
+- [ ] P-3: Set a format to 100% → book flips to Read immediately (auto-Read per-change).
+- [ ] P-4: Editing progress alone never shows the Save & Close bar (that's Edit-details only).
 
 ## Archive (union) variant
 - [ ] A-1: Open YOUR book inside a shared archive → same hybrid editing (edit title → bar → Save persists via your copy).

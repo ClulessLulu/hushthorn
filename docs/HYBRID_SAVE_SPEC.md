@@ -191,16 +191,19 @@ governs where they conflict.
 - **Instant** (fire `updateBook` on tap + `ht-saved-flash`): Verdict, Smoulder, Read/Unread, Shelf, Formats. These already save instantly today — only add the flash.
 - **Buffered** (edit → Save & Close / Discard): **Title, Author, Genres, Progress** (all formats).
 
-## Decision A — Progress = BUFFERED
+## Decision A — Progress = INSTANT (revised 2026-07-07)
 
-- Typed page/%/hours AND quick-bump +/− buffer to local state (save bar appears).
-- **Snap-to-update** (photo scan of a page): the parsed value writes to the local
-  BUFFER, not the DB. User reviews, then Save. (AI-suggested → human-confirmed,
-  consistent with the modal's AI-fill rule.)
-- **Auto-Read at 100%**: today it lives inside `updateBook`. With buffered progress
-  it's computed on **Save & Close** — if any format's buffered progress hits 100%,
-  the batched write includes `read: true`. The instant Read toggle still works
-  independently in between.
+Reading progress saves **instantly**, like ratings/toggles — it is NOT buffered
+and NOT part of the save bar. Only Title/Author/Genres (the "Edit details" card)
+buffer behind Save & Close.
+
+- Typed page/%/hours, quick-bump +/−, and **Snap-to-update** each call
+  `updateBook({ progress })` immediately (via the panel's `onUpdate`).
+- **Auto-Read at 100%** fires per-change inside `updateBook`, as it did before
+  hybrid save.
+- (Superseded: the earlier "progress buffered" design and its page-count-backfill
+  re-sync were reverted per user direction — progress edits should feel as
+  effortless as a rating tap.)
 
 ## Decision B — Save bar placement
 
