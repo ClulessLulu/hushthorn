@@ -5260,20 +5260,23 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
   // (and the DB) on Save & Close. The `key` at the render site resets this
   // state whenever a different book is opened. Read-only (!isMine) books
   // never see the editable card or the save bar, so isDirty is gated on isMine.
+  const bufProgress = () => (book.progress && typeof book.progress === "object") ? book.progress : {};
   const [buf, setBuf] = useState({
     title: book.title || "",
     author: book.author || "",
     genres: book.genres || [],
+    progress: bufProgress(),
   });
   const [genreInput, setGenreInput] = useState("");
   const isDirty = isMine && (
     buf.title !== (book.title || "") ||
     buf.author !== (book.author || "") ||
-    JSON.stringify(buf.genres) !== JSON.stringify(book.genres || [])
+    JSON.stringify(buf.genres) !== JSON.stringify(book.genres || []) ||
+    JSON.stringify(buf.progress) !== JSON.stringify(book.progress || {})
   );
-  const discard = () => { setBuf({ title: book.title || "", author: book.author || "", genres: book.genres || [] }); setGenreInput(""); };
+  const discard = () => { setBuf({ title: book.title || "", author: book.author || "", genres: book.genres || [], progress: bufProgress() }); setGenreInput(""); };
   const saveAndClose = () => {
-    onUpdate({ title: buf.title.trim(), author: buf.author.trim(), genres: buf.genres });
+    onUpdate({ title: buf.title.trim(), author: buf.author.trim(), genres: buf.genres, progress: buf.progress });
     onClose();
   };
   const addGenre = () => {
@@ -5431,7 +5434,10 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
 
                 {editable}
 
-                <ProgressEditor book={book} onUpdate={onUpdate} />
+                <ProgressEditor
+                  book={{ ...book, progress: buf.progress }}
+                  onUpdate={(patch) => { if ('progress' in patch) setBuf((b) => ({ ...b, progress: patch.progress })); }}
+                />
 
                 {/* Formats I have — editing my editions refreshes the union. */}
                 <div className="ht-card rounded-md p-4">
@@ -5526,7 +5532,10 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
 
           <div className="mt-4">{editable}</div>
 
-          <ProgressEditor book={book} onUpdate={onUpdate} />
+          <ProgressEditor
+            book={{ ...book, progress: buf.progress }}
+            onUpdate={(patch) => { if ('progress' in patch) setBuf((b) => ({ ...b, progress: patch.progress })); }}
+          />
 
           {/* Formats I have — same right-column placement (after progress) as the
               archive detail, so editing formats feels identical in both contexts. */}
