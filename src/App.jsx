@@ -5,25 +5,41 @@ import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 
 /* ── Claude API configuration ───────────────────────────────
-   Option A (recommended): point CLAUDE_API_URL at your own proxy
-   server, like Kindled's Express proxy — keeps the key server-side.
-     e.g. "http://localhost:3001/api/hushthorn/claude"
-   Option B (local dev only): set VITE_ANTHROPIC_API_KEY in a .env
-   file for direct browser access. NEVER ship a key in client code.
+   Production: NO client key. callClaude() posts to the same-origin
+   serverless proxy (api/claude.js), which holds ANTHROPIC_API_KEY
+   server-side and verifies the caller's Supabase session. The key
+   never reaches the browser bundle.
+   Local dev ONLY: set VITE_ANTHROPIC_API_KEY in .env for direct
+   browser access (Vite serves no /api function). NEVER ship a key.
 ──────────────────────────────────────────────────────────── */
-const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
+const CLAUDE_PROXY_URL = "/api/claude";
+const ANTHROPIC_DIRECT_URL = "https://api.anthropic.com/v1/messages";
 const CLAUDE_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY || "";
 
 async function callClaude(body) {
-  const headers = { "Content-Type": "application/json" };
+  // Dev-only direct path: a client key is present, call Anthropic directly.
   if (CLAUDE_API_KEY) {
-    headers["x-api-key"] = CLAUDE_API_KEY;
-    headers["anthropic-version"] = "2023-06-01";
-    headers["anthropic-dangerous-direct-browser-access"] = "true";
+    const res = await fetch(ANTHROPIC_DIRECT_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": CLAUDE_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`Claude API error ${res.status}`);
+    return res.json();
   }
-  const res = await fetch(CLAUDE_API_URL, {
+  // Production path: go through the server-side proxy with the user's session.
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(CLAUDE_PROXY_URL, {
     method: "POST",
-    headers,
+    headers: {
+      "Content-Type": "application/json",
+      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+    },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`Claude API error ${res.status}`);
@@ -3138,8 +3154,8 @@ function LibraryDetail({ lib, me, onChanged }) {
         </p>
       </div>
 
-      {/* invite */}
-      {invite ? (
+      {/* invite — owner-only (matches the owner-only invite-create RLS) */}
+      {isOwner && (invite ? (
         <div className="rounded-sm border border-pink-400/30 bg-purple-950/50 p-2.5">
           <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1">Invite code</p>
           <div className="flex items-center gap-2">
@@ -3158,7 +3174,7 @@ function LibraryDetail({ lib, me, onChanged }) {
           className="ht-display text-[10px] uppercase px-3 py-1.5 rounded-sm border border-purple-700/50 hover:border-pink-400/60 text-purple-200 disabled:opacity-40">
           ✦ Invite a fellow reader
         </button>
-      )}
+      ))}
 
       {/* owner / member actions */}
       <div className="flex flex-wrap gap-2 pt-0.5">
