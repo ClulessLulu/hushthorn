@@ -3898,12 +3898,15 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
               </button>
             ))}
           </div>
+          {galleryPresets.length === 0 && (
+            <p className="text-center text-purple-300/70 italic mt-6">Portraits arriving soon — craft your own in the Atelier for now.</p>
+          )}
           {chosenPreset && (
             <div className="text-center mt-6">
               <button onClick={seal} disabled={sealing} className="ht-display px-6 py-2.5 rounded-sm bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-400 hover:to-pink-400 text-white text-xs font-semibold uppercase disabled:opacity-60">
                 {sealing ? '✦ Sealing… ✦' : '✦ Seal the Likeness ✦'}
               </button>
-              {sealError && <p className="text-xs text-red-300 italic mt-2">{sealError}</p>}
+              {sealError && <p className="text-xs text-pink-300 italic mt-2">{sealError}</p>}
             </div>
           )}
           {/* hidden render target for sealing from gallery (Task 4) */}
@@ -3985,7 +3988,7 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
                 ⟳ Randomize
               </button>
             </div>
-            {sealError && <p className="text-xs text-red-300 italic mt-2 text-center">{sealError}</p>}
+            {sealError && <p className="text-xs text-pink-300 italic mt-2 text-center">{sealError}</p>}
             <p className="text-xs text-purple-400/60 italic mt-3 text-center">
               Sealing flattens the layers to one image — the file that lives in your archive and appears beside your marginalia.
             </p>
