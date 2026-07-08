@@ -1550,6 +1550,10 @@ export default function Hushthorn() {
         // restores every trait, and image_path is ready for Task 5's display swap.
         form: avatarData.form, traits: avatarData.traits,
         image_path: avatarData.image_path, preset_name: avatarData.preset_name,
+        // Needed to cache-bust image_path on display (Task 5) — seal() bakes
+        // its own ?v= into the in-session onSave payload, but a fresh page
+        // load only has the bare DB URL, so avatarSrc() needs this to bust it.
+        updated_at: avatarData.updated_at,
       });
       if (avatarData) setPrefs({
         pref_layout: avatarData.pref_layout ?? 'grid',
@@ -1581,7 +1585,7 @@ export default function Hushthorn() {
   // Produces UnionBook[]:
   //   { key, title, author, coverUrl, genres, formats(union),
   //     mineBookId?, read, overall, smut, progress, notes, hidden, shelf,   // from MY copy; defaults if I lack it
-  //     owners:  [{ user_id, username, av, formats, shelf }],               // me + every archive_shelf owner
+  //     owners:  [{ user_id, username, imagePath, formats, shelf }],         // me + every archive_shelf owner
   //     reveals: [{ user_id, overall, smut, progress, read }] }             // archive_reveal rows for this key
   //
   // key = norm(title)+'|'+norm(author), norm(s)=(s||'').trim().toLowerCase().
@@ -1628,30 +1632,33 @@ export default function Hushthorn() {
     // fetch profiles + avatars by user_id in a second round (the Phase-1 idiom).
     // Seed with me so my avatar shows even before the roster resolves.
     const memberIds = Array.from(new Set([uid, ...members.map(m => m.user_id)]));
+    const coMemberIds = memberIds.filter(id => id !== uid);
     let profsData = [];
-    let avsData = [];
+    let imgsData = []; // { user_id, image_path } — from archive_avatar; never traits/cosmetic columns
     if (memberIds.length) {
-      const [{ data: profs, error: prErr }, { data: avs, error: avErr }] = await Promise.all([
+      const [{ data: profs, error: prErr }, { data: imgs, error: avErr }] = await Promise.all([
         supabase.from('profiles').select('user_id, username').in('user_id', memberIds),
-        supabase.from('avatars').select('user_id, gender, hair_color, skin_tone, robe_color').in('user_id', memberIds),
+        // Privacy seam: co-members' avatars are read ONLY through the
+        // archive_avatar view (image_path only, co-member gated). My own
+        // avatar never goes through it — it comes from my own state/DB row.
+        coMemberIds.length
+          ? supabase.from('archive_avatar').select('user_id, image_path').in('user_id', coMemberIds)
+          : Promise.resolve({ data: [], error: null }),
       ]);
       if (prErr) console.error('union roster profiles fetch:', prErr.message);
       if (avErr) console.error('union roster avatars fetch:', avErr.message);
       profsData = profs || [];
-      avsData = avs || [];
+      imgsData = imgs || [];
     }
     const profBy = Object.fromEntries(profsData.map(p => [p.user_id, p]));
-    const avBy = Object.fromEntries(avsData.map(a => [a.user_id, a]));
-    const identity = (userId) => {
-      const a = avBy[userId];
-      return {
-        user_id: userId,
-        username: profBy[userId]?.username,
-        av: a
-          ? { gender: a.gender, hair_color: a.hair_color, skin_tone: a.skin_tone, robe_color: a.robe_color }
-          : null,
-      };
-    };
+    const imgBy = Object.fromEntries(imgsData.map(a => [a.user_id, a.image_path]));
+    const identity = (userId) => ({
+      user_id: userId,
+      username: profBy[userId]?.username,
+      imagePath: userId === uid
+        ? avatarSrc(avatar?.image_path, avatar?.updated_at)
+        : (imgBy[userId] || null),
+    });
 
     // My notes, grouped by book id (personal-load shape).
     const notesByBook = {};
@@ -1687,7 +1694,7 @@ export default function Hushthorn() {
         notes: notesByBook[b.id] || [],
         hidden: !!b.hidden_from_archives,
         shelf: myShelf,
-        owners: [{ user_id: uid, username: meId.username, av: meId.av, formats: myFormats, shelf: myShelf }],
+        owners: [{ user_id: uid, username: meId.username, imagePath: meId.imagePath, formats: myFormats, shelf: myShelf }],
         reveals: [],
         createdAt: b.created_at,
       });
@@ -1732,7 +1739,7 @@ export default function Hushthorn() {
       entry.owners.push({
         user_id: s.owner_id,
         username: who.username,
-        av: who.av,
+        imagePath: who.imagePath,
         formats: ownerFormats,
         shelf: s.shelf || 'wishlist',
       });
@@ -2913,34 +2920,29 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
 /* ── avatar chip + page ────────────────────────────────────── */
 
 function AvatarChip({ avatar, ownedCount, readCount, onClick }) {
-  const emoji = AVATAR_EMOJI[avatar.gender] || '🧝';
+  const src = avatarSrc(avatar.image_path, avatar.updated_at);
   return (
     <button
       onClick={onClick}
       className="flex items-center gap-2 bg-purple-900/50 hover:bg-purple-800/60 border border-purple-600/40 hover:border-pink-400/50 rounded-full px-3 py-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
     >
-      <span className="text-xl leading-none">{emoji}</span>
+      <MiniAvatar imagePath={src} size={28} />
       <div className="text-left">
         <div className="ht-display text-[10px] text-pink-200 leading-tight">{avatar.name}</div>
-        <div className="ht-display text-[9px] text-purple-300/80">{ownedCount} owned · {readCount} read</div>
+        <div className="ht-display text-[9px] text-purple-300/80">
+          {src ? `${ownedCount} owned · ${readCount} read` : 'Inscribe your Visage ✦'}
+        </div>
       </div>
     </button>
   );
 }
 
-const HAIR_STYLES = {
-  female:   'M28 40 Q28 24 44 23 Q60 24 60 40 Q57 28 44 27 Q31 28 28 40Z M28 40 Q24 55 27 65 Q26 50 28 40Z M60 40 Q64 55 61 65 Q62 50 60 40Z',
-  male:     'M29 42 Q28 26 44 24 Q60 26 59 42 Q57 30 44 28 Q31 30 29 42Z',
-  nonbinary:'M28 40 Q28 24 44 23 Q60 24 60 40 Q57 28 44 27 Q31 28 28 40Z M60 40 Q64 48 61 56 Q62 44 60 40Z',
-};
-const LASH_STYLES = {
-  female:   'M35 43.5 L33.5 41.5 M37.5 43 L37 41 M40 43.2 L40.5 41.2 M47 43.5 L45.5 41.5 M49.5 43 L49 41 M52 43.2 L52.5 41.2',
-  male:     '',
-  nonbinary:'M37.5 43 L37 41.2 M40 43.2 L40.5 41.4 M49.5 43 L49 41.2 M52 43.2 L52.5 41.4',
-};
-const HAIR_SWATCHES = ['#1e1b4b','#7c2d12','#c4b5fd','#d1d5db','#fbbf24','#831843'];
-const SKIN_SWATCHES = ['#fde68a','#c4956a','#a0522d','#7c4c2a','#4a2c17','#d4a5a5'];
-const ROBE_SWATCHES = ['#5b21b6','#831843','#1e3a5f','#064e3b','#1c1c1c','#9333ea'];
+// AVATAR_EMOJI is still referenced by the mini-shelf corner flourish in
+// AvatarPage (legacyGenderKey) — decorative only, explicitly out of scope
+// for Task 5's display sites, so it stays. HAIR_STYLES/LASH_STYLES/
+// HAIR_SWATCHES/SKIN_SWATCHES/ROBE_SWATCHES were the old cosmetic-SVG
+// MiniAvatar's inputs; removed as dead now that MiniAvatar renders the
+// sealed image_path instead (grepped for zero remaining references).
 const AVATAR_EMOJI  = { female: '🧝‍♀️', male: '🧝‍♂️', nonbinary: '🧝' };
 
 /* ── shared library: identity + membership (Phase 1) ───────── */
@@ -3370,33 +3372,49 @@ function Tile({ on, onClick, label }) {
   );
 }
 
-// Small gothic avatar for rosters — a cropped version of the AvatarPage figure.
-function MiniAvatar({ av, size = 34 }) {
-  const g    = av?.gender    || 'nonbinary';
-  const skin = av?.skin_tone || '#c4956a';
-  const hair = av?.hair_color || '#1e1b4b';
-  const robe = av?.robe_color || '#5b21b6';
+// Cache-bust a sealed avatar URL so a re-seal shows immediately without a
+// hard reload. seal() already bakes its own `?v=` onto the URL it hands to
+// onSave in-session, so this only appends one when the URL is still bare
+// (e.g. freshly loaded straight from the DB row) — never double-appends.
+function avatarSrc(imagePath, updatedAt) {
+  if (!imagePath) return null;
+  if (imagePath.includes('?')) return imagePath;
+  return updatedAt ? `${imagePath}?v=${encodeURIComponent(updatedAt)}` : imagePath;
+}
+
+// Small circular avatar for rosters — renders the sealed Visage image ONLY.
+// Never re-composites AvatarSVG from traits here: for co-members we only
+// ever have (or should have) an image_path, never their traits — that's the
+// privacy seam. No imagePath (unsealed, or a co-member who hasn't sealed
+// yet) → a muted placeholder, never a broken <img>.
+function MiniAvatar({ imagePath, size = 34 }) {
+  if (!imagePath) {
+    return (
+      <div
+        className="rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center bg-gradient-to-br from-purple-900/70 to-pink-950/50 border border-purple-700/40 text-purple-300/70"
+        style={{ width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.45)) }}
+        aria-label="No Visage sealed yet"
+      >
+        ❦
+      </div>
+    );
+  }
   return (
-    <div className="rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-purple-800/70 to-pink-900/40"
-      style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox="22 22 44 50" fill="none">
-        <path d="M26 72 Q44 66 62 72 L64 88 H24 Z" fill={robe} opacity=".7" />
-        <rect x="40" y="53" width="8" height="8" rx="2" fill={skin} />
-        <ellipse cx="44" cy="46" rx="16" ry="17" fill={skin} />
-        <path d={HAIR_STYLES[g]} fill={hair} />
-        <ellipse cx="38" cy="46" rx="2.4" ry="3" fill="white" />
-        <ellipse cx="50" cy="46" rx="2.4" ry="3" fill="white" />
-        <ellipse cx="38.5" cy="46.5" rx="1.5" ry="1.7" fill="#4c1d95" />
-        <ellipse cx="50.5" cy="46.5" rx="1.5" ry="1.7" fill="#4c1d95" />
-      </svg>
-    </div>
+    <img
+      src={imagePath}
+      alt=""
+      width={size}
+      height={size}
+      className="rounded-full object-cover flex-shrink-0 bg-purple-950/40 border border-purple-700/40"
+      style={{ width: size, height: size }}
+    />
   );
 }
 
 // The Shared Archives panel on the profile. Lists the user's shared libraries,
 // and lets them bind a new one or join with a code. Each library expands into
 // a roster + invite/owner controls (LibraryDetail).
-function SharedArchives({ session }) {
+function SharedArchives({ session, avatar }) {
   const me = session.user.id;
   const [libs, setLibs] = useState(null);   // null = loading
   const [openId, setOpenId] = useState(null);
@@ -3474,7 +3492,7 @@ function SharedArchives({ session }) {
                     </span>
                     <span className="text-purple-400 text-xs">{isOpen ? '▾' : '▸'}</span>
                   </button>
-                  {isOpen && <LibraryDetail lib={lib} me={me} onChanged={() => { setOpenId(null); load(); }} />}
+                  {isOpen && <LibraryDetail lib={lib} me={me} avatar={avatar} onChanged={() => { setOpenId(null); load(); }} />}
                 </div>
               );
             })}
@@ -3512,7 +3530,7 @@ function SharedArchives({ session }) {
 
 // One expanded library: roster (avatars + handles + roles), an invite-code
 // generator (any member), and owner-only rename/remove/delete + member Leave.
-function LibraryDetail({ lib, me, onChanged }) {
+function LibraryDetail({ lib, me, avatar, onChanged }) {
   const members = lib.library_members || [];
   const isOwner = members.find(m => m.user_id === me)?.role === 'owner';
   const [roster, setRoster] = useState(null);
@@ -3530,14 +3548,23 @@ function LibraryDetail({ lib, me, onChanged }) {
       .from('library_members').select('user_id, role, share_reading').eq('library_id', lib.id);
     if (error) { setErr('Could not load the roster.'); return; }
     const ids = (mem || []).map(m => m.user_id);
-    const [{ data: profs }, { data: avs }] = await Promise.all([
+    const coIds = ids.filter(id => id !== me);
+    const [{ data: profs }, { data: imgs }] = await Promise.all([
       supabase.from('profiles').select('user_id, username').in('user_id', ids),
-      supabase.from('avatars').select('user_id, gender, hair_color, skin_tone, robe_color').in('user_id', ids),
+      // Privacy seam: co-members' avatars are read ONLY through archive_avatar
+      // (image_path only). My own avatar comes from my own state, never this view.
+      coIds.length
+        ? supabase.from('archive_avatar').select('user_id, image_path').in('user_id', coIds)
+        : Promise.resolve({ data: [] }),
     ]);
     const pBy = Object.fromEntries((profs || []).map(p => [p.user_id, p]));
-    const aBy = Object.fromEntries((avs || []).map(a => [a.user_id, a]));
+    const imgBy = Object.fromEntries((imgs || []).map(a => [a.user_id, a.image_path]));
     setRoster((mem || []).map(m => ({
-      ...m, username: pBy[m.user_id]?.username, av: aBy[m.user_id],
+      ...m,
+      username: pBy[m.user_id]?.username,
+      imagePath: m.user_id === me
+        ? avatarSrc(avatar?.image_path, avatar?.updated_at)
+        : (imgBy[m.user_id] || null),
     })));
     setShareReading(!!(mem || []).find(m => m.user_id === me)?.share_reading);
   };
@@ -3613,7 +3640,7 @@ function LibraryDetail({ lib, me, onChanged }) {
         <div className="space-y-1.5 pt-1">
           {roster.map(m => (
             <div key={m.user_id} className="flex items-center gap-2">
-              <MiniAvatar av={m.av} />
+              <MiniAvatar imagePath={m.imagePath} />
               <span className="flex-1 min-w-0 truncate text-[13px] text-purple-100">
                 @{m.username || 'reader'}{m.user_id === me ? ' (you)' : ''}
               </span>
@@ -3987,7 +4014,7 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
       </div>
 
       {/* shared archives */}
-      <SharedArchives session={session} />
+      <SharedArchives session={session} avatar={avatar} />
 
       {/* mini shelf */}
       <h3 className="ht-display text-xs uppercase tracking-widest text-purple-300/70 mb-2">Your Shelf</h3>
@@ -5574,7 +5601,7 @@ function WhoHasIt({ owners = [], meId, compact = false }) {
         <span className="flex -space-x-1">
           {owners.slice(0, 3).map((o) => (
             <span key={o.user_id} className="inline-block rounded-full ring-1 ring-purple-700/50" style={{ width: 14, height: 14 }}>
-              <MiniAvatar av={o.av} size={14} />
+              <MiniAvatar imagePath={o.imagePath} size={14} />
             </span>
           ))}
           {owners.length > 3 && (
@@ -5600,7 +5627,7 @@ function WhoHasIt({ owners = [], meId, compact = false }) {
             : [];
           return (
             <div key={owner.user_id} className="flex items-center gap-2">
-              <MiniAvatar av={owner.av} size={20} />
+              <MiniAvatar imagePath={owner.imagePath} size={20} />
               <span className="flex-1 min-w-0 truncate text-[13px] text-purple-100/90">
                 {name}
               </span>
