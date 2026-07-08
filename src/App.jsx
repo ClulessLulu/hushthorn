@@ -3723,7 +3723,7 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
   const [traits, setTraits] = useState(() => seedVisageTraits(avatar));
   const [form, setForm] = useState(() => traits.form);
   const [mode, setMode] = useState(avatar?.traits ? 'atelier' : 'gallery');
-  const [chosenPreset, setChosenPreset] = useState(null);
+  const [chosenPreset, setChosenPreset] = useState(avatar?.preset_name ?? null);
   const svgWrapRef = useRef(null);
   const [sealing, setSealing] = useState(false);
   const [sealError, setSealError] = useState(null);
@@ -3774,13 +3774,16 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
       const { data: { publicUrl } } = supabase.storage.from('avatar-assets').getPublicUrl(path);
       const updatedAt = new Date().toISOString();
 
-      const { error: rowErr } = await supabase.from('avatars').update({
+      // upsert (not update) so a missing avatars row self-heals instead of a
+      // silent zero-row no-op that would leave the sealed image orphaned.
+      const { error: rowErr } = await supabase.from('avatars').upsert({
+        user_id: uid,
         form: traits.form,
         traits,
         image_path: publicUrl,
         preset_name: chosenPreset ?? null,
         updated_at: updatedAt,
-      }).eq('user_id', uid);
+      }, { onConflict: 'user_id' });
       if (rowErr) {
         // Image is already uploaded — safe, a later reseal just overwrites it.
         console.error('seal row update:', rowErr.message);
