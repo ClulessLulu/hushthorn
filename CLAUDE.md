@@ -88,9 +88,6 @@ design was superseded and dropped). Genuinely unshipped:
 - **Spine shelf at scale** — A–Z jump rail for author sort at 100+ books; row
   virtualization for very large shelves. (The spine shelf itself, cover-sampled
   spine colors, and the `spine_color` column are already shipped.)
-- **Duplicate-title rename guard** — renaming a book's title to collide with
-  another (unique-by-title) is only softly handled today; a broader uniqueness
-  pass is deferred (flagged in the hybrid-save final review).
 
 See also `docs/TODO.md` (richer signup + 2FA) and `README.md` "Known TODOs"
 (enable Supabase leaked-password protection before real users).

@@ -2381,6 +2381,7 @@ export default function Hushthorn() {
           onRemove={() => { const rid = activeBook.mineBookId ?? activeBook.id; if (rid) removeBook(rid); }}
           session={session}
           me={me}
+          isTitleTaken={(title, exceptId) => books.some((b) => b.id !== exceptId && (b.title || "").trim().toLowerCase() === title.trim().toLowerCase())}
           setHidden={setHidden}
           onOpenAdd={(seed) => { setAddSeed(seed); setAddOpen(true); }}
         />
@@ -5252,7 +5253,7 @@ function RevealGrid({ book, meId }) {
 //   `me`        — session.user.id for archive branch ownership checks
 //   `setHidden` — toggles hidden_from_archives on my book row
 //   `onOpenAdd` — opens AddBookModal prefilled from the UnionBook
-function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden, onOpenAdd }) {
+function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden, onOpenAdd, isTitleTaken }) {
   const isUnion = !!book.owners;
   const isMine  = isUnion ? !!book.mineBookId : true; // personal books are always mine
 
@@ -5268,6 +5269,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
     genres: book.genres || [],
   });
   const [genreInput, setGenreInput] = useState("");
+  const [titleErr, setTitleErr] = useState("");
   const isDirty = isMine && (
     buf.title !== (book.title || "") ||
     buf.author !== (book.author || "") ||
@@ -5275,10 +5277,17 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
   );
   const discard = () => { setBuf({ title: book.title || "", author: book.author || "", genres: book.genres || [] }); setGenreInput(""); };
   const saveAndClose = () => {
+    const t = buf.title.trim();
+    // Hard-block a rename that collides with another of my books (unique by
+    // title, case-insensitive): a silent collision hides a book from the archive
+    // union (same dedup key) and breaks by-title lookups.
+    if (t && t !== (book.title || "") && isTitleTaken && isTitleTaken(t, book.mineBookId ?? book.id)) {
+      setTitleErr(`Another tome is already titled “${t}.” Choose a different title.`);
+      return;
+    }
     // Write only the fields that actually changed (avoids needless
     // refreshArchiveUnion / unchanged-column writes).
     const patch = {};
-    const t = buf.title.trim();
     if (t !== (book.title || "")) patch.title = t || (book.title || ""); // blank-title guard
     if (buf.author.trim() !== (book.author || "")) patch.author = buf.author.trim();
     if (JSON.stringify(buf.genres) !== JSON.stringify(book.genres || [])) patch.genres = buf.genres;
@@ -5307,10 +5316,11 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
       </div>
       <input
         value={buf.title}
-        onChange={(e) => setBuf((b) => ({ ...b, title: e.target.value }))}
+        onChange={(e) => { setBuf((b) => ({ ...b, title: e.target.value })); setTitleErr(""); }}
         placeholder="Title"
-        className="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400"
+        className={`w-full bg-purple-950/60 border rounded-sm px-3 py-2 text-[15px] placeholder-purple-400/50 focus:outline-none ${titleErr ? "border-pink-500 focus:border-pink-500" : "border-purple-700/50 focus:border-pink-400"}`}
       />
+      {titleErr && <p className="text-[12px] text-pink-300 italic">{titleErr}</p>}
       <input
         value={buf.author}
         onChange={(e) => setBuf((b) => ({ ...b, author: e.target.value }))}

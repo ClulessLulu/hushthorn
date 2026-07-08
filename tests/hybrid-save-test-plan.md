@@ -32,3 +32,4 @@
 ## Regression
 - [ ] R-1: Inscribe modal (add a book) unchanged — "Inscribe to Owned/Wishlist" still commits; no stray save bar inside it.
 - [ ] R-2: Notes / marginalia unchanged — adding a note still writes immediately (not part of the save bar).
+- [ ] R-3: Rename a book's title to exactly match another of your books (any case) → Save & Close is HARD-BLOCKED: title field goes pink with "Another tome is already titled…", nothing persists, bar stays open. Editing the title clears the error. A non-colliding title saves normally.
