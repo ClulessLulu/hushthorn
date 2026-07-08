@@ -167,6 +167,16 @@ const FONT_CSS = `
   to { transform: translateY(0); opacity: 1; }
 }
 .ht-save-bar { animation: ht-slide-up 0.25s ease-out; }
+
+/* The Visage — preset tiles + the arch-frame avatar preview. */
+.ht-tile { transition: outline .15s ease, transform .15s ease; outline: 2px solid transparent; }
+.ht-tile:hover { transform: translateY(-1px); }
+.ht-tile.sel { outline: 2px solid #f0a6e0; box-shadow: 0 0 12px rgba(240,166,224,0.4); }
+.ht-arch {
+  border: 1px solid rgba(240,166,224,0.35);
+  border-radius: 130px 130px 6px 6px;
+  box-shadow: inset 0 0 0 3px rgba(12,7,20,0.9), inset 0 0 0 4px rgba(168,85,247,0.3), inset 0 0 50px rgba(124,58,237,0.15);
+}
 `;
 
 /* ── image crop utility ─────────────────────────────────────── */
@@ -3292,6 +3302,63 @@ function Accessory({ kind }) {
   return null;
 }
 
+/* ── preset gallery data ───────────────────────────────────── */
+
+const PRESETS = [
+  // The Rose
+  { name: "The Archivist", form: "rose", t: { ...DEFAULT } },
+  { name: "The Wanderer", form: "rose", t: { form: "rose", skin: 2, hairStyle: "long", hairColor: "chestnut", outfit: "turtleneck", eyes: "round", nose: "a", mouth: "smile", accessory: "pendant" } },
+  { name: "The Night Owl", form: "rose", t: { form: "rose", skin: 4, hairStyle: "curly", hairColor: "black", outfit: "hoodie", eyes: "sharp", nose: "b", mouth: "neutral", accessory: "none" } },
+  { name: "The Duelist", form: "rose", t: { form: "rose", skin: 0, hairStyle: "short", hairColor: "silver", outfit: "offshoulder", eyes: "sharp", nose: "a", mouth: "full", accessory: "choker" } },
+  { name: "The Romantic", form: "rose", t: { form: "rose", skin: 3, hairStyle: "long", hairColor: "wine", outfit: "offshoulder", eyes: "soft", nose: "b", mouth: "smile", accessory: "pendant" } },
+  { name: "The Scholar", form: "rose", t: { form: "rose", skin: 5, hairStyle: "updo", hairColor: "espresso", outfit: "turtleneck", eyes: "round", nose: "a", mouth: "neutral", accessory: "glasses" } },
+  // The Thorn
+  { name: "The Warden", form: "thorn", t: { form: "thorn", skin: 2, hairStyle: "short", hairColor: "black", outfit: "shirt", eyes: "sharp", nose: "b", mouth: "neutral", accessory: "none" } },
+  { name: "The Poet", form: "thorn", t: { form: "thorn", skin: 0, hairStyle: "curly", hairColor: "chestnut", outfit: "turtleneck", eyes: "soft", nose: "a", mouth: "smile", accessory: "glasses" } },
+  { name: "The Rake", form: "thorn", t: { form: "thorn", skin: 4, hairStyle: "short", hairColor: "espresso", outfit: "shirt", eyes: "sharp", nose: "b", mouth: "full", accessory: "pendant" } },
+  { name: "The Brooding", form: "thorn", t: { form: "thorn", skin: 1, hairStyle: "curly", hairColor: "black", outfit: "hoodie", eyes: "soft", nose: "a", mouth: "neutral", accessory: "none" } },
+  // The Vine
+  { name: "The Enigma", form: "vine", t: { form: "vine", skin: 1, hairStyle: "short", hairColor: "violet", outfit: "hoodie", eyes: "round", nose: "a", mouth: "neutral", accessory: "choker" } },
+  { name: "The Moth", form: "vine", t: { form: "vine", skin: 3, hairStyle: "curly", hairColor: "silver", outfit: "turtleneck", eyes: "soft", nose: "b", mouth: "smile", accessory: "glasses" } },
+  { name: "The Twilight", form: "vine", t: { form: "vine", skin: 5, hairStyle: "updo", hairColor: "wine", outfit: "shirt", eyes: "sharp", nose: "a", mouth: "full", accessory: "pendant" } },
+];
+
+/* ── The Visage — small UI pieces ─────────────────────────────
+   `ModeTab` already exists (add-book modal, different props/styling) —
+   this copy is prefixed `Visage` to avoid clashing with it. `Picker`/`Tile`
+   have no existing collision so they keep the prototype's names. */
+
+function VisageModeTab({ on, onClick, children }) {
+  return (
+    <button onClick={onClick}
+      className={`ht-display px-4 py-2 rounded-sm text-[11px] uppercase font-semibold transition-colors ${
+        on ? "bg-gradient-to-b from-fuchsia-500/90 to-purple-700/90 text-white" : "bg-purple-950/50 text-purple-300 hover:bg-purple-900/60"
+      }`}>
+      {children}
+    </button>
+  );
+}
+
+function Picker({ label, children }) {
+  return (
+    <div className="ht-card rounded-md p-3.5">
+      <p className="ht-display text-[10px] uppercase text-purple-300 font-semibold mb-2">{label}</p>
+      <div className="flex gap-2 flex-wrap items-center">{children}</div>
+    </div>
+  );
+}
+
+function Tile({ on, onClick, label }) {
+  return (
+    <button onClick={onClick}
+      className={`ht-tile ht-display rounded-sm px-3 py-1.5 text-[10px] uppercase ${
+        on ? "sel bg-purple-800/60 text-white" : "bg-purple-950/50 text-purple-300 hover:bg-purple-900/60"
+      }`}>
+      {label}
+    </button>
+  );
+}
+
 // Small gothic avatar for rosters — a cropped version of the AvatarPage figure.
 function MiniAvatar({ av, size = 34 }) {
   const g    = av?.gender    || 'nonbinary';
@@ -3621,10 +3688,45 @@ function LibraryDetail({ lib, me, onChanged }) {
   );
 }
 
+// Back-compat seed: The Visage's traits jsonb wins outright if it exists
+// (already-Visage user, re-editing). Otherwise this is a legacy avatar (only
+// gender/hair_color/skin_tone/robe_color) — map its `gender` to a starting
+// `form` and default everything else, and start the user in Gallery (they've
+// never touched the Atelier yet).
+function seedVisageTraits(avatar) {
+  if (avatar?.traits) return avatar.traits;
+  const g = avatar?.gender;
+  const form = (g === 'masc' || g === 'male') ? 'thorn'
+    : (g === 'fem' || g === 'female') ? 'rose'
+    : 'vine';
+  return { ...DEFAULT, form };
+}
+
 function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
-  const [draft, setDraft] = useState({ ...avatar });
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState('');
+  // ── The Visage: Gallery + Atelier avatar editor ──────────────
+  // `traits` is the one shape that drives the preview, presets, randomize,
+  // and (Task 4) the seal + DB write. `form` is a second, Gallery-only bit of
+  // state — it's the form filter/tagline shown while *browsing* presets, and
+  // only syncs into `traits.form` when a preset is actually chosen or a
+  // picker is touched in the Atelier (ported as-is from the prototype).
+  const [traits, setTraits] = useState(() => seedVisageTraits(avatar));
+  const [form, setForm] = useState(() => traits.form);
+  const [mode, setMode] = useState(avatar?.traits ? 'atelier' : 'gallery');
+  const [chosenPreset, setChosenPreset] = useState(null);
+  const svgWrapRef = useRef(null);
+
+  const set = (k, v) => { setTraits(t => ({ ...t, [k]: v })); setChosenPreset(null); };
+  const activeForm = FORMS.find(f => f.key === form);
+  const galleryPresets = PRESETS.filter(p => p.form === form);
+
+  // TODO(Task 4): flatten the composed AvatarSVG (svgWrapRef) to a PNG,
+  // upload to Storage (avatar-assets/{uid}/sealed.png), then persist the
+  // avatars row (form/traits/image_path/preset_name) and call onSave/onClose.
+  // Left as an inert placeholder here — Gallery/Atelier are fully interactive
+  // against the live preview without it.
+  const seal = () => {
+    console.info('[Visage] Seal placeholder — wiring to Storage lands in Task 4.');
+  };
 
   const owned       = books.filter(b => b.shelf === 'owned');
   const readCount   = books.filter(b => b.read).length;
@@ -3634,118 +3736,153 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
     ? Math.round(ratedBooks.reduce((s, b) => s + b.overall, 0) / ratedBooks.length)
     : 0;
 
-  const save = async () => {
-    setSaving(true);
-    setSaveError('');
-    try {
-      const { error } = await supabase.from('avatars').upsert({
-        user_id:    session.user.id,
-        name:       draft.name,
-        gender:     draft.gender,
-        hair_color: draft.hair_color,
-        skin_tone:  draft.skin_tone,
-        robe_color: draft.robe_color,
-        updated_at: new Date().toISOString(),
-      });
-      if (error) {
-        console.error('avatar upsert:', error.message);
-        setSaveError("The scribe's quill faltered. Please try again.");
-      } else {
-        onSave({ name: draft.name, gender: draft.gender, hair_color: draft.hair_color, skin_tone: draft.skin_tone, robe_color: draft.robe_color });
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const SwatchRow = ({ label, field, options }) => (
-    <div className="flex items-center gap-3">
-      <span className="ht-display text-[9px] uppercase tracking-widest text-purple-400 w-12 shrink-0">{label}</span>
-      <div className="flex gap-1.5 flex-wrap">
-        {options.map(color => (
-          <button key={color} onClick={() => setDraft(d => ({ ...d, [field]: color }))}
-            aria-label={`${label}: ${color}`}
-            className={`w-6 h-6 rounded-full transition-transform hover:scale-110 focus:outline-none ${
-              draft[field] === color ? 'ring-2 ring-pink-400 ring-offset-1 ring-offset-purple-950 scale-110' : ''
-            }`}
-            style={{ background: color }} />
-        ))}
-      </div>
-    </div>
-  );
-
-  const genders = [
-    { key: 'female',    icon: '♀', label: 'Female' },
-    { key: 'male',      icon: '♂', label: 'Male' },
-    { key: 'nonbinary', icon: '⚧', label: 'Non-binary' },
-  ];
-
   const spineColors = ['#7c3aed','#db2777','#6d28d9','#be185d','#4c1d95','#9333ea'];
+  // Mini-shelf corner emoji reuses the legacy gender→emoji map off the
+  // current form (decorative only; not persisted, not the display sites Task 5 owns).
+  const legacyGenderKey = form === 'rose' ? 'female' : form === 'thorn' ? 'male' : 'nonbinary';
 
   return (
-    <Overlay onClose={onClose} label="Avatar profile">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="ht-display text-xl text-pink-200">Your Avatar</h2>
+    <Overlay onClose={onClose} label="The Visage" wide>
+      <div className="flex items-start justify-between mb-1">
+        <div>
+          <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60">Every reader has a face in the dark</p>
+          <h2 className="ht-display text-2xl text-pink-100 mt-1">The Visage</h2>
+        </div>
         <button onClick={onClose} className="text-purple-300 hover:text-pink-300 text-xl px-2" aria-label="Close">✕</button>
       </div>
+      <p className="text-[11px] text-purple-400/60 italic mb-4">@{username || '…'} · how readers know you in shared archives</p>
 
-      {/* avatar SVG preview */}
-      <div className="flex flex-col items-center mb-5">
-        <div className="w-28 h-28 rounded-full bg-gradient-to-br from-purple-800/80 to-pink-900/50 border-2 border-pink-400/40 shadow-[0_0_30px_rgba(217,70,239,0.2)] flex items-center justify-center mb-3 overflow-hidden">
-          <svg width="88" height="88" viewBox="0 0 88 88" fill="none">
-            <ellipse cx="44" cy="78" rx="22" ry="14" fill={draft.robe_color} opacity=".9"/>
-            <path d="M26 72 Q44 66 62 72 L64 88 H24 Z" fill={draft.robe_color} opacity=".7"/>
-            <rect x="30" y="63" width="18" height="13" rx="1.5" fill="#db2777" opacity=".9"/>
-            <line x1="39" y1="63" x2="39" y2="76" stroke="#f9a8d4" strokeWidth="1"/>
-            <rect x="40" y="53" width="8" height="8" rx="2" fill={draft.skin_tone}/>
-            <ellipse cx="44" cy="46" rx="16" ry="17" fill={draft.skin_tone}/>
-            <path d={HAIR_STYLES[draft.gender]} fill={draft.hair_color}/>
-            <ellipse cx="38" cy="46" rx="3" ry="3.5" fill="white"/>
-            <ellipse cx="50" cy="46" rx="3" ry="3.5" fill="white"/>
-            <ellipse cx="38.5" cy="46.5" rx="2" ry="2.2" fill="#4c1d95"/>
-            <ellipse cx="50.5" cy="46.5" rx="2" ry="2.2" fill="#4c1d95"/>
-            <circle cx="39" cy="46" r=".7" fill="white" opacity=".7"/>
-            <circle cx="51" cy="46" r=".7" fill="white" opacity=".7"/>
-            {LASH_STYLES[draft.gender] && (
-              <path d={LASH_STYLES[draft.gender]} stroke="#1e1b4b" strokeWidth="1" strokeLinecap="round"/>
-            )}
-            <ellipse cx="34" cy="50" rx="3.5" ry="2" fill="#f9a8d4" opacity=".4"/>
-            <ellipse cx="54" cy="50" rx="3.5" ry="2" fill="#f9a8d4" opacity=".4"/>
-            <path d="M40 54 Q44 57 48 54" stroke="#be185d" strokeWidth="1.3" fill="none" strokeLinecap="round"/>
-            <path d="M34 29 L36 24 L40 27 L44 22 L48 27 L52 24 L54 29Z" fill="none" stroke="#f0a6e0" strokeWidth="1.2" strokeLinejoin="round"/>
-          </svg>
-        </div>
-        <div className="ht-display text-base text-pink-200">@{username || '…'}</div>
-        <p className="text-[11px] text-purple-400/60 italic mt-1">your handle · how readers know you in shared archives</p>
+      <div className="flex justify-center gap-2 mb-5">
+        <VisageModeTab on={mode === 'gallery'} onClick={() => setMode('gallery')}>Gallery — choose a likeness</VisageModeTab>
+        <VisageModeTab on={mode === 'atelier'} onClick={() => setMode('atelier')}>Atelier — craft your own</VisageModeTab>
       </div>
 
-      {/* customiser */}
-      <div className="ht-card rounded-md p-4 space-y-3 mb-5">
-        <div className="flex items-center gap-3">
-          <span className="ht-display text-[9px] uppercase tracking-widest text-purple-400 w-12 shrink-0">Form</span>
-          <div className="flex gap-2 flex-1">
-            {genders.map(g => (
-              <button key={g.key} onClick={() => setDraft(d => ({ ...d, gender: g.key }))}
-                className={`flex-1 py-1.5 rounded-sm border text-center transition-colors focus:outline-none ${
-                  draft.gender === g.key
-                    ? 'border-pink-400/60 bg-purple-600/30 text-pink-200'
-                    : 'border-purple-700/40 text-purple-400 hover:border-purple-500/60'
-                }`}>
-                <div className="text-sm">{g.icon}</div>
-                <div className="ht-display text-[8px] uppercase tracking-wide">{g.label}</div>
+      {mode === 'gallery' ? (
+        <div className="mb-6">
+          {/* form selection */}
+          <div className="text-center mb-2">
+            <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60 mb-3">Choose your form</p>
+            <div className="flex justify-center gap-2 flex-wrap">
+              {FORMS.map(f => (
+                <button
+                  key={f.key}
+                  onClick={() => { setForm(f.key); setChosenPreset(null); }}
+                  className={`ht-tile rounded-sm px-4 py-2.5 text-center ${form === f.key ? "sel bg-purple-900/60" : "bg-purple-950/50 hover:bg-purple-900/50"}`}
+                >
+                  <span className="ht-display block text-[11px] uppercase font-semibold text-pink-100">{f.name}</span>
+                  <span className="block text-[10px] text-purple-400/70 italic mt-0.5">{f.subtitle}</span>
+                </button>
+              ))}
+            </div>
+            <p className="mt-4 text-[15px] text-purple-300/75 italic">"{activeForm.tagline}"</p>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-6">
+            {galleryPresets.map(p => (
+              <button
+                key={p.name}
+                onClick={() => { setChosenPreset(p.name); setTraits(p.t); }}
+                className={`ht-card ht-tile rounded-md p-3 text-center ${chosenPreset === p.name ? "sel" : ""}`}
+              >
+                <div className="ht-arch mx-auto overflow-hidden bg-[#120b1e]" style={{ width: 150, height: 190 }}>
+                  <AvatarSVG t={p.t} size={150} />
+                </div>
+                <p className="ht-display text-[11px] uppercase text-pink-200 mt-2">{p.name}</p>
               </button>
             ))}
           </div>
+          {chosenPreset && (
+            <div className="text-center mt-6">
+              <button onClick={seal} className="ht-display px-6 py-2.5 rounded-sm bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-400 hover:to-pink-400 text-white text-xs font-semibold uppercase">
+                ✦ Seal the Likeness ✦
+              </button>
+            </div>
+          )}
+          {/* hidden render target for sealing from gallery (Task 4) */}
+          <div ref={mode === "gallery" ? svgWrapRef : null} className="hidden" aria-hidden="true">
+            <AvatarSVG t={traits} size={320} />
+          </div>
         </div>
-        <SwatchRow label="Hair"  field="hair_color" options={HAIR_SWATCHES} />
-        <SwatchRow label="Skin"  field="skin_tone"  options={SKIN_SWATCHES} />
-        <SwatchRow label="Robe"  field="robe_color" options={ROBE_SWATCHES} />
-        <button onClick={save} disabled={saving}
-          className="ht-display w-full py-2.5 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest mt-2">
-          {saving ? 'Inscribing…' : '✦ Save avatar ✦'}
-        </button>
-        {saveError && <p className="text-pink-400 text-xs text-center mt-1">{saveError}</p>}
-      </div>
+      ) : (
+        <div className="mb-6 grid md:grid-cols-[1fr_300px] gap-5">
+          {/* trait pickers */}
+          <div className="space-y-4">
+            <Picker label="Form">
+              {FORMS.map(f => (
+                <button
+                  key={f.key}
+                  onClick={() => { setForm(f.key); set("form", f.key); }}
+                  className={`ht-tile rounded-sm px-3 py-1.5 text-center ${traits.form === f.key ? "sel bg-purple-800/60" : "bg-purple-950/50 hover:bg-purple-900/60"}`}
+                >
+                  <span className="ht-display block text-[10px] uppercase text-pink-100">{f.name}</span>
+                  <span className="block text-[9px] text-purple-400/70 italic">{f.subtitle}</span>
+                </button>
+              ))}
+            </Picker>
+
+            <Picker label="Skin tone">
+              {SKIN_TONES.map((c, i) => (
+                <button key={c} onClick={() => set("skin", i)}
+                  className={`ht-tile rounded-full ${traits.skin === i ? "sel" : ""}`}
+                  style={{ width: 34, height: 34, background: c, border: "1px solid rgba(255,255,255,0.25)" }}
+                  aria-label={`Skin tone ${i + 1}`} />
+              ))}
+            </Picker>
+
+            <Picker label="Hair">
+              {VISAGE_HAIR_STYLES.map(h => (
+                <Tile key={h} on={traits.hairStyle === h} onClick={() => set("hairStyle", h)} label={h} />
+              ))}
+            </Picker>
+            <Picker label="Hair colour">
+              {HAIR_COLORS.map(h => (
+                <button key={h.key} onClick={() => set("hairColor", h.key)}
+                  className={`ht-tile rounded-full ${traits.hairColor === h.key ? "sel" : ""}`}
+                  style={{ width: 30, height: 30, background: `linear-gradient(135deg, ${h.c2}, ${h.c1})`, border: "1px solid rgba(255,255,255,0.2)" }}
+                  aria-label={`Hair colour ${h.key}`} />
+              ))}
+            </Picker>
+
+            <Picker label="Eyes">
+              {EYES.map(e => <Tile key={e} on={traits.eyes === e} onClick={() => set("eyes", e)} label={e} />)}
+            </Picker>
+            <Picker label="Nose">
+              {NOSES.map(n => <Tile key={n} on={traits.nose === n} onClick={() => set("nose", n)} label={n === "a" ? "gentle" : "defined"} />)}
+            </Picker>
+            <Picker label="Mouth">
+              {MOUTHS.map(m => <Tile key={m} on={traits.mouth === m} onClick={() => set("mouth", m)} label={m} />)}
+            </Picker>
+
+            <Picker label="Attire">
+              {OUTFITS.map(o => (
+                <Tile key={o} on={traits.outfit === o} onClick={() => set("outfit", o)}
+                  label={o === "offshoulder" ? "off-shoulder" : o} />
+              ))}
+            </Picker>
+            <Picker label="Adornments">
+              {ACCESSORIES.map(a => <Tile key={a} on={traits.accessory === a} onClick={() => set("accessory", a)} label={a} />)}
+            </Picker>
+          </div>
+
+          {/* preview */}
+          <div className="ht-card rounded-md p-4 h-fit md:sticky md:top-4">
+            <div ref={mode === "atelier" ? svgWrapRef : null} className="ht-arch mx-auto overflow-hidden bg-[#120b1e]" style={{ width: 240, height: 300 }}>
+              <AvatarSVG t={traits} size={240} />
+            </div>
+            <div className="mt-4 space-y-2">
+              <button onClick={seal} className="ht-display w-full py-2.5 rounded-sm bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-400 hover:to-pink-400 text-white text-xs font-semibold uppercase">
+                ✦ Seal the Likeness ✦
+              </button>
+              <button onClick={() => { setTraits(randomTraits(traits.form)); setChosenPreset(null); }} className="ht-display w-full py-2 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100 text-xs font-semibold uppercase">
+                ⟳ Randomize
+              </button>
+            </div>
+            <p className="text-xs text-purple-400/60 italic mt-3 text-center">
+              Sealing flattens the layers to one image — the file that lives in your archive and appears beside your marginalia.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* stats */}
       <h3 className="ht-display text-xs uppercase tracking-widest text-purple-300/70 mb-2">Reading Chronicle</h3>
@@ -3788,7 +3925,7 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
             }} />
           ))}
           <span className="absolute right-2 bottom-0 text-xl leading-none">
-            {AVATAR_EMOJI[draft.gender] || '🧝'}
+            {AVATAR_EMOJI[legacyGenderKey] || '🧝'}
           </span>
         </div>
         <p className="text-[11px] text-purple-400/60 italic text-center mt-2">
