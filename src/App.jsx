@@ -1546,6 +1546,10 @@ export default function Hushthorn() {
         name: avatarData.name, gender: avatarData.gender,
         hair_color: avatarData.hair_color, skin_tone: avatarData.skin_tone,
         robe_color: avatarData.robe_color,
+        // The Visage (Task 4): carried in-memory so re-opening the editor
+        // restores every trait, and image_path is ready for Task 5's display swap.
+        form: avatarData.form, traits: avatarData.traits,
+        image_path: avatarData.image_path, preset_name: avatarData.preset_name,
       });
       if (avatarData) setPrefs({
         pref_layout: avatarData.pref_layout ?? 'grid',
@@ -2364,7 +2368,14 @@ export default function Hushthorn() {
           username={profile?.username}
           books={books}
           session={session}
-          onSave={(updated) => { setAvatar(updated); setAvatarOpen(false); }}
+          onSave={(updated) => {
+            // Visage's seal() hands back only { form, traits, image_path, preset_name } —
+            // merge onto the existing avatar state so the legacy columns
+            // (name/gender/hair_color/skin_tone/robe_color) and their own
+            // save path (untouched by this task) stay intact in memory.
+            setAvatar(prev => ({ ...prev, ...updated }));
+            setAvatarOpen(false);
+          }}
           onClose={() => setAvatarOpen(false)}
         />
       )}
@@ -3714,18 +3725,84 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
   const [mode, setMode] = useState(avatar?.traits ? 'atelier' : 'gallery');
   const [chosenPreset, setChosenPreset] = useState(null);
   const svgWrapRef = useRef(null);
+  const [sealing, setSealing] = useState(false);
+  const [sealError, setSealError] = useState(null);
 
   const set = (k, v) => { setTraits(t => ({ ...t, [k]: v })); setChosenPreset(null); };
   const activeForm = FORMS.find(f => f.key === form);
   const galleryPresets = PRESETS.filter(p => p.form === form);
 
-  // TODO(Task 4): flatten the composed AvatarSVG (svgWrapRef) to a PNG,
-  // upload to Storage (avatar-assets/{uid}/sealed.png), then persist the
-  // avatars row (form/traits/image_path/preset_name) and call onSave/onClose.
-  // Left as an inert placeholder here — Gallery/Atelier are fully interactive
-  // against the live preview without it.
-  const seal = () => {
-    console.info('[Visage] Seal placeholder — wiring to Storage lands in Task 4.');
+  const SEAL_RETRY_MSG = "The likeness wouldn't hold — try sealing again.";
+
+  // Seal the Likeness: flatten the composed AvatarSVG (svgWrapRef, whichever
+  // mode is active) to a 512×640 PNG over the app background, upload it to
+  // Storage FIRST, then persist the avatars row — never leave a row pointing
+  // at a missing image. Image path is fixed to `${uid}/sealed.png` per user
+  // (owner-write storage policy keys off that first path segment).
+  const seal = async () => {
+    const svgEl = svgWrapRef.current?.querySelector('svg');
+    if (!svgEl) { setSealError(SEAL_RETRY_MSG); return; }
+    setSealing(true);
+    setSealError(null);
+    try {
+      const xml = new XMLSerializer().serializeToString(svgEl);
+      const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+      const img = new Image();
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = svgUrl; });
+      const canvas = document.createElement('canvas');
+      canvas.width = 512; canvas.height = 640;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#0c0714';
+      ctx.fillRect(0, 0, 512, 640);
+      ctx.drawImage(img, 0, 0, 512, 640);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) { setSealError(SEAL_RETRY_MSG); return; }
+
+      const uid = session.user.id;
+      const path = `${uid}/sealed.png`;
+
+      // Image FIRST — if this fails, bail without touching the avatars row.
+      const { error: uploadErr } = await supabase.storage
+        .from('avatar-assets')
+        .upload(path, blob, { upsert: true, contentType: 'image/png' });
+      if (uploadErr) {
+        console.error('seal upload:', uploadErr.message);
+        setSealError(SEAL_RETRY_MSG);
+        return;
+      }
+
+      const { data: { publicUrl } } = supabase.storage.from('avatar-assets').getPublicUrl(path);
+      const updatedAt = new Date().toISOString();
+
+      const { error: rowErr } = await supabase.from('avatars').update({
+        form: traits.form,
+        traits,
+        image_path: publicUrl,
+        preset_name: chosenPreset ?? null,
+        updated_at: updatedAt,
+      }).eq('user_id', uid);
+      if (rowErr) {
+        // Image is already uploaded — safe, a later reseal just overwrites it.
+        console.error('seal row update:', rowErr.message);
+        setSealError(SEAL_RETRY_MSG);
+        return;
+      }
+
+      onSave({
+        form: traits.form,
+        traits,
+        // Cache-busted so the nav/display refresh even though the storage
+        // path (and therefore the bare public URL) never changes.
+        image_path: `${publicUrl}?v=${Date.now()}`,
+        preset_name: chosenPreset ?? null,
+      });
+      onClose();
+    } catch (err) {
+      console.error('seal:', err);
+      setSealError(SEAL_RETRY_MSG);
+    } finally {
+      setSealing(false);
+    }
   };
 
   const owned       = books.filter(b => b.shelf === 'owned');
@@ -3793,9 +3870,10 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
           </div>
           {chosenPreset && (
             <div className="text-center mt-6">
-              <button onClick={seal} className="ht-display px-6 py-2.5 rounded-sm bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-400 hover:to-pink-400 text-white text-xs font-semibold uppercase">
-                ✦ Seal the Likeness ✦
+              <button onClick={seal} disabled={sealing} className="ht-display px-6 py-2.5 rounded-sm bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-400 hover:to-pink-400 text-white text-xs font-semibold uppercase disabled:opacity-60">
+                {sealing ? '✦ Sealing… ✦' : '✦ Seal the Likeness ✦'}
               </button>
+              {sealError && <p className="text-xs text-red-300 italic mt-2">{sealError}</p>}
             </div>
           )}
           {/* hidden render target for sealing from gallery (Task 4) */}
@@ -3870,13 +3948,14 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
               <AvatarSVG t={traits} size={240} />
             </div>
             <div className="mt-4 space-y-2">
-              <button onClick={seal} className="ht-display w-full py-2.5 rounded-sm bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-400 hover:to-pink-400 text-white text-xs font-semibold uppercase">
-                ✦ Seal the Likeness ✦
+              <button onClick={seal} disabled={sealing} className="ht-display w-full py-2.5 rounded-sm bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-400 hover:to-pink-400 text-white text-xs font-semibold uppercase disabled:opacity-60">
+                {sealing ? '✦ Sealing… ✦' : '✦ Seal the Likeness ✦'}
               </button>
               <button onClick={() => { setTraits(randomTraits(traits.form)); setChosenPreset(null); }} className="ht-display w-full py-2 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100 text-xs font-semibold uppercase">
                 ⟳ Randomize
               </button>
             </div>
+            {sealError && <p className="text-xs text-red-300 italic mt-2 text-center">{sealError}</p>}
             <p className="text-xs text-purple-400/60 italic mt-3 text-center">
               Sealing flattens the layers to one image — the file that lives in your archive and appears beside your marginalia.
             </p>
