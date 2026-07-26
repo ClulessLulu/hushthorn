@@ -3388,7 +3388,9 @@ function avatarSrc(imagePath, updatedAt) {
 // privacy seam. No imagePath (unsealed, or a co-member who hasn't sealed
 // yet) → a muted placeholder, never a broken <img>.
 function MiniAvatar({ imagePath, size = 34 }) {
-  if (!imagePath) {
+  // Visage flagged off → always the placeholder, ignoring any image sealed
+  // during testing (there's no editor to change or clear it while hidden).
+  if (!VISAGE_ENABLED || !imagePath) {
     return (
       <div
         className="rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center bg-gradient-to-br from-purple-900/70 to-pink-950/50 border border-purple-700/40 text-purple-300/70"
@@ -3740,6 +3742,14 @@ function seedVisageTraits(avatar) {
   return { ...DEFAULT, form };
 }
 
+// ── Feature flag ─────────────────────────────────────────────
+// The Visage (avatar creation) ships DORMANT for the catalog + living-library
+// release. Flip to `true` — then drop the broad `co-members read avatars`
+// policy and redeploy — to launch the Gallery/Atelier editor. While false, the
+// profile modal shows only Reading Chronicle + Shared Archives + shelf, and
+// avatars fall back to the ❦ placeholder everywhere (nothing can be sealed).
+const VISAGE_ENABLED = false;
+
 function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
   // ── The Visage: Gallery + Atelier avatar editor ──────────────
   // `traits` is the one shape that drives the preview, presets, randomize,
@@ -3849,7 +3859,9 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
   const legacyGenderKey = form === 'rose' ? 'female' : form === 'thorn' ? 'male' : 'nonbinary';
 
   return (
-    <Overlay onClose={onClose} label="The Visage" wide>
+    <Overlay onClose={onClose} label={VISAGE_ENABLED ? "The Visage" : "Your Profile"} wide>
+      {VISAGE_ENABLED ? (
+      <>
       <div className="flex items-start justify-between mb-1">
         <div>
           <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60">Every reader has a face in the dark</p>
@@ -3994,6 +4006,16 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
             </p>
           </div>
         </div>
+      )}
+      </>
+      ) : (
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h2 className="ht-display text-2xl text-pink-100">Your Profile</h2>
+          <p className="text-[11px] text-purple-400/60 italic mt-1">@{username || '…'}</p>
+        </div>
+        <button onClick={onClose} className="text-purple-300 hover:text-pink-300 text-xl px-2" aria-label="Close">✕</button>
+      </div>
       )}
 
       {/* stats */}
