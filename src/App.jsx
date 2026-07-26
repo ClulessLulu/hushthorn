@@ -4602,7 +4602,10 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
       } catch { /* unsupported — ignore */ }
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        // iOS can reject an explicit play() even when autoPlay+muted+playsInline
+        // starts the stream on its own — a rejection here must NOT abort the
+        // scan (that's what left the preview blank on iPhone).
+        try { await videoRef.current.play(); } catch { /* autoPlay handles it */ }
       }
       setLiveActive(true);
       startBarcodeScan();
@@ -5062,7 +5065,11 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
       ) : (
         <div className="space-y-3">
           <div className="relative w-full aspect-[3/4] rounded-sm overflow-hidden bg-purple-950/60 border border-purple-700/40 flex items-center justify-center">
-            <video ref={videoRef} playsInline muted className={`w-full h-full object-cover ${liveActive ? "" : "hidden"}`} />
+            {/* iOS Safari won't play a display:none MediaStream video, so the
+                element stays in the render tree always (absolute, behind the
+                overlays) and un-hides via the stream itself. autoPlay + muted +
+                playsInline is the iOS-sanctioned inline-autoplay combo. */}
+            <video ref={videoRef} playsInline muted autoPlay className="absolute inset-0 w-full h-full object-cover" />
             {!liveActive && <span className="text-[15px] text-purple-300/70">📷 Camera preview</span>}
             {liveActive && (
               <div className="absolute inset-x-8 top-1/2 h-px bg-pink-400/80 shadow-[0_0_8px_rgba(244,114,182,0.8)]" aria-hidden="true" />
