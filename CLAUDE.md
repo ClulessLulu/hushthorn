@@ -89,6 +89,31 @@ design was superseded and dropped). Genuinely unshipped:
   virtualization for very large shelves. (The spine shelf itself, cover-sampled
   spine colors, and the `spine_color` column are already shipped.)
 
+- **The Visage (avatar creation)** — BUILT, shipped **dormant** behind the
+  `VISAGE_ENABLED` flag (`src/App.jsx`, currently `false`). Gallery + Atelier +
+  seal-to-Storage are implemented and integrated; the flag hides the editor UI
+  and forces the `❦` avatar placeholder everywhere. To launch: flip
+  `VISAGE_ENABLED = true`, drop the broad `co-members read avatars` policy,
+  redeploy, then verify a co-member `select traits from avatars` returns 0.
+  Spec with structural rules, schema, locked verbiage, and test cases:
+  `docs/VISAGE_SPEC.md`. Asset pipeline: `docs/VISAGE_PROMPT_TEMPLATES.md`
+  (painterly PNG path) + `docs/VISAGE_FIGMA_SETUP.md` (vector SVG path).
+  Reference UI: `prototype/hushthorn-visage.jsx` (placeholder art; the
+  architecture is the deliverable). Summary: two modes — Gallery (preset
+  portraits from Storage) and Atelier (layered builder) — across three forms:
+  **The Rose** (feminine) / **The Thorn** (masculine) / **The Vine**
+  (non-binary). Build Gallery (Phase 1) first; Atelier facial pickers
+  (eyes/nose/mouth) are implemented in the prototype but stay feature-flagged
+  off until Phase 3 art exists. Key rules: the 9-layer stack order is fixed;
+  form never restricts traits (shapes silhouette + curates presets only);
+  "Seal the Likeness" flattens to one PNG — upload to Storage BEFORE updating
+  the `avatars` row (extend the existing table: `form`, `traits jsonb`,
+  `image_path`, `preset_name`), and the app displays only the flattened image.
+  `avatars` RLS stays owner-only; if archive members should see each other's
+  avatars beside shared books, grant a narrow read on `image_path` only —
+  never `traits` (route it through the union-model views, same discipline as
+  the shared library).
+
 See also `docs/TODO.md` (richer signup + 2FA) and `README.md` "Known TODOs"
 (enable Supabase leaked-password protection before real users).
 
