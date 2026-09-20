@@ -62,8 +62,12 @@ Replaces the flat `aspect-[2/3]` image box in the grid card at `src/App.jsx:2310
 cover, clamped to **5 lines** with `overflow-wrap: break-word` and a `max-height`, so a long title can never
 spill past the cover.
 
-**Card text.** Title + author only. The progress text line shown in an earlier mockup is **removed** —
-the rails carry progress. Exact percentages remain available as the card's `title` tooltip
+**Card text.** The progress text line shown in an earlier mockup is **not built** — the rails carry progress.
+
+Everything the card shows today stays: title, author, genre chips, the Verdict/Smoulder meters, and the
+Owned/Wishlist + Read/Unread badges. The mockups omitted the meters and badges for clarity, so they were
+never judged; removing them was never requested and is out of scope. Exact percentages are available as the
+card's `title` tooltip
 (`"<title> — <author> · 64% Print · 72% Audio"`), matching the spine's existing tooltip format.
 
 - Title: clamp to **2 lines** (`-webkit-line-clamp: 2`) + `overflow-wrap: break-word`. A long title must never
