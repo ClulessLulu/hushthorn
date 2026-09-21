@@ -64,13 +64,18 @@ spill past the cover.
 
 **Card text.** The progress text line shown in an earlier mockup is **not built** — the rails carry progress.
 
-The card keeps its title, author, genre chips, Verdict/Smoulder meters and Owned/Wishlist + Read/Unread
-badges. The per-format progress BARS (`CardProgress`) are **removed** from the Covers grid: the tome's
-own rails are the single progress language there, and carrying both said the same thing twice on one
-card. `CardProgress` had no other call site and was deleted. The detail panel's progress editor is
-untouched and remains where exact per-format numbers are read and edited. The mockups omitted the meters and badges for clarity, so they were
-never judged; removing them was never requested and is out of scope. Exact percentages are available as the
-card's `title` tooltip
+The card **keeps** its title, author, genre chips, Verdict/Smoulder meters, and Owned/Wishlist +
+Read/Unread badges. The mockups omitted the meters and badges for clarity, so they were never judged;
+removing them was never requested and is out of scope.
+
+The card **loses** its per-format progress bars (`CardProgress`). The mockups omitted those too, which
+hid a real conflict: with the rails added, the card carried two progress languages saying the same thing,
+and under the original `book.read` gate they actively contradicted each other. On the Covers grid the
+tome's own rails are now the single progress language. `CardProgress` had no other call site and was
+deleted. The detail panel's progress editor is untouched and remains where exact per-format numbers are
+read and edited.
+
+Exact percentages are available as the card's `title` tooltip
 (`"<title> — <author> · 64% Print · 72% Audio"`), matching the spine's existing tooltip format.
 
 - Title: clamp to **2 lines** (`-webkit-line-clamp: 2`) + `overflow-wrap: break-word`. A long title must never
