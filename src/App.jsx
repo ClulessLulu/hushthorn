@@ -78,6 +78,7 @@ const FONT_CSS = `
 .ht-bg {
   background-color: #0c0714;
   background-image:
+    repeating-linear-gradient(45deg, rgba(240,166,224,.016) 0 2px, transparent 2px 6px),
     radial-gradient(ellipse 70% 55% at 50% -5%, rgba(76,29,149,0.45), transparent 70%),
     radial-gradient(ellipse 45% 35% at 50% 18%, rgba(217,70,239,0.13), transparent 70%),
     radial-gradient(ellipse 35% 30% at 8% 96%, rgba(236,72,153,0.15), transparent 70%),
@@ -2216,20 +2217,20 @@ export default function Hushthorn() {
       <div className="ht-frame" aria-hidden="true" />
 
       {/* header */}
-      <header className="max-w-5xl mx-auto px-5 pt-10 pb-4 text-center">
+      <header className="max-w-5xl mx-auto px-5 pt-6 pb-3 text-center">
         <Crown />
-        <h1 className="ht-blackletter ht-glow text-6xl sm:text-7xl text-transparent bg-clip-text bg-gradient-to-b from-pink-200 via-fuchsia-300 to-fuchsia-500">
+        <h1 className="ht-blackletter ht-glow text-4xl sm:text-5xl text-transparent bg-clip-text bg-gradient-to-b from-pink-200 via-fuchsia-300 to-fuchsia-500">
           Hushthorn
         </h1>
-        <p className="mt-3 text-[15px] text-pink-200/65 italic">
+        <p className="mt-2 text-[15px] text-pink-200/65 italic">
           a candlelit archive for the books you shouldn't read in public
         </p>
-        <div className="mt-4 flex items-center justify-center gap-2" aria-hidden="true">
+        <div className="mt-3 flex items-center justify-center gap-2" aria-hidden="true">
           <span className="ht-rule w-24 inline-block" />
           <span className="text-pink-300/70 text-[10px]">◆</span>
           <span className="ht-rule w-24 inline-block" />
         </div>
-        <div className="mt-4 flex justify-center">
+        <div className="mt-3 flex justify-center">
           <AvatarChip
             avatar={avatar}
             ownedCount={books.filter(b => b.shelf === 'owned').length}
