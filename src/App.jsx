@@ -125,7 +125,7 @@ const FONT_CSS = `
   50% { box-shadow: 0 0 0 10px rgba(244,114,182,0); }
 }
 .ht-recording { animation: ht-pulse 1.4s ease infinite; }
-@media (prefers-reduced-motion: reduce) { .ht-recording { animation: none; } .ht-card { transition: none; } .ht-saved-flash, .ht-save-bar { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .ht-recording { animation: none; } .ht-card { transition: none; } .ht-saved-flash, .ht-save-bar { animation: none; } .ht-tome { transition: none; } .ht-card:hover .ht-tome-lift { transform: none; } }
 
 /* per-format progress sliders — sanctioned accents: violet print, indigo
    ebook, cyan audio (cyan is reserved for audio). Sharp 2px track + thumb. */
@@ -177,6 +177,38 @@ const FONT_CSS = `
   border-radius: 130px 130px 6px 6px;
   box-shadow: inset 0 0 0 3px rgba(12,7,20,0.9), inset 0 0 0 4px rgba(168,85,247,0.3), inset 0 0 50px rgba(124,58,237,0.15);
 }
+
+/* ── the standing tome (Covers view) ─────────────────────────
+   A cover with real thickness: cream page block on the fore-edge, darkened
+   spine edge at the left. Progress rails (Task 2) attach to those same edges.
+   .ht-tome is the positioning context — it must stay position:relative. */
+.ht-tome { position: relative; transition: transform .25s ease; }
+.ht-tome-cover {
+  position: absolute; inset: 0;
+  border-radius: 2px 4px 4px 2px;
+  overflow: hidden;
+  box-shadow: 0 16px 28px rgba(0,0,0,0.72), inset 0 1px 0 rgba(240,166,224,0.16);
+  transition: box-shadow .25s ease;
+}
+.ht-tome-pages {
+  position: absolute; top: 6px; bottom: 6px; right: -8px; width: 8px;
+  border-radius: 0 2px 2px 0;
+  background: repeating-linear-gradient(180deg, #e8ddc8 0 2px, #c4b69b 2px 3px);
+  box-shadow: 1px 0 4px rgba(0,0,0,0.65);
+}
+.ht-tome-spine {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 12px;
+  background: linear-gradient(90deg, rgba(0,0,0,0.62), rgba(0,0,0,0.04));
+  border-right: 1px solid rgba(240,166,224,0.11);
+}
+@media (min-width: 640px) { .ht-tome-spine { width: 17px; } }
+/* Only tomes marked .ht-tome-lift rise on hover. The add-book result rows in
+   Task 4 are also .ht-card, and their small covers must NOT lift. */
+.ht-card:hover .ht-tome-lift { transform: translateY(-10px); }
+.ht-card:hover .ht-tome-lift .ht-tome-cover { box-shadow: 0 26px 42px rgba(0,0,0,0.8), inset 0 1px 0 rgba(240,166,224,0.22); }
+/* wishlist tomes are ghosts in dashed glass — mirrors the spine shelf */
+.ht-tome-ghost .ht-tome-cover { opacity: .55; border: 1px dashed rgba(240,166,224,0.45); }
+.ht-tome-ghost .ht-tome-pages { opacity: .35; }
 `;
 
 /* ── image crop utility ─────────────────────────────────────── */
@@ -2307,15 +2339,19 @@ export default function Hushthorn() {
                   onClick={() => setActiveId(openId)}
                   className="ht-card rounded-md p-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
                 >
-                  <div className="aspect-[2/3] rounded-sm overflow-hidden bg-purple-950/60 flex items-center justify-center">
-                    <CoverImage
-                      src={b.coverUrl}
-                      alt={`Cover of ${b.title}`}
-                      className="w-full h-full object-cover"
-                      fallback={<span className="ht-display text-purple-400/60 text-xs px-2 text-center">{b.title}</span>}
-                    />
+                  <div className={`ht-tome ht-tome-lift aspect-[2/3] ${b.shelf === "wishlist" ? "ht-tome-ghost" : ""}`}>
+                    <div className="ht-tome-cover bg-purple-950/60 flex items-center justify-center">
+                      <CoverImage
+                        src={b.coverUrl}
+                        alt={`Cover of ${b.title}`}
+                        className="w-full h-full object-cover"
+                        fallback={<span className="ht-display text-purple-300/70 text-[11px] leading-snug px-3 text-center line-clamp-5 break-words">{b.title}</span>}
+                      />
+                    </div>
+                    <div className="ht-tome-pages" aria-hidden="true" />
+                    <div className="ht-tome-spine" aria-hidden="true" />
                   </div>
-                  <h3 className="mt-2 text-[15px] font-semibold leading-tight line-clamp-2">{b.title}</h3>
+                  <h3 className="mt-2 text-[15px] font-semibold leading-tight line-clamp-2 break-words">{b.title}</h3>
                   <p className="text-sm text-purple-300/70 line-clamp-1 italic">{b.author}</p>
                   <GenreChips genres={b.genres} max={2} className="mt-1" />
 
