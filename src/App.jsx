@@ -209,6 +209,11 @@ const FONT_CSS = `
 /* wishlist tomes are ghosts in dashed glass — mirrors the spine shelf */
 .ht-tome-ghost .ht-tome-cover { opacity: .55; border: 1px dashed rgba(240,166,224,0.45); }
 .ht-tome-ghost .ht-tome-pages { opacity: .35; }
+/* progress rails — violet reading on the spine edge, cyan audio on the
+   fore-edge. Same language as the spine shelf. Cyan is audio-only. */
+.ht-rail { position: absolute; bottom: 6px; width: 3px; pointer-events: none; }
+.ht-rail-read { left: 0; background: rgba(167,139,250,0.9); box-shadow: 0 0 6px rgba(167,139,250,0.9); }
+.ht-rail-audio { right: -8px; background: rgba(34,211,238,0.95); box-shadow: 0 0 6px rgba(34,211,238,0.95); }
 /* Reduced motion for the tome MUST be declared here, after the rules above.
    FONT_CSS is injected verbatim into a <style> tag with no post-processing, so
    equal-specificity rules are decided by source order — the earlier
@@ -1127,10 +1132,11 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
   const hasAudio = (book.formats || []).includes("audio");
   // UnionBook detection — personal books have `id`; archive entries have `owners`.
   const isUnion = !!book.owners;
-  // Two thin vertical EDGE RAILS rise from the foot of the spine — NEITHER is
-  // gated on book.read, so a tome finished in audio still shows its partial
-  // print rail. Defensive `formatPercent` coerces missing/malformed progress
-  // to 0, so a rail simply doesn't render rather than throwing.
+  // Two thin vertical EDGE RAILS rise from the foot of the spine. BOTH are
+  // gated on book.read: a finished tome shows no rail, in this view and in
+  // the Covers view alike (one rule, both views). Defensive `formatPercent`
+  // coerces missing/malformed progress to 0, so a rail simply doesn't render
+  // rather than throwing.
   //   Left rail  = READING, always violet. Print & ebook share the page concept,
   //                so the furthest of the two drives it.
   //   Right rail = AUDIO, always cyan (cyan is reserved for audio).
@@ -1141,8 +1147,8 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
   const audioPct = formatPercent(book, "audio");
   const tip =
     `${book.title} — ${book.author}` +
-    (readPct > 0 ? ` · ${readPct}% ${FORMAT_META[readFmt].label}` : "") +
-    (audioPct > 0 ? ` · ${audioPct}% ${FORMAT_META.audio.label}` : "");
+    (!book.read && readPct > 0 ? ` · ${readPct}% ${FORMAT_META[readFmt].label}` : "") +
+    (!book.read && audioPct > 0 ? ` · ${audioPct}% ${FORMAT_META.audio.label}` : "");
   return (
     <button
       onClick={onOpen}
@@ -1162,7 +1168,7 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
           `pct` height. Left = reading (violet), right = audio (cyan). They sit
           on the spine's vertical edges and start just above the 5px spice band
           so they never muddy it. Sharp corners. */}
-      {readPct > 0 && (
+      {!book.read && readPct > 0 && (
         <span
           className="absolute left-0 bottom-[5px] w-[2px] pointer-events-none"
           aria-hidden="true"
@@ -1173,7 +1179,7 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
           }}
         />
       )}
-      {audioPct > 0 && (
+      {!book.read && audioPct > 0 && (
         <span
           className="absolute right-0 bottom-[5px] w-[2px] pointer-events-none"
           aria-hidden="true"
@@ -2342,10 +2348,24 @@ export default function Hushthorn() {
               // UnionBooks (archive entries) have `owners`; personal books have `id`.
               const isUnion = !!b.owners;
               const openId = isUnion ? b.key : b.id;
+              // Progress rails, same rule as the spine shelf: reading (the further
+              // of print/ebook) climbs the spine edge, audio climbs the fore-edge.
+              // A finished tome shows no rail. `formatPercent` coerces missing or
+              // malformed progress to 0, so a rail simply doesn't render.
+              const printPct = formatPercent(b, "print");
+              const ebookPct = formatPercent(b, "ebook");
+              const readPct = b.read ? 0 : Math.max(printPct, ebookPct);
+              const readFmt = ebookPct > printPct ? "ebook" : "print";
+              const audioPct = b.read ? 0 : formatPercent(b, "audio");
+              const tip =
+                `${b.title} — ${b.author}` +
+                (readPct > 0 ? ` · ${readPct}% ${FORMAT_META[readFmt].label}` : "") +
+                (audioPct > 0 ? ` · ${audioPct}% ${FORMAT_META.audio.label}` : "");
               return (
                 <button
                   key={b.id || b.key}
                   onClick={() => setActiveId(openId)}
+                  title={tip}
                   className="ht-card rounded-md p-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
                 >
                   <div className={`ht-tome ht-tome-lift aspect-[2/3] ${b.shelf === "wishlist" ? "ht-tome-ghost" : ""}`}>
@@ -2359,6 +2379,12 @@ export default function Hushthorn() {
                     </div>
                     <div className="ht-tome-pages" aria-hidden="true" />
                     <div className="ht-tome-spine" aria-hidden="true" />
+                    {readPct > 0 && (
+                      <span className="ht-rail ht-rail-read" aria-hidden="true" style={{ height: `calc(${readPct}% - 6px)` }} />
+                    )}
+                    {audioPct > 0 && (
+                      <span className="ht-rail ht-rail-audio" aria-hidden="true" style={{ height: `calc(${audioPct}% - 6px)` }} />
+                    )}
                   </div>
                   <h3 className="mt-2 text-[15px] font-semibold leading-tight line-clamp-2 break-words">{b.title}</h3>
                   <p className="text-sm text-purple-300/70 line-clamp-1 italic">{b.author}</p>
