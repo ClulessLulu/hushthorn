@@ -222,6 +222,7 @@ const FONT_CSS = `
    unconditional .ht-tome rules and silently do nothing. */
 @media (prefers-reduced-motion: reduce) {
   .ht-tome { transition: none; }
+  .ht-tome-cover { transition: none; }
   .ht-card:hover .ht-tome-lift { transform: none; }
 }
 `;
@@ -4958,7 +4959,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
                         src={doc._coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg` : "")}
                         alt=""
                         className="w-full h-full object-cover"
-                        fallback={<span className="text-purple-400/70 text-base">❦</span>}
+                        fallback={<span className="text-purple-500 text-base">♛</span>}
                       />
                     </div>
                     <div className="ht-tome-pages" aria-hidden="true" />
