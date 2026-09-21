@@ -64,8 +64,11 @@ spill past the cover.
 
 **Card text.** The progress text line shown in an earlier mockup is **not built** — the rails carry progress.
 
-Everything the card shows today stays: title, author, genre chips, the Verdict/Smoulder meters, and the
-Owned/Wishlist + Read/Unread badges. The mockups omitted the meters and badges for clarity, so they were
+The card keeps its title, author, genre chips, Verdict/Smoulder meters and Owned/Wishlist + Read/Unread
+badges. The per-format progress BARS (`CardProgress`) are **removed** from the Covers grid: the tome's
+own rails are the single progress language there, and carrying both said the same thing twice on one
+card. `CardProgress` had no other call site and was deleted. The detail panel's progress editor is
+untouched and remains where exact per-format numbers are read and edited. The mockups omitted the meters and badges for clarity, so they were
 never judged; removing them was never requested and is out of scope. Exact percentages are available as the
 card's `title` tooltip
 (`"<title> — <author> · 64% Print · 72% Audio"`), matching the spine's existing tooltip format.
@@ -100,15 +103,17 @@ rule identical in both places.
 - Each rail sits `bottom: 6px` on covers (`5px` on spines, unchanged) and its height is
   `calc(<pct>% - 6px)` — the same "subtract the foot offset" form the spine already uses, so a 100% rail
   stops flush with the top edge rather than overshooting it.
-- **A rail renders only when `pct > 0` AND the book is not finished.**
+- **A rail renders only when `pct > 0` AND its own format is below 100%.** The gate is per format, not
+  per book.
 
-**Behaviour change to shipped code:** spine rails are currently *not* gated on `book.read` — a deliberate
-choice so a tome finished in audio still showed its partial print rail. That is being dropped by decision:
-**a finished book shows no rail in either view.** Add the `!book.read` gate to both spine rails and update the
-comment at `src/App.jsx:1089-1094`, which documents the old invariant and would otherwise be wrong.
+**Revised after the final review.** The first version of this spec gated rails on `book.read`. That was wrong
+in a common case: `updateBook` auto-marks a book read the moment *any single* format reaches 100%
+(`maxPercent` spans every format), so finishing an audiobook would hide the violet print rail of a book you
+were only 30% through — and on the Spine shelf, which has no other progress affordance, that progress became
+completely invisible. The per-format gate keeps the spine shelf's original signal (finished in audio, still
+reading in print) while still making a genuinely finished format's rail disappear.
 
-Consequence, accepted: a book marked read that still has partial print progress no longer advertises it on the
-shelf. The detail panel still shows per-format progress.
+Both views implement the identical rule; neither references `book.read` for rails.
 
 ## 3. Page shell
 
@@ -161,7 +166,9 @@ visual and tap-target pass only.
 
 - [ ] A book with `print` progress shows a violet rail at the correct height; 0% shows no rail
 - [ ] A book with both ebook and audio progress shows violet (the further of print/ebook) AND cyan
-- [ ] Marking a book **read** removes its rails in the Covers view **and** the Spine shelf
+- [ ] Finishing ONE format (e.g. audio to 100%) removes only that rail; a print rail still mid-way stays
+      visible in BOTH the Covers view and the Spine shelf
+- [ ] A format that reaches 100% shows no rail for that format in either view
 - [ ] A book with malformed/missing `progress` renders no rail and does not throw (`formatPercent` returns 0)
 - [ ] A 60-character title clamps to 2 lines under the cover and does not misalign the grid
 - [ ] A 60-character title on a **coverless** book clamps inside the cover and does not overflow it
