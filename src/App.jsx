@@ -796,41 +796,12 @@ async function readProgressShot(dataUrl, fmt) {
   }
 }
 
-/* ── per-format progress bars (cards + detail) ─────────────── */
+/* ── per-format progress editor (detail panel) ─────────────── */
 
-// Compact stack of per-format bars for grid cards. Renders nothing until at
-// least one tracked format has motion, so unread/untracked tomes stay clean.
-function CardProgress({ book }) {
-  const fmts = (book && book.formats) || ["print"];
-  const rows = fmts
-    .map((f) => ({ fmt: f, pct: formatPercent(book, f) }))
-    .filter((r) => r.pct > 0);
-  if (rows.length === 0) return null;
-  return (
-    <div className="mt-2 flex flex-col gap-1">
-      {rows.map(({ fmt, pct }) => {
-        const meta = FORMAT_META[fmt] || FORMAT_META.print;
-        return (
-          <div key={fmt} className="flex items-center gap-1.5">
-            <span className="text-[10px] leading-none flex-shrink-0" aria-hidden="true">{meta.glyph}</span>
-            <span
-              className="h-1.5 flex-1 rounded-sm bg-purple-950/70 overflow-hidden border border-purple-800/40"
-              role="progressbar"
-              aria-valuenow={pct}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label={`${meta.label} progress`}
-            >
-              <span className={`block h-full rounded-sm ${meta.bar} transition-all`} style={{ width: `${pct}%` }} />
-            </span>
-            <span className={`ht-display text-[9px] tabular-nums flex-shrink-0 ${meta.text}`}>{pct}%</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
+// Cards no longer carry progress bars: on the Covers grid the tome's own
+// edge rails are the single progress language, so the old CardProgress
+// component was removed rather than left duplicating them.
+//
 // Per-format reading-progress editor for the DetailPanel. Edits live on
 // `book.progress` ({ print:{page,pages}, ebook:{percent}, audio:{listened,hours} })
 // and persist through onUpdate({ progress }). Defensive: a missing/empty/
@@ -1134,9 +1105,13 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
   const hasAudio = (book.formats || []).includes("audio");
   // UnionBook detection — personal books have `id`; archive entries have `owners`.
   const isUnion = !!book.owners;
-  // Two thin vertical EDGE RAILS rise from the foot of the spine. BOTH are
-  // gated on book.read: a finished tome shows no rail, in this view and in
-  // the Covers view alike (one rule, both views). Defensive `formatPercent`
+  // Two thin vertical EDGE RAILS rise from the foot of the spine. A rail
+  // disappears when ITS OWN format reaches 100% — deliberately NOT when
+  // book.read is set, because updateBook auto-marks the whole book read as
+  // soon as any one format hits 100% (maxPercent spans every format). Gating
+  // on book.read would therefore hide the print rail of a book you are only
+  // halfway through the moment you finished its audiobook. Same rule in the
+  // Covers view. Defensive `formatPercent`
   // coerces missing/malformed progress to 0, so a rail simply doesn't render
   // rather than throwing.
   //   Left rail  = READING, always violet. Print & ebook share the page concept,
@@ -1144,13 +1119,15 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
   //   Right rail = AUDIO, always cyan (cyan is reserved for audio).
   const printPct = formatPercent(book, "print");
   const ebookPct = formatPercent(book, "ebook");
-  const readPct = Math.max(printPct, ebookPct);
+  const readRaw = Math.max(printPct, ebookPct);
+  const readPct = readRaw >= 100 ? 0 : readRaw; // finished in this format → no rail
   const readFmt = ebookPct > printPct ? "ebook" : "print"; // label by the driver
-  const audioPct = formatPercent(book, "audio");
+  const audioRaw = formatPercent(book, "audio");
+  const audioPct = audioRaw >= 100 ? 0 : audioRaw;
   const tip =
     `${book.title} — ${book.author}` +
-    (!book.read && readPct > 0 ? ` · ${readPct}% ${FORMAT_META[readFmt].label}` : "") +
-    (!book.read && audioPct > 0 ? ` · ${audioPct}% ${FORMAT_META.audio.label}` : "");
+    (readPct > 0 ? ` · ${readPct}% ${FORMAT_META[readFmt].label}` : "") +
+    (audioPct > 0 ? ` · ${audioPct}% ${FORMAT_META.audio.label}` : "");
   return (
     <button
       onClick={onOpen}
@@ -1170,7 +1147,7 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
           `pct` height. Left = reading (violet), right = audio (cyan). They sit
           on the spine's vertical edges and start just above the 5px spice band
           so they never muddy it. Sharp corners. */}
-      {!book.read && readPct > 0 && (
+      {readPct > 0 && (
         <span
           className="absolute left-0 bottom-[5px] w-[2px] pointer-events-none"
           aria-hidden="true"
@@ -1181,7 +1158,7 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
           }}
         />
       )}
-      {!book.read && audioPct > 0 && (
+      {audioPct > 0 && (
         <span
           className="absolute right-0 bottom-[5px] w-[2px] pointer-events-none"
           aria-hidden="true"
@@ -2352,13 +2329,18 @@ export default function Hushthorn() {
               const openId = isUnion ? b.key : b.id;
               // Progress rails, same rule as the spine shelf: reading (the further
               // of print/ebook) climbs the spine edge, audio climbs the fore-edge.
-              // A finished tome shows no rail. `formatPercent` coerces missing or
-              // malformed progress to 0, so a rail simply doesn't render.
+              // A rail disappears when ITS OWN format reaches 100% — NOT when
+              // book.read is set, since updateBook auto-marks the book read the
+              // moment any single format finishes (maxPercent spans all formats).
+              // `formatPercent` coerces missing or malformed progress to 0, so a
+              // rail simply doesn't render.
               const printPct = formatPercent(b, "print");
               const ebookPct = formatPercent(b, "ebook");
-              const readPct = b.read ? 0 : Math.max(printPct, ebookPct);
+              const readRaw = Math.max(printPct, ebookPct);
+              const readPct = readRaw >= 100 ? 0 : readRaw;
               const readFmt = ebookPct > printPct ? "ebook" : "print";
-              const audioPct = b.read ? 0 : formatPercent(b, "audio");
+              const audioRaw = formatPercent(b, "audio");
+              const audioPct = audioRaw >= 100 ? 0 : audioRaw;
               const tip =
                 `${b.title} — ${b.author}` +
                 (readPct > 0 ? ` · ${readPct}% ${FORMAT_META[readFmt].label}` : "") +
@@ -2422,7 +2404,6 @@ export default function Hushthorn() {
                           </span>
                         )}
                       </div>
-                      <CardProgress book={b} />
                     </>
                   )}
                 </button>
