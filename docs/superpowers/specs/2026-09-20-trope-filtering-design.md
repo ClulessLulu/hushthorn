@@ -30,13 +30,14 @@ There is no usable trope API. Investigated and rejected:
 | Romance.io | Trope-focused; no public API. |
 
 So tropes are **inferred by Claude and confirmed by the reader**. Claude is reliable on well-known romantasy
-and guesses on obscure indie titles — which is exactly why the confirm step is mandatory and why
-auto-applying was rejected.
+and guesses on obscure indie titles — which is exactly why single-book tagging always goes through a
+confirm step, and why the one place that skips it (bulk, §5) owes the reader a review summary.
 
 ## Decisions (locked)
 
 1. Tropes live in their own **`tropes text[]`** column on `books` — not folded into `genres`.
-2. **AI suggests, the reader confirms.** Nothing is written without confirmation.
+2. **AI suggests, the reader confirms** everywhere except the bulk backfill, which applies directly and
+   then shows a review summary (§5). That exception is deliberate and is the only one.
 3. The filter supports **AND / OR**, switchable by the reader.
 4. Existing books get tropes via **both** a bulk pass and a per-book button.
 5. Raw BISAC strings in `genres` get **cleaned up** as part of this work.
