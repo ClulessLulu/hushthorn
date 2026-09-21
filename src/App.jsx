@@ -125,7 +125,7 @@ const FONT_CSS = `
   50% { box-shadow: 0 0 0 10px rgba(244,114,182,0); }
 }
 .ht-recording { animation: ht-pulse 1.4s ease infinite; }
-@media (prefers-reduced-motion: reduce) { .ht-recording { animation: none; } .ht-card { transition: none; } .ht-saved-flash, .ht-save-bar { animation: none; } .ht-tome { transition: none; } .ht-card:hover .ht-tome-lift { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .ht-recording { animation: none; } .ht-card { transition: none; } .ht-saved-flash, .ht-save-bar { animation: none; } }
 
 /* per-format progress sliders — sanctioned accents: violet print, indigo
    ebook, cyan audio (cyan is reserved for audio). Sharp 2px track + thumb. */
@@ -209,6 +209,15 @@ const FONT_CSS = `
 /* wishlist tomes are ghosts in dashed glass — mirrors the spine shelf */
 .ht-tome-ghost .ht-tome-cover { opacity: .55; border: 1px dashed rgba(240,166,224,0.45); }
 .ht-tome-ghost .ht-tome-pages { opacity: .35; }
+/* Reduced motion for the tome MUST be declared here, after the rules above.
+   FONT_CSS is injected verbatim into a <style> tag with no post-processing, so
+   equal-specificity rules are decided by source order — the earlier
+   prefers-reduced-motion block near the top of this sheet would lose to the
+   unconditional .ht-tome rules and silently do nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .ht-tome { transition: none; }
+  .ht-card:hover .ht-tome-lift { transform: none; }
+}
 `;
 
 /* ── image crop utility ─────────────────────────────────────── */

@@ -91,17 +91,26 @@ Insert immediately after the existing `.ht-arch { … }` rule:
 
 - [ ] **Step 2: Disable the lift under reduced motion**
 
-Find this line (~128):
+**Do NOT edit the existing `@media (prefers-reduced-motion: reduce)` rule near line 128.** `FONT_CSS` is
+injected verbatim into a `<style>` tag with no post-processing, so equal-specificity rules are decided by
+source order. That block sits *above* the `.ht-tome` rules added in Step 1, so a neutralizer placed there
+loses the cascade to the unconditional rules and silently does nothing.
+
+Instead append a second reduced-motion block immediately after the `.ht-tome-ghost` rules from Step 1:
 
 ```css
-@media (prefers-reduced-motion: reduce) { .ht-recording { animation: none; } .ht-card { transition: none; } .ht-saved-flash, .ht-save-bar { animation: none; } }
+/* Reduced motion for the tome MUST be declared here, after the rules above.
+   FONT_CSS is injected verbatim into a <style> tag with no post-processing, so
+   equal-specificity rules are decided by source order — the earlier
+   prefers-reduced-motion block near the top of this sheet would lose to the
+   unconditional .ht-tome rules and silently do nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .ht-tome { transition: none; }
+  .ht-card:hover .ht-tome-lift { transform: none; }
+}
 ```
 
-Replace with (adds `.ht-tome`; rails are information, not decoration, so they are NOT disabled):
-
-```css
-@media (prefers-reduced-motion: reduce) { .ht-recording { animation: none; } .ht-card { transition: none; } .ht-saved-flash, .ht-save-bar { animation: none; } .ht-tome { transition: none; } .ht-card:hover .ht-tome-lift { transform: none; } }
-```
+Rails (Task 2) are information, not decoration, so reduced motion never disables them.
 
 - [ ] **Step 3: Rework the grid card's cover block**
 
