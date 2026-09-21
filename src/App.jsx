@@ -370,12 +370,15 @@ function cleanGenres(subjects, max = 3) {
   return out;
 }
 
-function GenreChips({ genres, max = 3, className = "" }) {
+// `oneLine` keeps the chips on a single clipped row. The grid cards use it so a
+// book with long raw categories ("FICTION, ROMANCE, GENERAL") can't wrap to two
+// lines and push its card's text block taller than its neighbours'.
+function GenreChips({ genres, max = 3, className = "", oneLine = false }) {
   if (!genres || genres.length === 0) return null;
   return (
-    <div className={`flex gap-1 flex-wrap ${className}`}>
+    <div className={`flex gap-1 ${oneLine ? "flex-nowrap overflow-hidden" : "flex-wrap"} ${className}`}>
       {genres.slice(0, max).map((g) => (
-        <span key={g} className="ht-display text-[9px] uppercase px-1.5 py-0.5 rounded-sm border border-purple-500/40 bg-purple-900/40 text-purple-200/90">
+        <span key={g} className={`ht-display text-[9px] uppercase px-1.5 py-0.5 rounded-sm border border-purple-500/40 bg-purple-900/40 text-purple-200/90 ${oneLine ? "whitespace-nowrap flex-shrink-0 max-w-full truncate" : ""}`}>
           {g}
         </span>
       ))}
@@ -2365,7 +2368,7 @@ export default function Hushthorn() {
                       <CoverImage
                         src={b.coverUrl}
                         alt={`Cover of ${b.title}`}
-                        className="w-full h-full object-cover"
+                        className="absolute inset-0 w-full h-full object-cover"
                         fallback={<span className="ht-display text-purple-300/70 text-[11px] leading-snug px-3 text-center line-clamp-5 break-words">{b.title}</span>}
                       />
                     </div>
@@ -2382,7 +2385,7 @@ export default function Hushthorn() {
                   </div>
                   <h3 className="mt-2 text-[15px] font-semibold leading-tight line-clamp-2 break-words">{b.title}</h3>
                   <p className="text-sm text-purple-300/70 line-clamp-1 italic">{b.author}</p>
-                  <GenreChips genres={b.genres} max={2} className="mt-1" />
+                  <GenreChips genres={b.genres} max={2} className="mt-1" oneLine />
 
                   {isUnion ? (
                     /* Archive card: WhoHasIt compact + owner count badge */
@@ -4949,7 +4952,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
                       <CoverImage
                         src={doc._coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg` : "")}
                         alt=""
-                        className="w-full h-full object-cover"
+                        className="absolute inset-0 w-full h-full object-cover"
                         fallback={<span className="text-purple-500 text-base">♛</span>}
                       />
                     </div>
