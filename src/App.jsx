@@ -4935,30 +4935,43 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
 
           {loading && <p className="mt-4 text-[15px] text-purple-300/70 italic">Consulting the archives…</p>}
           {error && <p className="mt-4 text-[15px] text-pink-300">{error}</p>}
+          {!loading && !error && query.trim().length >= 2 && results.length === 0 && (
+            <div className="mt-6 text-center">
+              <p className="ht-display text-sm text-purple-200">No tome answers to that name.</p>
+              <p className="mt-1.5 text-[15px] text-purple-300/70 italic">
+                Try the author's name instead, or switch to Scan or upload to add it by hand.
+              </p>
+            </div>
+          )}
 
-          <div className="mt-4 space-y-3 max-h-80 overflow-y-auto pr-1">
+          <div className="mt-4 space-y-3 max-h-[28rem] overflow-y-auto pr-1">
             {results.map((doc) => (
-              <div key={doc.key} className="flex gap-3 items-center bg-purple-950/40 rounded-sm p-2.5 border border-purple-800/40">
-                <div className="w-10 h-14 rounded-sm overflow-hidden bg-purple-900/60 flex-shrink-0 flex items-center justify-center">
-                  <CoverImage
-                    src={doc._coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg` : "")}
-                    alt=""
-                    className="w-full h-full object-cover"
-                    fallback={<span className="text-purple-500 text-lg">♛</span>}
-                  />
+              <div key={doc.key} className="ht-card rounded-md p-3">
+                <div className="flex gap-3 items-start">
+                  <div className="ht-tome w-14 h-[84px] flex-shrink-0">
+                    <div className="ht-tome-cover bg-purple-900/60 flex items-center justify-center">
+                      <CoverImage
+                        src={doc._coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg` : "")}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        fallback={<span className="text-purple-400/70 text-base">❦</span>}
+                      />
+                    </div>
+                    <div className="ht-tome-pages" aria-hidden="true" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[15px] font-semibold line-clamp-2 break-words">{doc.title}</p>
+                    <p className="text-sm text-purple-300/70 truncate italic">
+                      {doc.author_name?.[0] || "Unknown"} {doc.first_publish_year ? `· ${doc.first_publish_year}` : ""}
+                    </p>
+                    <GenreChips genres={cleanGenres(doc.subject)} className="mt-1" />
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[15px] font-semibold truncate">{doc.title}</p>
-                  <p className="text-sm text-purple-300/70 truncate italic">
-                    {doc.author_name?.[0] || "Unknown"} {doc.first_publish_year ? `· ${doc.first_publish_year}` : ""}
-                  </p>
-                  <GenreChips genres={cleanGenres(doc.subject)} className="mt-1" />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <button onClick={() => pick(doc, "owned")} className="ht-display text-[10px] uppercase px-2.5 py-1 rounded-sm bg-indigo-500/40 hover:bg-indigo-500/70 text-indigo-100">
+                <div className="mt-3 flex gap-2">
+                  <button onClick={() => pick(doc, "owned")} className="ht-display flex-1 min-h-[44px] text-[10px] uppercase px-3 rounded-sm bg-indigo-500/40 hover:bg-indigo-500/70 text-indigo-100">
                     + Owned
                   </button>
-                  <button onClick={() => pick(doc, "wishlist")} className="ht-display text-[10px] uppercase px-2.5 py-1 rounded-sm bg-pink-500/30 hover:bg-pink-500/60 text-pink-100">
+                  <button onClick={() => pick(doc, "wishlist")} className="ht-display flex-1 min-h-[44px] text-[10px] uppercase px-3 rounded-sm bg-pink-500/30 hover:bg-pink-500/60 text-pink-100">
                     + Wishlist
                   </button>
                 </div>
