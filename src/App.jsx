@@ -4418,7 +4418,11 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
         }
         if (!cancelled) {
           setResults(docs);
-          setError(docs.length ? "" : "No tomes found. Try a different title or author.");
+          // A search that completes with zero results is not an error — the
+          // empty state below the results list owns that message. `error` is
+          // reserved for genuine failures (network, both providers down), which
+          // is what the pink error line renders.
+          setError("");
           setLoading(false);
         }
       } catch {

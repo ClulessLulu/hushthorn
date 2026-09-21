@@ -564,7 +564,35 @@ Replace with (card surface, larger cover with a page block, `❦` fallback, and 
 Note: the small cover deliberately omits `.ht-tome-spine` — at 56px wide a 12px spine edge would swallow the
 artwork. The page block alone is enough to read as a book.
 
-- [ ] **Step 3: Add the "nothing found" state**
+- [ ] **Step 3a: Stop treating "zero results" as an error**
+
+Without this the empty state in Step 3b is unreachable dead code. The search effect currently sets `error` to a
+message whenever a completed search returns nothing, so `!error` is never true in exactly the case the empty
+state exists for. Find, inside the search `useEffect`:
+
+```jsx
+          setResults(docs);
+          setError(docs.length ? "" : "No tomes found. Try a different title or author.");
+          setLoading(false);
+```
+
+Replace with:
+
+```jsx
+          setResults(docs);
+          // A search that completes with zero results is not an error — the
+          // empty state below the results list owns that message. `error` is
+          // reserved for genuine failures (network, both providers down), which
+          // is what the pink error line renders.
+          setError("");
+          setLoading(false);
+```
+
+This touches only the error *string* (display plumbing). The fetches, debounce, field mapping and the
+`catch` that sets "The archives are unreachable…" all stay exactly as they are — that pink error line is
+still needed for real failures.
+
+- [ ] **Step 3b: Add the "nothing found" state**
 
 Find the results container's closing and the loading/error lines above it (~line 4864):
 
