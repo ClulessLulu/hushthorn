@@ -179,42 +179,50 @@ const FONT_CSS = `
   box-shadow: inset 0 0 0 3px rgba(12,7,20,0.9), inset 0 0 0 4px rgba(168,85,247,0.3), inset 0 0 50px rgba(124,58,237,0.15);
 }
 
-/* ── the standing tome (Covers view) ─────────────────────────
-   A cover with real thickness: cream page block on the fore-edge, darkened
-   spine edge at the left. Progress rails (Task 2) attach to those same edges.
+/* ── the framed relic (Covers view) ──────────────────────────
+   The cover is mounted in a thin gothic plate with cornerpieces — an object in
+   a collection rather than a tile in a grid. There is no spine or fore-edge
+   here, so the progress rails ride the plate's own left and right edges,
+   keeping the spine shelf's violet-reading / cyan-audio language.
    .ht-tome is the positioning context — it must stay position:relative. */
-.ht-tome { position: relative; transition: transform .25s ease; }
+.ht-tome {
+  position: relative;
+  padding: 10px;
+  background: linear-gradient(158deg, #2a1b3d, #150d24);
+  border: 1px solid rgba(240,166,224,0.30);
+  box-shadow: 0 16px 30px rgba(0,0,0,0.70);
+  transition: transform .25s ease, box-shadow .25s ease;
+}
+/* the small plate used in the add-book results — same frame, tighter */
+.ht-tome-sm { padding: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.6); }
 .ht-tome-cover {
-  position: absolute; inset: 0;
-  border-radius: 2px 4px 4px 2px;
+  position: relative;
   overflow: hidden;
-  box-shadow: 0 16px 28px rgba(0,0,0,0.72), inset 0 1px 0 rgba(240,166,224,0.16);
-  transition: box-shadow .25s ease;
+  border: 1px solid rgba(240,166,224,0.16);
 }
-.ht-tome-pages {
-  position: absolute; top: 6px; bottom: 6px; right: -8px; width: 8px;
-  border-radius: 0 2px 2px 0;
-  background: repeating-linear-gradient(180deg, #e8ddc8 0 2px, #c4b69b 2px 3px);
-  box-shadow: 1px 0 4px rgba(0,0,0,0.65);
+.ht-tome-corner {
+  position: absolute; font-size: 8px; line-height: 1; pointer-events: none;
+  color: rgba(240,166,224,0.5);
 }
-.ht-tome-spine {
-  position: absolute; left: 0; top: 0; bottom: 0; width: 12px;
-  background: linear-gradient(90deg, rgba(0,0,0,0.62), rgba(0,0,0,0.04));
-  border-right: 1px solid rgba(240,166,224,0.11);
-}
-@media (min-width: 640px) { .ht-tome-spine { width: 17px; } }
+.ht-tome-corner.tl { top: 2px; left: 3px; }
+.ht-tome-corner.tr { top: 2px; right: 3px; }
+.ht-tome-corner.bl { bottom: 2px; left: 3px; }
+.ht-tome-corner.br { bottom: 2px; right: 3px; }
 /* Only tomes marked .ht-tome-lift rise on hover. The add-book result rows in
-   Task 4 are also .ht-card, and their small covers must NOT lift. */
-.ht-card:hover .ht-tome-lift { transform: translateY(-10px); }
-.ht-card:hover .ht-tome-lift .ht-tome-cover { box-shadow: 0 26px 42px rgba(0,0,0,0.8), inset 0 1px 0 rgba(240,166,224,0.22); }
-/* wishlist tomes are ghosts in dashed glass — mirrors the spine shelf */
-.ht-tome-ghost .ht-tome-cover { opacity: .55; border: 1px dashed rgba(240,166,224,0.45); }
-.ht-tome-ghost .ht-tome-pages { opacity: .35; }
-/* progress rails — violet reading on the spine edge, cyan audio on the
-   fore-edge. Same language as the spine shelf. Cyan is audio-only. */
-.ht-rail { position: absolute; bottom: 6px; width: 3px; pointer-events: none; }
-.ht-rail-read { left: 0; background: rgba(167,139,250,0.9); box-shadow: 0 0 6px rgba(167,139,250,0.9); }
-.ht-rail-audio { right: -8px; background: rgba(34,211,238,0.95); box-shadow: 0 0 6px rgba(34,211,238,0.95); }
+   Task 4 are also .ht-card, and their small plates must NOT lift. */
+.ht-card:hover .ht-tome-lift {
+  transform: translateY(-5px);
+  box-shadow: 0 20px 38px rgba(0,0,0,0.76), 0 0 0 1px rgba(244,114,182,0.55), 0 0 26px rgba(244,114,182,0.26);
+}
+/* wishlist relics are ghosts in dashed glass — mirrors the spine shelf */
+.ht-tome-ghost { border-style: dashed; }
+.ht-tome-ghost .ht-tome-cover { opacity: .55; }
+/* progress rails — violet reading on the left edge of the plate, cyan audio on
+   the right. Same language as the spine shelf. Cyan is audio-only. They sit on
+   the plate's border and run the full height, so no foot offset is subtracted. */
+.ht-rail { position: absolute; bottom: -1px; width: 3px; pointer-events: none; }
+.ht-rail-read { left: -1px; background: rgba(167,139,250,0.9); box-shadow: 0 0 6px rgba(167,139,250,0.9); }
+.ht-rail-audio { right: -1px; background: rgba(34,211,238,0.95); box-shadow: 0 0 6px rgba(34,211,238,0.95); }
 /* Reduced motion for the tome MUST be declared here, after the rules above.
    FONT_CSS is injected verbatim into a <style> tag with no post-processing, so
    equal-specificity rules are decided by source order — the earlier
@@ -2352,8 +2360,8 @@ export default function Hushthorn() {
                   title={tip}
                   className="ht-card rounded-md p-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
                 >
-                  <div className={`ht-tome ht-tome-lift aspect-[2/3] ${b.shelf === "wishlist" ? "ht-tome-ghost" : ""}`}>
-                    <div className="ht-tome-cover bg-purple-950/60 flex items-center justify-center">
+                  <div className={`ht-tome ht-tome-lift ${b.shelf === "wishlist" ? "ht-tome-ghost" : ""}`}>
+                    <div className="ht-tome-cover aspect-[2/3] bg-purple-950/60 flex items-center justify-center">
                       <CoverImage
                         src={b.coverUrl}
                         alt={`Cover of ${b.title}`}
@@ -2361,13 +2369,15 @@ export default function Hushthorn() {
                         fallback={<span className="ht-display text-purple-300/70 text-[11px] leading-snug px-3 text-center line-clamp-5 break-words">{b.title}</span>}
                       />
                     </div>
-                    <div className="ht-tome-pages" aria-hidden="true" />
-                    <div className="ht-tome-spine" aria-hidden="true" />
+                    <span className="ht-tome-corner tl" aria-hidden="true">◆</span>
+                    <span className="ht-tome-corner tr" aria-hidden="true">◆</span>
+                    <span className="ht-tome-corner bl" aria-hidden="true">◆</span>
+                    <span className="ht-tome-corner br" aria-hidden="true">◆</span>
                     {readPct > 0 && (
-                      <span className="ht-rail ht-rail-read" aria-hidden="true" style={{ height: `calc(${readPct}% - 6px)` }} />
+                      <span className="ht-rail ht-rail-read" aria-hidden="true" style={{ height: `${readPct}%` }} />
                     )}
                     {audioPct > 0 && (
-                      <span className="ht-rail ht-rail-audio" aria-hidden="true" style={{ height: `calc(${audioPct}% - 6px)` }} />
+                      <span className="ht-rail ht-rail-audio" aria-hidden="true" style={{ height: `${audioPct}%` }} />
                     )}
                   </div>
                   <h3 className="mt-2 text-[15px] font-semibold leading-tight line-clamp-2 break-words">{b.title}</h3>
@@ -4934,8 +4944,8 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
             {results.map((doc) => (
               <div key={doc.key} className="ht-card rounded-md p-3">
                 <div className="flex gap-3 items-start">
-                  <div className="ht-tome w-14 h-[84px] flex-shrink-0">
-                    <div className="ht-tome-cover bg-purple-900/60 flex items-center justify-center">
+                  <div className="ht-tome ht-tome-sm w-16 flex-shrink-0">
+                    <div className="ht-tome-cover aspect-[2/3] bg-purple-900/60 flex items-center justify-center">
                       <CoverImage
                         src={doc._coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg` : "")}
                         alt=""
@@ -4943,7 +4953,6 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
                         fallback={<span className="text-purple-500 text-base">♛</span>}
                       />
                     </div>
-                    <div className="ht-tome-pages" aria-hidden="true" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-[15px] font-semibold line-clamp-2 break-words">{doc.title}</p>
