@@ -71,11 +71,10 @@ alter table books add column if not exists tropes text[] not null default '{}';
 
 - RLS: unchanged. `books` is already owner-only (`user_id = auth.uid()`).
 - `FIELD_MAP` in `src/App.jsx` gains `tropes: 'tropes'` so the existing update path persists it.
-- **Shared archives:** the union model reads members' books through SECURITY DEFINER views. If tropes should
-  be visible on a co-member's book, `tropes` must be added to those views' select lists. Tropes are not
-  sensitive (they describe the book, not the reader), so exposing them is acceptable — but it is a deliberate
-  choice and must be made explicitly, not by accident. If the views are left alone, tropes simply don't show
-  on archive entries.
+- **Shared archives (decided: expose them):** the union model reads members' books through SECURITY DEFINER
+  views, so `tropes` must be added to those views' select lists for tropes to appear on a co-member's book.
+  This is an explicit choice, not an accident: tropes describe the book, not the reader, so they carry no
+  personal signal. Nothing else about those views changes, and no other column is widened.
 
 ## 3. Suggestion
 
@@ -112,9 +111,16 @@ Both entry points, sharing one function:
 Bulk is roughly one Claude call per untagged book (~70 today). That cost is real and the reader is told the
 count before it starts.
 
-Bulk results are written **as suggestions to review**, consistent with decision 2 — the bulk pass must not
-silently apply tropes. Practical approach: bulk writes tropes and flags the books it touched so the reader
-can review them, rather than blocking on 70 individual confirmations.
+**Bulk writes directly** (decided): requiring 70 individual confirmations would defeat the point of a bulk
+pass, so bulk is the one place tropes are applied without a per-book confirm. To keep that honest:
+
+- The reader is told the number of books and that results are applied, **before** it starts.
+- When it finishes it shows a **review summary** — every book it touched and the tropes applied, each opening
+  that book — so a wrong tag is one tap from being fixed.
+- No new column is added to track "needs review". The summary is the review surface; if persistent
+  review state is wanted later it can be added then, rather than speculatively now.
+
+This is the single exception to decision 2 and is deliberate.
 
 ## 6. Filtering
 
@@ -160,6 +166,8 @@ cannot absorb ~48 more buttons.
 - [ ] Clearing the trope filter restores the full shelf
 - [ ] The trope list shows only tropes present in the library, with correct counts
 - [ ] Bulk backfill: stopping mid-run leaves already-tagged books tagged and re-running skips them
+- [ ] Bulk backfill states the book count before starting and shows a review summary when it finishes
+- [ ] A co-member's book in a shared archive shows its tropes (views updated); no other column leaks
 - [ ] Bulk backfill on a library with no untagged books does nothing and says so
 - [ ] A book with no tropes is unaffected by an AND filter and excluded from an OR filter
 - [ ] Genre cleanup dry-run lists changes without writing; the real run matches the dry-run
