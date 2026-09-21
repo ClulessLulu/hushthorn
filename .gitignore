@@ -7,3 +7,6 @@ CLAUDE.local.md
 
 # Playwright MCP scratch output
 .playwright-mcp/
+
+# QA screenshot evidence (large, local only)
+tests/screenshots/

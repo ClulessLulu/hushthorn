@@ -373,12 +373,16 @@ function cleanGenres(subjects, max = 3) {
 // `oneLine` keeps the chips on a single clipped row. The grid cards use it so a
 // book with long raw categories ("FICTION, ROMANCE, GENERAL") can't wrap to two
 // lines and push its card's text block taller than its neighbours'.
+// The chip MUST stay shrinkable for `truncate` to engage: flex items default to
+// min-width:auto, and flex-shrink-0 pins them at content width — with either of
+// those the row's overflow-hidden clips a long chip away entirely instead of
+// ellipsising it (QA BUG-001).
 function GenreChips({ genres, max = 3, className = "", oneLine = false }) {
   if (!genres || genres.length === 0) return null;
   return (
     <div className={`flex gap-1 ${oneLine ? "flex-nowrap overflow-hidden" : "flex-wrap"} ${className}`}>
       {genres.slice(0, max).map((g) => (
-        <span key={g} className={`ht-display text-[9px] uppercase px-1.5 py-0.5 rounded-sm border border-purple-500/40 bg-purple-900/40 text-purple-200/90 ${oneLine ? "whitespace-nowrap flex-shrink-0 max-w-full truncate" : ""}`}>
+        <span key={g} className={`ht-display text-[9px] uppercase px-1.5 py-0.5 rounded-sm border border-purple-500/40 bg-purple-900/40 text-purple-200/90 ${oneLine ? "min-w-0 truncate" : ""}`}>
           {g}
         </span>
       ))}
