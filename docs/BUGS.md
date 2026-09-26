@@ -101,3 +101,65 @@ The fixture claims to load "the real compiled stylesheet" so that authed-only co
 ### Suggested fix direction (not applied — QA does not fix)
 
 Whatever script generates `qa-fixture.html` should also inline the `FONT_CSS` block (or link a small stylesheet built from it) so the fixture is self-contained. QA worked around this for this pass by extracting the live-injected style text and linking it in at runtime (`dist/qa-fixture-fontcss.css`, saved alongside this report) — that workaround file can be reused as the missing `<link>` target if convenient.
+
+---
+
+## BUG-003 — Leaving a shared archive doesn't refresh the currently-viewed shelf (stale co-member data lingers client-side)
+
+**STATUS: FIXED** (2026-09-26). Root cause ran deeper than the report: `onChanged` only reloaded
+`SharedArchives`' own local list, so the top-level `archives` state never refreshed after a leave either —
+there was nothing for `currentLibraryId` to be re-validated against.
+
+Fix: a `membershipVersion` counter in `Hushthorn` is bumped on any membership change and added to the main
+data-load effect's deps, so archives refetch; that load now also re-validates `currentLibraryId` and falls
+back to the personal shelf when the viewed archive is gone. The callback is threaded
+`Hushthorn → AvatarPage → SharedArchives → LibraryDetail`. This covers leaving, the owner deleting the
+archive, and membership revoked elsewhere — not just the one path reported.
+
+Verified live on staging without a reload: viewing the shared archive showed 4 tomes (incl. Alpha's
+*Fourth Wing*, *A Court of Thorns and Roses*); immediately after "Leave archive" the shelf showed 2 tomes,
+Beta's own only.
+
+**Severity:** Medium (data-integrity/UX — not a security leak; the server-side RLS boundary is correct the instant it's re-queried, but the open tab keeps showing another member's books after the user has left the archive, which is confusing and could mislead the user about what they've actually left)
+**Found by:** qa-tester, shared-library QA pass, 2026-09-26
+**Owner:** frontend-dev
+
+### Steps to reproduce
+
+1. Staging (`http://localhost:5174/`), two accounts: Alpha owns a shared archive with 3 books; Beta is a joined member.
+2. As Beta, switch the shelf selector to the shared archive (e.g. "QA Shared Archive") so the union view (Alpha's + Beta's books) is on screen.
+3. Open the profile panel → Shared Archives → expand the archive → click "Leave archive" → confirm the `window.confirm` dialog.
+4. Close the profile panel. **Do not reload.**
+
+Reproduced twice, independently, with matching evidence:
+- Accessibility-tree snapshot immediately after step 4: profile panel correctly reads "No shared archives yet," while the shelf header still reads "QA Shared Archive" and the grid still shows "4 tomes" (Fourth Wing, Iron Flame/"iron flame" merged, A Court of Thorns and Roses, Onyx Storm).
+- Screenshot: `tests/screenshots/bug-stale-archive-view-after-leave.png`.
+- A manual reload of the same session immediately after correctly drops back to "My Library" with only Beta's own 2 books — confirming the underlying data/RLS is fine and this is purely a stale-render issue.
+
+### Expected
+
+Per the task's invariant ("After Beta leaves the archive, Alpha's books disappear from Beta's archive views"), leaving should immediately clear the shared-archive shelf from view — either by bouncing the shelf selector back to "My Library" or by refetching the union and finding it now 404/empty for that library.
+
+### Actual
+
+The shelf selector stays labeled with the just-left archive's name and the grid keeps rendering the last-fetched union payload (including the other member's books) until something else forces a refetch (e.g. a full page reload). Verified via direct REST (as Alpha) that `library_members` for that library correctly drops to 1 row (Alpha only) the moment Beta leaves — the staleness is entirely client-side, not a server-side/RLS gap.
+
+### Suspected file / cause
+
+`src/App.jsx` — `LibraryDetail`'s `leave()` handler (~line 3684-3690):
+
+```js
+const leave = async () => {
+  if (!window.confirm('Leave this shared archive?')) return;
+  const { error } = await supabase.from('library_members')
+    .delete().eq('library_id', lib.id).eq('user_id', me);
+  if (error) { setErr('Could not leave.'); return; }
+  onChanged();
+};
+```
+
+`onChanged()` reloads the `SharedArchives` panel's own `libs` list (so the profile modal correctly shows "No shared archives yet"), but nothing here invalidates `currentLibraryId` / the top-level union (`loadArchiveUnion`) state that drives the main shelf grid when the user is actively viewing that archive. The main shelf keeps the last-loaded union array in memory.
+
+### Suggested fix direction (not applied — QA does not fix)
+
+When `leave()` (or `destroy()`, which likely has the same gap for the owner deleting an archive while viewing it) succeeds and the archive being left/deleted is the one currently selected (`currentLibraryId === lib.id`), reset `currentLibraryId` to `null` (switch back to "My Library") and clear/refetch the union state, rather than relying on `SharedArchives`'s own local list refresh.

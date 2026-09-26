@@ -10,3 +10,4 @@ CLAUDE.local.md
 
 # QA screenshot evidence (large, local only)
 tests/screenshots/
+.env.staging

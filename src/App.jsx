@@ -1509,6 +1509,11 @@ export default function Hushthorn() {
   // archives the user belongs to, each with the user's own membership role.
   const [currentLibraryId, setCurrentLibraryId] = useState(null);
   const [archives, setArchives] = useState([]);
+  // Bumped whenever membership changes (leaving or deleting an archive). The
+  // main data load depends on it, so archives refetch and `currentLibraryId`
+  // gets re-validated — without this the app keeps rendering an archive the
+  // reader no longer belongs to until a manual reload (QA BUG-003).
+  const [membershipVersion, setMembershipVersion] = useState(0);
   // Books loaded for the active shared archive (empty while personal).
   const [sharedBooks, setSharedBooks] = useState([]);
   // Identity. `profile` is the user's claimed username row (or null until claimed).
@@ -1604,14 +1609,20 @@ export default function Hushthorn() {
       // Map libraries → [{ id, name, role }] where role is THIS user's
       // membership role. A library with no matching membership row is skipped
       // defensively (shouldn't happen under RLS, but never a dead end).
-      setArchives((libsData || []).reduce((acc, lib) => {
+      const nextArchives = (libsData || []).reduce((acc, lib) => {
         const mine = (lib.library_members || []).find(m => m.user_id === uid);
         if (mine) acc.push({ id: lib.id, name: lib.name, role: mine.role });
         return acc;
-      }, []));
+      }, []);
+      setArchives(nextArchives);
+      // If the archive being viewed is gone (left it, or the owner deleted it),
+      // fall back to the personal shelf rather than rendering a stale union.
+      setCurrentLibraryId((prev) =>
+        prev != null && !nextArchives.some((a) => a.id === prev) ? null : prev
+      );
     }).catch(err => console.error('data load:', err))
       .finally(() => { setDataLoading(false); setProfileReady(true); });
-  }, [session]);
+  }, [session, membershipVersion]);
 
   // ── shared archive union read model (Union model) ───────────
   // An archive is a *lens*: it merges every member's PERSONAL library, deduped
@@ -2446,6 +2457,7 @@ export default function Hushthorn() {
           username={profile?.username}
           books={books}
           session={session}
+          onMembershipChanged={() => setMembershipVersion((v) => v + 1)}
           onSave={(updated) => {
             // Visage's seal() hands back only { form, traits, image_path, preset_name } —
             // merge onto the existing avatar state so the legacy columns
@@ -3487,7 +3499,7 @@ function MiniAvatar({ imagePath, size = 34 }) {
 // The Shared Archives panel on the profile. Lists the user's shared libraries,
 // and lets them bind a new one or join with a code. Each library expands into
 // a roster + invite/owner controls (LibraryDetail).
-function SharedArchives({ session, avatar }) {
+function SharedArchives({ session, avatar, onMembershipChanged }) {
   const me = session.user.id;
   const [libs, setLibs] = useState(null);   // null = loading
   const [openId, setOpenId] = useState(null);
@@ -3565,7 +3577,7 @@ function SharedArchives({ session, avatar }) {
                     </span>
                     <span className="text-purple-400 text-xs">{isOpen ? '▾' : '▸'}</span>
                   </button>
-                  {isOpen && <LibraryDetail lib={lib} me={me} avatar={avatar} onChanged={() => { setOpenId(null); load(); }} />}
+                  {isOpen && <LibraryDetail lib={lib} me={me} avatar={avatar} onChanged={() => { setOpenId(null); load(); onMembershipChanged?.(); }} />}
                 </div>
               );
             })}
@@ -3821,7 +3833,7 @@ function seedVisageTraits(avatar) {
 // avatars fall back to the ❦ placeholder everywhere (nothing can be sealed).
 const VISAGE_ENABLED = false;
 
-function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
+function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembershipChanged }) {
   // ── The Visage: Gallery + Atelier avatar editor ──────────────
   // `traits` is the one shape that drives the preview, presets, randomize,
   // and (Task 4) the seal + DB write. `form` is a second, Gallery-only bit of
@@ -4110,7 +4122,7 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose }) {
       </div>
 
       {/* shared archives */}
-      <SharedArchives session={session} avatar={avatar} />
+      <SharedArchives session={session} avatar={avatar} onMembershipChanged={onMembershipChanged} />
 
       {/* mini shelf */}
       <h3 className="ht-display text-xs uppercase tracking-widest text-purple-300/70 mb-2">Your Shelf</h3>
