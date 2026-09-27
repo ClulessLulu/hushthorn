@@ -353,19 +353,30 @@ function MicIcon({ size = 18 }) {
 
 // Open Library subjects are noisy; keep the few that read like genres.
 const GENRE_JUNK = /(accessible|protected|in library|large type|reading level|staff picks|nyt|times bestseller|literature$|^fiction$|translations|collections|specimens)/i;
+// BISAC headings arrive as "Fiction, romance, fantasy" or "Fiction / Romance /
+// Fantasy". They are short, colon-free and not junk, so they passed every
+// filter intact — which is how raw publishing categories ended up as chips on
+// the cards. Split them, drop the generic qualifiers, keep the real leaves.
+const GENRE_GENERIC = /^(fiction|nonfiction|non-fiction|general|juvenile|young adult|adult|literary)$/i;
+
 function cleanGenres(subjects, max = 3) {
   if (!Array.isArray(subjects)) return [];
   const seen = new Set();
   const out = [];
   for (const s of subjects) {
     if (typeof s !== "string") continue;
-    const g = s.trim();
-    if (!g || g.length > 28 || g.includes(":") || GENRE_JUNK.test(g)) continue;
-    const key = g.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(g.charAt(0).toUpperCase() + g.slice(1));
-    if (out.length >= max) break;
+    // one heading can yield several usable genres
+    const parts = s.includes(",") || s.includes("/") ? s.split(/[,/]/) : [s];
+    for (const part of parts) {
+      const g = part.trim();
+      if (!g || g.length > 28 || g.includes(":") || GENRE_JUNK.test(g)) continue;
+      if (GENRE_GENERIC.test(g)) continue;
+      const key = g.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(g.charAt(0).toUpperCase() + g.slice(1).toLowerCase());
+      if (out.length >= max) return out;
+    }
   }
   return out;
 }
