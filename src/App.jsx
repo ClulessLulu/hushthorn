@@ -2334,7 +2334,19 @@ export default function Hushthorn() {
     // NOTE: patches top-level fields but NOT the entry's `owners[]` "me" row — fine
     // today (the archive detail edits only marks/progress/hide, never shelf/formats).
     // If an archive entry ever edits shelf/formats, mirror into owners[] here too.
-    setSharedBooks(prev => prev.map(b => b.mineBookId === id ? { ...b, ...patch } : b));
+    setSharedBooks(prev => prev.map(b => {
+      if (b.mineBookId !== id) return b;
+      const next = { ...b, ...patch };
+      // A union entry keeps two trope fields: `myTropes` (what I tagged, what
+      // the picker binds to) and `tropes` (the merged set shown on the card).
+      // Patching only the merged one left the picker showing a stale value, so
+      // a just-tapped chip didn't light up and a second tap undid it.
+      if ('tropes' in patch) {
+        next.myTropes = patch.tropes;
+        next.tropes = normalizeTropes([...(b.tropes || []), ...patch.tropes]);
+      }
+      return next;
+    }));
     return true;
   };
 
