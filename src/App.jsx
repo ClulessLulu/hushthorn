@@ -370,6 +370,53 @@ function cleanGenres(subjects, max = 3) {
   return out;
 }
 
+/* ── tropes ─────────────────────────────────────────────────
+   A CLOSED vocabulary. Filtering only works if every book spells a trope the
+   same way, so free text is never stored: `normalizeTropes` maps whatever it
+   is given (AI output, older rows) onto these canonical strings and silently
+   drops anything else. Adding a trope here is safe; removing one orphans
+   stored values and needs a data migration. */
+const TROPE_GROUPS = {
+  Relationship: [
+    "Enemies to Lovers", "Rivals to Lovers", "Friends to Lovers", "Lovers to Enemies",
+    "Second Chance", "Fake Dating", "Marriage of Convenience", "Arranged Marriage",
+    "Forbidden Love", "Forced Proximity", "Only One Bed", "Slow Burn", "Insta-Love",
+    "Love Triangle", "Grumpy/Sunshine", "Touch Her and Die", "Possessive MMC",
+    "Morally Grey MMC", "Golden Retriever MMC", "Touch Aversion",
+  ],
+  "Fantasy & Paranormal": [
+    "Fated Mates", "Mate Bond", "Chosen One", "Hidden Royalty", "Secret Heir",
+    "Dragon Rider", "Fae Court", "Vampire", "Shifter", "Witch", "Demon", "Angel",
+    "God/Immortal", "Magic Academy", "Portal Fantasy",
+  ],
+  "Plot & Structure": [
+    "Found Family", "Redemption Arc", "Revenge", "Trials/Tournament",
+    "Court Intrigue", "Heist", "Road Trip", "Betrayal", "Prophecy",
+  ],
+  Heat: ["Closed Door", "Open Door", "Why Choose"],
+};
+
+const TROPES = Object.values(TROPE_GROUPS).flat();
+
+// lowercase -> canonical, so AI output and hand-typed casing both resolve
+const TROPE_CANON = new Map(TROPES.map((t) => [t.toLowerCase(), t]));
+
+// The ONLY gate into `tropes`. Anything not in the vocabulary is dropped.
+function normalizeTropes(list, max = 6) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const raw of list) {
+    if (typeof raw !== "string") continue;
+    const canon = TROPE_CANON.get(raw.trim().toLowerCase());
+    if (!canon || seen.has(canon)) continue;
+    seen.add(canon);
+    out.push(canon);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 // `oneLine` keeps the chips on a single clipped row. The grid cards use it so a
 // book with long raw categories ("FICTION, ROMANCE, GENERAL") can't wrap to two
 // lines and push its card's text block taller than its neighbours'.
@@ -1598,7 +1645,7 @@ export default function Hushthorn() {
       }
       setBooks((booksData || []).map(b => ({
         id: b.id, title: b.title, author: b.author, year: b.year,
-        coverUrl: b.cover_url, genres: b.genres || [], shelf: b.shelf,
+        coverUrl: b.cover_url, genres: b.genres || [], tropes: b.tropes || [], shelf: b.shelf,
         read: b.read, overall: b.overall, smut: b.smut,
         spineColor: b.spine_color,
         formats: b.formats || ['print'],
@@ -1653,7 +1700,7 @@ export default function Hushthorn() {
   // (and everyone's hidden rows for co-members).
   //
   // Produces UnionBook[]:
-  //   { key, title, author, coverUrl, genres, formats(union),
+  //   { key, title, author, coverUrl, genres, tropes(union), formats(union),
   //     mineBookId?, read, overall, smut, progress, notes, hidden, shelf,   // from MY copy; defaults if I lack it
   //     owners:  [{ user_id, username, imagePath, formats, shelf }],         // me + every archive_shelf owner
   //     reveals: [{ user_id, overall, smut, progress, read }] }             // archive_reveal rows for this key
@@ -1755,6 +1802,7 @@ export default function Hushthorn() {
         author: b.author,
         coverUrl: b.cover_url,
         genres: b.genres || [],
+        tropes: b.tropes || [],
         formats: Array.from(new Set(myFormats)),
         mineBookId: b.id,
         read: !!b.read,
@@ -1783,6 +1831,7 @@ export default function Hushthorn() {
           author: s.author,
           coverUrl: s.cover_url,
           genres: s.genres || [],
+          tropes: s.tropes || [],
           formats: [],
           mineBookId: undefined,
           read: false,
@@ -1803,6 +1852,9 @@ export default function Hushthorn() {
       if ((!entry.genres || entry.genres.length === 0) && (s.genres || []).length) entry.genres = s.genres;
       // formats = union of every owner's formats.
       entry.formats = Array.from(new Set([...(entry.formats || []), ...ownerFormats]));
+      // tropes = union of every owner's tropes — a merged card shows every
+      // trope either reader tagged (re-normalized: caps at 6, drops dupes).
+      entry.tropes = normalizeTropes([...(entry.tropes || []), ...(s.tropes || [])]);
       // recency = most recent addition across owners (ISO strings sort chronologically).
       if (s.created_at && (!entry.createdAt || s.created_at > entry.createdAt)) entry.createdAt = s.created_at;
       const who = identity(s.owner_id);
@@ -2018,7 +2070,7 @@ export default function Hushthorn() {
   // again (union model), so there is a single personal write path — marks and
   // metadata all live on the owner's own row. `hidden` maps to the per-book
   // `hidden_from_archives` flag that removes a book from the archive union.
-  const FIELD_MAP = { title: 'title', author: 'author', coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', progress: 'progress', hidden: 'hidden_from_archives' };
+  const FIELD_MAP = { title: 'title', author: 'author', coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', progress: 'progress', hidden: 'hidden_from_archives', tropes: 'tropes' };
 
   const updateBook = async (id, patch) => {
     // Handle notes diff — detects adds and/or deletes by comparing ID sets
@@ -2176,6 +2228,7 @@ export default function Hushthorn() {
       year: book.year ?? null,
       cover_url: book.coverUrl,
       genres: book.genres,
+      tropes: normalizeTropes(book.tropes),
       shelf: book.shelf,
       read: book.read,
       overall: book.overall,
@@ -2185,7 +2238,7 @@ export default function Hushthorn() {
       progress: book.progress || {},
     });
     if (error) { console.error('addBook:', error.message); return; }
-    setBooks(prev => [{ ...book, id, progress: book.progress || {}, notes: [] }, ...prev]);
+    setBooks(prev => [{ ...book, id, tropes: normalizeTropes(book.tropes), progress: book.progress || {}, notes: [] }, ...prev]);
     setAddOpen(false);
     // In an archive the active shelf is the union (entries resolve by `key`, not
     // `id`), and it doesn't auto-refresh on insert. So after adding from an archive,
