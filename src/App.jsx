@@ -1434,7 +1434,7 @@ function SpineShelf({ books, onOpen, query, onPersist }) {
 
 /* ── controls bar ──────────────────────────────────────────── */
 
-function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery }) {
+function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery, availableTropes = [], tropeFilter = [], onTropeFilter, tropeMode = "all", onTropeMode }) {
   return (
     <div className="max-w-5xl mx-auto px-5 pb-5 flex flex-wrap items-center justify-center gap-2">
       <div className="flex rounded-sm overflow-hidden border border-purple-700/50">
@@ -1470,6 +1470,51 @@ function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery }) {
         className="bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400 w-44"
         aria-label="Search the shelves"
       />
+      {availableTropes.length > 0 && (
+        <div className="w-full flex flex-col items-center gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60">Tropes</span>
+            <div className="flex rounded-sm overflow-hidden border border-purple-700/50">
+              {["all", "any"].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => onTropeMode(m)}
+                  className={`ht-display px-2.5 py-1 text-[9px] uppercase font-semibold transition-colors ${
+                    tropeMode === m ? "bg-purple-600/70 text-white" : "bg-purple-950/50 text-purple-300 hover:bg-purple-900/60"
+                  }`}
+                >
+                  {m === "all" ? "Match all" : "Match any"}
+                </button>
+              ))}
+            </div>
+            {tropeFilter.length > 0 && (
+              <button
+                onClick={() => onTropeFilter([])}
+                className="ht-display text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap justify-center gap-1.5 max-w-3xl">
+            {availableTropes.map(([t, n]) => {
+              const on = tropeFilter.includes(t);
+              return (
+                <button
+                  key={t}
+                  onClick={() => onTropeFilter(on ? tropeFilter.filter((x) => x !== t) : [...tropeFilter, t])}
+                  aria-pressed={on}
+                  className={`ht-display text-[9px] uppercase px-2 py-1 rounded-sm border transition-colors ${
+                    on ? "border-pink-400/70 bg-pink-500/30 text-pink-100" : "border-purple-500/40 bg-purple-950/50 text-purple-200/90 hover:bg-purple-900/60"
+                  }`}
+                >
+                  {t} <span className="text-purple-400/70">{n}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1982,13 +2027,21 @@ export default function Hushthorn() {
   const shelfBooks = currentLibraryId === null ? books : sharedBooks;
 
   const [shelfFilter, setShelfFilter] = useState("all");
+  // Trope filter. `tropeMode` 'all' = a book must carry every selected trope,
+  // 'any' = at least one. Empty selection means the filter is off.
+  const [tropeFilter, setTropeFilter] = useState([]);
+  const [tropeMode, setTropeMode] = useState("all");
   // Switch the active shelf (null = My Library). The filter tab set differs
   // between contexts (personal Owned/Wishlist vs. archive I own/Others own/
   // Nobody), so reset to "All" on switch to avoid a stale, un-highlighted tab.
   // Also drop back to the library view so the switch is immediately visible.
+  // The trope filter resets too — a trope selected on one shelf may not exist
+  // on the next, and a stale hidden filter would leave the new shelf looking
+  // emptier than it is with no visible control to explain why.
   const switchLibrary = (id) => {
     setCurrentLibraryId(id);
     setShelfFilter("all");
+    setTropeFilter([]);
     setActiveId(null);
     setView("library");
   };
@@ -2132,6 +2185,28 @@ export default function Hushthorn() {
   // matches, the spine keeps the full set (it dims non-matches). Drives the count
   // header shown above both layouts.
   const shelfShown = layout === "spines" ? sorted : gridBooks;
+
+  // Trope narrowing. A book with no tropes is excluded whenever the filter is
+  // active — under ALL it can't match, and under ANY it has nothing to match.
+  const tropeNarrowed = tropeFilter.length === 0
+    ? shelfShown
+    : shelfShown.filter((b) => {
+        const has = new Set(b.tropes || []);
+        return tropeMode === "all"
+          ? tropeFilter.every((t) => has.has(t))
+          : tropeFilter.some((t) => has.has(t));
+      });
+
+  // Only offer tropes that actually appear on this shelf, most common first.
+  // Derived from `shelfShown` (before trope narrowing) so selecting one trope
+  // never erases the others from the list — you can still add a second.
+  const tropeCounts = shelfShown.reduce((acc, b) => {
+    for (const t of b.tropes || []) acc.set(t, (acc.get(t) || 0) + 1);
+    return acc;
+  }, new Map());
+  const availableTropes = [...tropeCounts.entries()].sort(
+    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0])
+  );
 
   // FIELD_MAP maps in-memory book fields → `books` columns. Books are personal
   // again (union model), so there is a single personal write path — marks and
@@ -2456,14 +2531,19 @@ export default function Hushthorn() {
           onSort={changeSort}
           query={query}
           onQuery={setQuery}
+          availableTropes={availableTropes}
+          tropeFilter={tropeFilter}
+          onTropeFilter={setTropeFilter}
+          tropeMode={tropeMode}
+          onTropeMode={setTropeMode}
         />
       )}
 
       {/* library grid / oracle */}
       <main className="max-w-5xl mx-auto px-5 pb-16">
-        {view === "library" && !dataLoading && shelfShown.length > 0 && (
+        {view === "library" && !dataLoading && tropeNarrowed.length > 0 && (
           <p className="ht-display text-center text-[10px] uppercase tracking-widest text-purple-300/60 mb-4">
-            {shelfShown.length} tome{shelfShown.length === 1 ? "" : "s"} · {shelfShown.filter((b) => b.read).length} read
+            {tropeNarrowed.length} tome{tropeNarrowed.length === 1 ? "" : "s"} · {tropeNarrowed.filter((b) => b.read).length} read
           </p>
         )}
         {view === "oracle" ? (
@@ -2476,23 +2556,25 @@ export default function Hushthorn() {
           </div>
         ) : layout === "spines" ? (
           <SpineShelf
-            books={sorted}
+            books={tropeNarrowed}
             onOpen={setActiveId}
             query={query}
             onPersist={persistSpineColor}
           />
-        ) : gridBooks.length === 0 ? (
+        ) : tropeNarrowed.length === 0 ? (
           <div className="text-center py-20 text-purple-300/60">
             <p className="ht-display text-xl">This shelf lies bare.</p>
             <p className="mt-2 text-[15px] italic">
               {query.trim()
                 ? "No tome answers to that name. Loose the search to see the shelf."
+                : tropeFilter.length > 0
+                ? "No tome bears that trope. Clear the trope filter to see the shelf."
                 : "Inscribe a tome to begin the collection."}
             </p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {gridBooks.map((b) => {
+            {tropeNarrowed.map((b) => {
               // UnionBooks (archive entries) have `owners`; personal books have `id`.
               const isUnion = !!b.owners;
               const openId = isUnion ? b.key : b.id;
