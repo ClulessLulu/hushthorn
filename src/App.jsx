@@ -401,8 +401,13 @@ const TROPES = Object.values(TROPE_GROUPS).flat();
 // lowercase -> canonical, so AI output and hand-typed casing both resolve
 const TROPE_CANON = new Map(TROPES.map((t) => [t.toLowerCase(), t]));
 
+// How many tropes a book may CARRY. Distinct from the suggestion cap (6) —
+// a reader may deliberately tag more than the AI proposes, and truncating
+// their selection on save would silently lose tags.
+const TROPE_MAX = 12;
+
 // The ONLY gate into `tropes`. Anything not in the vocabulary is dropped.
-function normalizeTropes(list, max = 6) {
+function normalizeTropes(list, max = TROPE_MAX) {
   if (!Array.isArray(list)) return [];
   const out = [];
   const seen = new Set();
@@ -2073,6 +2078,10 @@ export default function Hushthorn() {
   const FIELD_MAP = { title: 'title', author: 'author', coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', progress: 'progress', hidden: 'hidden_from_archives', tropes: 'tropes' };
 
   const updateBook = async (id, patch) => {
+    // `tropes` goes through the validator here too, not just in the picker.
+    // FIELD_MAP writes patch values straight to the column, so without this a
+    // caller could persist an off-vocabulary string and break filtering.
+    if ('tropes' in patch) patch = { ...patch, tropes: normalizeTropes(patch.tropes, TROPE_MAX) };
     // Handle notes diff — detects adds and/or deletes by comparing ID sets
     if ('notes' in patch) {
       const current = books.find(b => b.id === id);
@@ -2228,7 +2237,7 @@ export default function Hushthorn() {
       year: book.year ?? null,
       cover_url: book.coverUrl,
       genres: book.genres,
-      tropes: normalizeTropes(book.tropes),
+      tropes: normalizeTropes(book.tropes, TROPE_MAX),
       shelf: book.shelf,
       read: book.read,
       overall: book.overall,
@@ -2238,7 +2247,7 @@ export default function Hushthorn() {
       progress: book.progress || {},
     });
     if (error) { console.error('addBook:', error.message); return; }
-    setBooks(prev => [{ ...book, id, tropes: normalizeTropes(book.tropes), progress: book.progress || {}, notes: [] }, ...prev]);
+    setBooks(prev => [{ ...book, id, tropes: normalizeTropes(book.tropes, TROPE_MAX), progress: book.progress || {}, notes: [] }, ...prev]);
     setAddOpen(false);
     // In an archive the active shelf is the union (entries resolve by `key`, not
     // `id`), and it doesn't auto-refresh on insert. So after adding from an archive,
