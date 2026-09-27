@@ -427,6 +427,34 @@ function normalizeTropes(list, max = TROPE_MAX) {
   return out;
 }
 
+// Tropes for a single known title. Returns [] on any failure or when Claude
+// doesn't recognise the book — callers must treat [] as "nothing to suggest",
+// never as an error worth blocking on. Shared by the bulk backfill and the
+// per-book "Divine tropes" button — define the prompt exactly once.
+async function suggestTropes(title, author) {
+  if (!title || !title.trim()) return [];
+  try {
+    const data = await callClaude({
+      model: "claude-sonnet-4-6",
+      max_tokens: 400,
+      messages: [{
+        role: "user",
+        content: `For the book "${title.trim()}"${author?.trim() ? ` by ${author.trim()}` : ""}: list its romance/fantasy tropes.
+
+Choose ONLY from this exact list, copying the spelling verbatim:
+${TROPES.join(", ")}
+
+If you do not recognize the book, return an empty array rather than guessing.
+
+Respond with ONLY valid JSON: {"tropes": array of 0 to 6 strings from the list above}.`,
+      }],
+    });
+    return normalizeTropes(parseClaudeJson(data, "{").tropes, TROPE_SUGGEST_MAX);
+  } catch {
+    return [];
+  }
+}
+
 // `oneLine` keeps the chips on a single clipped row. The grid cards use it so a
 // book with long raw categories ("FICTION, ROMANCE, GENERAL") can't wrap to two
 // lines and push its card's text block taller than its neighbours'.
@@ -2682,6 +2710,7 @@ export default function Hushthorn() {
           username={profile?.username}
           books={books}
           session={session}
+          onUpdateBook={updateBook}
           onMembershipChanged={() => setMembershipVersion((v) => v + 1)}
           onSave={(updated) => {
             // Visage's seal() hands back only { form, traits, image_path, preset_name } —
@@ -4059,7 +4088,7 @@ function seedVisageTraits(avatar) {
 // avatars fall back to the ❦ placeholder everywhere (nothing can be sealed).
 const VISAGE_ENABLED = false;
 
-function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembershipChanged }) {
+function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembershipChanged, onUpdateBook }) {
   // ── The Visage: Gallery + Atelier avatar editor ──────────────
   // `traits` is the one shape that drives the preview, presets, randomize,
   // and (Task 4) the seal + DB write. `form` is a second, Gallery-only bit of
@@ -4166,6 +4195,41 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
   // Mini-shelf corner emoji reuses the legacy gender→emoji map off the
   // current form (decorative only; not persisted, not the display sites Task 5 owns).
   const legacyGenderKey = form === 'rose' ? 'female' : form === 'thorn' ? 'male' : 'nonbinary';
+
+  // Bulk trope backfill. Sequential on purpose — parallel calls would hammer
+  // the API. Stoppable mid-run, and skips books that already have tropes so a
+  // re-run is cheap. This is the one path that writes without a per-book
+  // confirm, so it reports everything it touched for review.
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkDone, setBulkDone] = useState(0);
+  const [bulkResults, setBulkResults] = useState(null);
+  const bulkStopRef = useRef(false);
+
+  const untagged = books.filter((b) => !(b.tropes || []).length);
+
+  const runBulkTropes = async () => {
+    if (!untagged.length) return;
+    if (!window.confirm(`Divine tropes for ${untagged.length} untagged tome${untagged.length === 1 ? "" : "s"}? Results are applied directly — you can review and correct them afterwards.`)) return;
+    bulkStopRef.current = false;
+    setBulkRunning(true);
+    setBulkDone(0);
+    const touched = [];
+    for (const b of untagged) {
+      if (bulkStopRef.current) break;
+      const tropes = await suggestTropes(b.title, b.author); // [] on failure
+      if (tropes.length) {
+        try {
+          await onUpdateBook(b.id, { tropes });
+          touched.push({ id: b.id, title: b.title, tropes });
+        } catch {
+          /* one book failing must not abort the run */
+        }
+      }
+      setBulkDone((n) => n + 1);
+    }
+    setBulkRunning(false);
+    setBulkResults({ touched, stopped: bulkStopRef.current });
+  };
 
   return (
     <Overlay onClose={onClose} label={VISAGE_ENABLED ? "The Visage" : "Your Profile"} wide>
@@ -4326,6 +4390,52 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
         <button onClick={onClose} className="text-purple-300 hover:text-pink-300 text-xl px-2" aria-label="Close">✕</button>
       </div>
       )}
+
+      {/* bulk trope backfill */}
+      <div className="ht-card rounded-md p-3 mb-4">
+        <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60">Tropes</p>
+        {untagged.length === 0 && !bulkResults ? (
+          <p className="mt-1.5 text-[15px] text-purple-300/70 italic">Every tome is tagged.</p>
+        ) : (
+          <>
+            <p className="mt-1.5 text-[15px] text-purple-300/70 italic">
+              {bulkRunning
+                ? `Divining… ${bulkDone} of ${untagged.length}`
+                : `${untagged.length} tome${untagged.length === 1 ? "" : "s"} have no tropes yet.`}
+            </p>
+            <div className="mt-2 flex gap-2">
+              {bulkRunning ? (
+                <button onClick={() => { bulkStopRef.current = true; }} className="ht-display px-3 py-2 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100 text-[10px] uppercase font-semibold">
+                  Stop
+                </button>
+              ) : (
+                <button onClick={runBulkTropes} disabled={!untagged.length} className="ht-display px-3 py-2 rounded-sm bg-indigo-500/70 hover:bg-indigo-500 disabled:opacity-40 text-white text-[10px] uppercase font-semibold">
+                  ✨ Divine tropes for my library
+                </button>
+              )}
+            </div>
+          </>
+        )}
+        {bulkResults && (
+          <div className="mt-3">
+            <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60">
+              {bulkResults.stopped ? "Stopped early — " : ""}{bulkResults.touched.length} tagged · review below
+            </p>
+            {bulkResults.touched.length === 0 ? (
+              <p className="mt-1 text-[15px] text-purple-300/70 italic">Nothing could be divined.</p>
+            ) : (
+              <ul className="mt-1.5 space-y-1 max-h-40 overflow-y-auto pr-1">
+                {bulkResults.touched.map((t) => (
+                  <li key={t.id} className="text-sm text-purple-200/90">
+                    <span className="font-semibold">{t.title}</span>
+                    <span className="text-purple-400/70 italic"> — {t.tropes.join(", ")}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* stats */}
       <h3 className="ht-display text-xs uppercase tracking-widest text-purple-300/70 mb-2">Reading Chronicle</h3>
@@ -6145,6 +6255,11 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
   const isUnion = !!book.owners;
   const isMine  = isUnion ? !!book.mineBookId : true; // personal books are always mine
 
+  // "Divine tropes" — populates suggestions for the trope picker below; this
+  // confirm-first path never applies them itself (unlike the bulk backfill).
+  const [tropeSuggestions, setTropeSuggestions] = useState([]);
+  const [tropeBusy, setTropeBusy] = useState(false);
+
   // Buffered title/author/genres — edits stage here and only reach onUpdate
   // (and the DB) on Save & Close. The `key` at the render site resets this
   // state whenever a different book is opened. Read-only (!isMine) books
@@ -6343,7 +6458,21 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
                   <TropePicker
                     value={book.tropes || []}
                     onChange={(next) => onUpdate({ tropes: next })}
+                    suggested={tropeSuggestions}
                   />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setTropeBusy(true);
+                      const s = await suggestTropes(book.title, book.author);
+                      setTropeSuggestions(s);
+                      setTropeBusy(false);
+                    }}
+                    disabled={tropeBusy}
+                    className="ht-display mt-2 text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300 disabled:opacity-40"
+                  >
+                    {tropeBusy ? "Divining…" : "✨ Divine tropes"}
+                  </button>
                 </div>
 
                 <ProgressEditor book={book} onUpdate={onUpdate} />
@@ -6446,7 +6575,21 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
             <TropePicker
               value={book.tropes || []}
               onChange={(next) => onUpdate({ tropes: next })}
+              suggested={tropeSuggestions}
             />
+            <button
+              type="button"
+              onClick={async () => {
+                setTropeBusy(true);
+                const s = await suggestTropes(book.title, book.author);
+                setTropeSuggestions(s);
+                setTropeBusy(false);
+              }}
+              disabled={tropeBusy}
+              className="ht-display mt-2 text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300 disabled:opacity-40"
+            >
+              {tropeBusy ? "Divining…" : "✨ Divine tropes"}
+            </button>
           </div>
 
           <ProgressEditor book={book} onUpdate={onUpdate} />
