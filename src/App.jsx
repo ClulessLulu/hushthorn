@@ -406,6 +406,11 @@ const TROPE_CANON = new Map(TROPES.map((t) => [t.toLowerCase(), t]));
 // their selection on save would silently lose tags.
 const TROPE_MAX = 12;
 
+// How many tropes the AI may PROPOSE at once. The prompt asks for 0-6, but a
+// prompt is a request, not a guarantee — this is the enforced ceiling so a
+// chatty model can't bury the reader in suggestion chips.
+const TROPE_SUGGEST_MAX = 6;
+
 // The ONLY gate into `tropes`. Anything not in the vocabulary is dropped.
 function normalizeTropes(list, max = TROPE_MAX) {
   if (!Array.isArray(list)) return [];
@@ -4669,7 +4674,7 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
       });
       // Suggestions only: normalizeTropes drops anything off-vocabulary, and
       // nothing is written until the reader taps a chip (spec decision 2).
-      setSuggestedTropes(normalizeTropes(parsed.tropes));
+      setSuggestedTropes(normalizeTropes(parsed.tropes, TROPE_SUGGEST_MAX));
     } catch {
       /* quiet failure — the user can fill details by hand */
     } finally {
