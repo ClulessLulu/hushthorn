@@ -377,6 +377,23 @@ function cleanGenres(subjects, max = 3) {
 // min-width:auto, and flex-shrink-0 pins them at content width — with either of
 // those the row's overflow-hidden clips a long chip away entirely instead of
 // ellipsising it (QA BUG-001).
+/* ── staging marker ──────────────────────────────────────────
+   Two dev servers run side by side during QA (production on 5173, staging on
+   5174) and the app looks identical in both. This makes the staging one
+   unmistakable so nobody deletes a real book thinking it is throwaway data.
+   Renders ONLY under `vite --mode staging`; production builds never mount it,
+   so this is inert in prod. */
+function StagingBadge() {
+  if (import.meta.env.MODE !== "staging") return null;
+  return (
+    <div
+      className="fixed bottom-0 left-0 right-0 z-[60] text-center py-1 ht-display text-[10px] uppercase tracking-widest text-amber-100 bg-amber-900/90 border-t border-amber-400/50 pointer-events-none"
+    >
+      Staging &middot; throwaway data &middot; not your real archive
+    </div>
+  );
+}
+
 function GenreChips({ genres, max = 3, className = "", oneLine = false }) {
   if (!genres || genres.length === 0) return null;
   return (
@@ -1496,6 +1513,7 @@ function ArchiveLoading() {
     <div className="ht-bg ht-body" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <style>{FONT_CSS}</style>
       <div className="ht-frame" aria-hidden="true" />
+      <StagingBadge />
       <p className="ht-display text-purple-300/60 text-sm uppercase tracking-widest">Opening the archive…</p>
     </div>
   );
@@ -2219,6 +2237,7 @@ export default function Hushthorn() {
     <div className="ht-bg ht-body text-purple-100">
       <style>{FONT_CSS}</style>
       <div className="ht-frame" aria-hidden="true" />
+      <StagingBadge />
 
       {/* header */}
       <header className="max-w-5xl mx-auto px-5 pt-6 pb-3 text-center">
@@ -3102,6 +3121,7 @@ function UsernameGate({ session, suggested, onClaimed }) {
     <div className="ht-bg ht-body fixed inset-0 overflow-y-auto flex items-center justify-center p-4">
       <style>{FONT_CSS}</style>
       <div className="ht-frame" aria-hidden="true" />
+      <StagingBadge />
       <div className="ht-card rounded-xl p-8 w-full max-w-sm text-center" style={{ transform: 'none' }}>
         <Crown size={48} />
         <h1 className="ht-display text-xl text-pink-200 mt-2 mb-1">Choose your handle</h1>
@@ -4220,6 +4240,7 @@ function AuthPage() {
     <div className="ht-bg ht-body fixed inset-0 overflow-y-auto flex items-center justify-center p-4">
       <style>{FONT_CSS}</style>
       <div className="ht-frame" aria-hidden="true" />
+      <StagingBadge />
       <div className="ht-card rounded-xl p-8 w-full max-w-sm text-center" style={{ transform: 'none' }}>
         <Crown size={52} />
         <h1 className="ht-blackletter ht-glow text-5xl text-transparent bg-clip-text bg-gradient-to-b from-pink-200 via-fuchsia-300 to-fuchsia-500 mt-1 mb-1">
