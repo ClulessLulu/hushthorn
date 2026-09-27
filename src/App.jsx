@@ -459,6 +459,63 @@ function GenreChips({ genres, max = 3, className = "", oneLine = false }) {
   );
 }
 
+/* Toggle chips over the closed vocabulary. `suggested` are AI proposals shown
+   first and marked — they are NOT applied until tapped (the reader confirms).
+   "Show all" opens the full grouped list for manual tagging. */
+function TropePicker({ value = [], onChange, suggested = [] }) {
+  const [showAll, setShowAll] = useState(false);
+  const selected = new Set(value);
+  const quick = [...new Set([...value, ...suggested])];
+  const toggle = (t) => {
+    const next = selected.has(t) ? value.filter((v) => v !== t) : [...value, t];
+    onChange(normalizeTropes(next, TROPE_MAX));
+  };
+  const chip = (t, isSuggestion) => (
+    <button
+      key={t}
+      type="button"
+      onClick={() => toggle(t)}
+      aria-pressed={selected.has(t)}
+      className={`ht-display text-[9px] uppercase px-2 py-1 rounded-sm border transition-colors ${
+        selected.has(t)
+          ? "border-pink-400/70 bg-pink-500/30 text-pink-100"
+          : isSuggestion
+            ? "border-fuchsia-500/40 bg-purple-900/40 text-fuchsia-200/90 hover:bg-purple-800/60"
+            : "border-purple-500/40 bg-purple-950/50 text-purple-200/90 hover:bg-purple-900/60"
+      }`}
+    >
+      {t}
+    </button>
+  );
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1.5">
+        {quick.length === 0 && (
+          <span className="text-sm text-purple-400/60 italic">No tropes yet.</span>
+        )}
+        {quick.map((t) => chip(t, !selected.has(t)))}
+      </div>
+      <button
+        type="button"
+        onClick={() => setShowAll((v) => !v)}
+        className="ht-display mt-2 text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300"
+      >
+        {showAll ? "▴ Close the index" : "▾ Browse all tropes"}
+      </button>
+      {showAll && (
+        <div className="mt-2 space-y-2 max-h-56 overflow-y-auto pr-1">
+          {Object.entries(TROPE_GROUPS).map(([group, list]) => (
+            <div key={group}>
+              <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400/70 mb-1">{group}</p>
+              <div className="flex flex-wrap gap-1.5">{list.map((t) => chip(t, false))}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── covers ────────────────────────────────────────────────── */
 
 // Covers are fetched as bytes and rendered as data URLs so they can be cached
@@ -4407,9 +4464,10 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
   // also switches to the scan/review mode so the user sees the filled fields.
   const [manual, setManual] = useState(() =>
     seed
-      ? { title: seed.title || "", author: seed.author || "", coverUrl: seed.coverUrl || "", genres: seed.genres || [], pageCount: null }
-      : { title: "", author: "", coverUrl: "", genres: [], pageCount: null }
+      ? { title: seed.title || "", author: seed.author || "", coverUrl: seed.coverUrl || "", genres: seed.genres || [], tropes: normalizeTropes(seed.tropes), pageCount: null }
+      : { title: "", author: "", coverUrl: "", genres: [], tropes: [], pageCount: null }
   );
+  const [suggestedTropes, setSuggestedTropes] = useState([]);
   const [genreInput, setGenreInput] = useState("");
   const [scanning, setScanning] = useState(false);
   const [scanNotice, setScanNotice] = useState("");
@@ -4587,7 +4645,14 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
           max_tokens: 1000,
           messages: [{
             role: "user",
-            content: `For the book titled "${title.trim()}"${author?.trim() ? ` by ${author.trim()}` : ""}: identify the author (if you recognize the book) and its genres. If you don't recognize it, set author to null and infer plausible genres from the title. Respond with ONLY a valid JSON object, nothing else: {"author": string or null, "genres": array of 2 to 4 short genre strings}.`,
+            content: `For the book titled "${title.trim()}"${author?.trim() ? ` by ${author.trim()}` : ""}: identify the author (if you recognize the book), its genres, and its romance/fantasy tropes.
+
+Choose tropes ONLY from this exact list, copying the spelling verbatim:
+${TROPES.join(", ")}
+
+If you do not recognize the book, set author to null, infer plausible genres from the title, and return an EMPTY tropes array rather than guessing. Never invent a trope that is not on the list.
+
+Respond with ONLY a valid JSON object, nothing else: {"author": string or null, "genres": array of 2 to 4 short genre strings, "tropes": array of 0 to 6 strings from the list above}.`,
           }],
       });
       const parsed = parseClaudeJson(data, "{");
@@ -4602,6 +4667,9 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
           genres: [...m.genres, ...fresh].slice(0, 6),
         };
       });
+      // Suggestions only: normalizeTropes drops anything off-vocabulary, and
+      // nothing is written until the reader taps a chip (spec decision 2).
+      setSuggestedTropes(normalizeTropes(parsed.tropes));
     } catch {
       /* quiet failure — the user can fill details by hand */
     } finally {
@@ -4927,7 +4995,8 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
   };
 
   const scanAnother = () => {
-    setManual({ title: "", author: "", coverUrl: "", genres: [], pageCount: null });
+    setManual({ title: "", author: "", coverUrl: "", genres: [], tropes: [], pageCount: null });
+    setSuggestedTropes([]);
     setPhotoPreview(""); setOriginalPhotoSrc(""); setCoverChoice("api");
     setScanNotice("");
     cameraTriedRef.current = false;
@@ -4983,6 +5052,7 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
       year: null,
       coverUrl,
       genres: manual.genres.slice(0, 6),
+      tropes: manual.tropes,
       shelf,
       read: false,
       overall: 0,
@@ -5234,6 +5304,15 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
                 Add
               </button>
             </div>
+          </div>
+          {/* tropes: suggested by AI, confirmed by tapping */}
+          <div>
+            <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60 mb-1.5">Tropes</p>
+            <TropePicker
+              value={manual.tropes}
+              suggested={suggestedTropes}
+              onChange={(next) => setManual((m) => ({ ...m, tropes: next }))}
+            />
           </div>
           <div className="flex gap-2">
             <button onClick={() => addManual("owned")} disabled={!manual.title.trim()} className="ht-display flex-1 py-2 rounded-sm bg-indigo-500/70 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold uppercase">
@@ -6172,6 +6251,14 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
 
                 {editable}
 
+                <div className="mt-3">
+                  <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60 mb-1.5">Tropes</p>
+                  <TropePicker
+                    value={book.tropes || []}
+                    onChange={(next) => onUpdate({ tropes: next })}
+                  />
+                </div>
+
                 <ProgressEditor book={book} onUpdate={onUpdate} />
 
                 {/* Formats I have — editing my editions refreshes the union. */}
@@ -6266,6 +6353,14 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
           </div>
 
           <div className="mt-4">{editable}</div>
+
+          <div className="mt-3">
+            <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60 mb-1.5">Tropes</p>
+            <TropePicker
+              value={book.tropes || []}
+              onChange={(next) => onUpdate({ tropes: next })}
+            />
+          </div>
 
           <ProgressEditor book={book} onUpdate={onUpdate} />
 
