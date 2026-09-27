@@ -357,7 +357,14 @@ const GENRE_JUNK = /(accessible|protected|in library|large type|reading level|st
 // Fantasy". They are short, colon-free and not junk, so they passed every
 // filter intact — which is how raw publishing categories ended up as chips on
 // the cards. Split them, drop the generic qualifiers, keep the real leaves.
-const GENRE_GENERIC = /^(fiction|nonfiction|non-fiction|general|juvenile|young adult|adult|literary)$/i;
+const GENRE_GENERIC = /^(fiction|nonfiction|non-fiction|general|juvenile|young adult|adult)$/i;
+// Google Books headings carry the qualifier INSIDE the first segment
+// ("Young Adult Fiction / Fantasy"), so the whole-part test above never fires
+// and the raw heading eats one of only three chip slots. Strip the leading
+// audience qualifier so what remains ("Fiction") is caught as generic.
+// Deliberately NOT stripping a trailing "fiction": "Science Fiction" is a real
+// genre and must survive.
+const GENRE_LEAD_QUALIFIER = /^(young adult|juvenile|teen|children'?s)\s+/i;
 
 function cleanGenres(subjects, max = 3) {
   if (!Array.isArray(subjects)) return [];
@@ -368,13 +375,15 @@ function cleanGenres(subjects, max = 3) {
     // one heading can yield several usable genres
     const parts = s.includes(",") || s.includes("/") ? s.split(/[,/]/) : [s];
     for (const part of parts) {
-      const g = part.trim();
+      const g = part.trim().replace(GENRE_LEAD_QUALIFIER, "");
       if (!g || g.length > 28 || g.includes(":") || GENRE_JUNK.test(g)) continue;
       if (GENRE_GENERIC.test(g)) continue;
       const key = g.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push(g.charAt(0).toUpperCase() + g.slice(1).toLowerCase());
+      // Only the first letter is forced — lower-casing the tail mangled
+      // acronyms ("LGBTQ+" -> "Lgbtq+", "Sci-Fi" -> "Sci-fi").
+      out.push(g.charAt(0).toUpperCase() + g.slice(1));
       if (out.length >= max) return out;
     }
   }
@@ -437,6 +446,12 @@ function normalizeTropes(list, max = TROPE_MAX) {
   }
   return out;
 }
+
+// Guards the bulk backfill across mounts. `AvatarPage` unmounts when the
+// profile modal closes, but an in-flight run keeps writing from its closure —
+// without this, reopening the modal would offer the button again and a second
+// run would race the first over the same rows.
+let bulkTropeRunInFlight = false;
 
 // Tropes for a single known title. Returns [] on any failure or when Claude
 // doesn't recognise the book — callers must treat [] as "nothing to suggest",
@@ -1509,7 +1524,7 @@ function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery, availa
         className="bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400 w-44"
         aria-label="Search the shelves"
       />
-      {availableTropes.length > 0 && (
+      {(availableTropes.length > 0 || tropeFilter.length > 0) && (
         <div className="w-full flex flex-col items-center gap-1.5">
           <div className="flex items-center gap-2">
             <span className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60">Tropes</span>
@@ -1953,7 +1968,11 @@ export default function Hushthorn() {
         author: b.author,
         coverUrl: b.cover_url,
         genres: b.genres || [],
+        // `tropes` is the MERGED set across owners (display + filtering).
+        // `myTropes` is only what I tagged — the picker binds to this, so
+        // editing in an archive can never adopt a co-member's tags onto my row.
         tropes: b.tropes || [],
+        myTropes: b.tropes || [],
         formats: Array.from(new Set(myFormats)),
         mineBookId: b.id,
         read: !!b.read,
@@ -1983,6 +2002,7 @@ export default function Hushthorn() {
           coverUrl: s.cover_url,
           genres: s.genres || [],
           tropes: s.tropes || [],
+          myTropes: [],   // not my book; I have tagged nothing on it
           formats: [],
           mineBookId: undefined,
           read: false,
@@ -2004,7 +2024,8 @@ export default function Hushthorn() {
       // formats = union of every owner's formats.
       entry.formats = Array.from(new Set([...(entry.formats || []), ...ownerFormats]));
       // tropes = union of every owner's tropes — a merged card shows every
-      // trope either reader tagged (re-normalized: caps at 6, drops dupes).
+      // trope either reader tagged (re-normalized: dedupes, caps at TROPE_MAX).
+      // Deliberately does NOT touch `myTropes`: that stays my own tagging.
       entry.tropes = normalizeTropes([...(entry.tropes || []), ...(s.tropes || [])]);
       // recency = most recent addition across owners (ISO strings sort chronologically).
       if (s.created_at && (!entry.createdAt || s.created_at > entry.createdAt)) entry.createdAt = s.created_at;
@@ -2302,7 +2323,10 @@ export default function Hushthorn() {
     );
     if (Object.keys(dbPatch).length) {
       const { error } = await supabase.from('books').update(dbPatch).eq('id', id);
-      if (error) { console.error('updateBook:', error.message); return; }
+      // Returns false so callers can tell a failed write from a successful one.
+      // The bulk backfill depends on this: its review summary is the reader's
+      // only chance to catch a bad tag, so it must not list books it never wrote.
+      if (error) { console.error('updateBook:', error.message); return false; }
     }
     setBooks(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
     // Mirror onto the archive union too: a UnionBook keyed on this row (my copy)
@@ -2311,6 +2335,7 @@ export default function Hushthorn() {
     // today (the archive detail edits only marks/progress/hide, never shelf/formats).
     // If an archive entry ever edits shelf/formats, mirror into owners[] here too.
     setSharedBooks(prev => prev.map(b => b.mineBookId === id ? { ...b, ...patch } : b));
+    return true;
   };
 
   // Delete a personal book row (owner-only). Drop it from the personal shelf and
@@ -4213,37 +4238,60 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
   // confirm, so it reports everything it touched for review.
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkDone, setBulkDone] = useState(0);
+  const [bulkTotal, setBulkTotal] = useState(0);
+  const [bulkNagged, setBulkNagged] = useState(false);
   const [bulkResults, setBulkResults] = useState(null);
   const bulkStopRef = useRef(false);
 
   const untagged = books.filter((b) => !(b.tropes || []).length);
 
   const runBulkTropes = async () => {
-    if (!untagged.length) return;
+    if (!untagged.length || bulkTropeRunInFlight) return;
     if (!window.confirm(`Divine tropes for ${untagged.length} untagged tome${untagged.length === 1 ? "" : "s"}? Results are applied directly — you can review and correct them afterwards.`)) return;
+    // Snapshot the queue: `untagged` is recomputed from `books` on every render,
+    // so each successful write shrinks it. Iterating it live made the readout
+    // count down ("1 of 4", then "2 of 3"). The loop and the denominator both
+    // use this frozen list.
+    const queue = untagged;
+    bulkTropeRunInFlight = true;
     bulkStopRef.current = false;
     setBulkRunning(true);
+    setBulkTotal(queue.length);
     setBulkDone(0);
     const touched = [];
-    for (const b of untagged) {
-      if (bulkStopRef.current) break;
-      const tropes = await suggestTropes(b.title, b.author); // [] on failure
-      if (tropes.length) {
-        try {
-          await onUpdateBook(b.id, { tropes });
-          touched.push({ id: b.id, title: b.title, tropes });
-        } catch {
-          /* one book failing must not abort the run */
+    const failed = [];
+    try {
+      for (const b of queue) {
+        if (bulkStopRef.current) break;
+        const tropes = await suggestTropes(b.title, b.author); // [] on failure
+        if (tropes.length) {
+          // updateBook resolves false on a write error rather than throwing, so
+          // only a confirmed write may be reported as tagged.
+          const ok = await onUpdateBook(b.id, { tropes });
+          if (ok) touched.push({ id: b.id, title: b.title, tropes });
+          else failed.push({ id: b.id, title: b.title });
         }
+        setBulkDone((n) => n + 1);
       }
-      setBulkDone((n) => n + 1);
+    } finally {
+      bulkTropeRunInFlight = false;
+      setBulkRunning(false);
+      setBulkResults({ touched, failed, stopped: bulkStopRef.current });
     }
-    setBulkRunning(false);
-    setBulkResults({ touched, stopped: bulkStopRef.current });
   };
 
   return (
-    <Overlay onClose={onClose} label={VISAGE_ENABLED ? "The Visage" : "Your Profile"} wide>
+    <Overlay
+      onClose={() => {
+        // A run in flight keeps writing from its closure after this unmounts,
+        // with no progress readout and no Stop button. Make the reader stop it
+        // deliberately rather than losing sight of it.
+        if (bulkRunning) { setBulkNagged(true); return; }
+        onClose();
+      }}
+      label={VISAGE_ENABLED ? "The Visage" : "Your Profile"}
+      wide
+    >
       {VISAGE_ENABLED ? (
       <>
       <div className="flex items-start justify-between mb-1">
@@ -4411,12 +4459,17 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
           <>
             <p className="mt-1.5 text-[15px] text-purple-300/70 italic">
               {bulkRunning
-                ? `Divining… ${bulkDone} of ${untagged.length}`
+                ? `Divining… ${bulkDone} of ${bulkTotal}`
                 : `${untagged.length} tome${untagged.length === 1 ? "" : "s"} have no tropes yet.`}
             </p>
+            {bulkNagged && bulkRunning && (
+              <p className="mt-1.5 text-[15px] text-pink-200/90 italic">
+                Still divining — press Stop first, or let it finish.
+              </p>
+            )}
             <div className="mt-2 flex gap-2">
               {bulkRunning ? (
-                <button onClick={() => { bulkStopRef.current = true; }} className="ht-display px-3 py-2 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100 text-[10px] uppercase font-semibold">
+                <button onClick={() => { bulkStopRef.current = true; setBulkNagged(false); }} className="ht-display px-3 py-2 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100 text-[10px] uppercase font-semibold">
                   Stop
                 </button>
               ) : (
@@ -4430,7 +4483,8 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
         {bulkResults && (
           <div className="mt-3">
             <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60">
-              {bulkResults.stopped ? "Stopped early — " : ""}{bulkResults.touched.length} tagged · review below
+              {bulkResults.stopped ? "Stopped early — " : ""}{bulkResults.touched.length} tagged
+              {bulkResults.failed?.length ? ` · ${bulkResults.failed.length} could not be saved` : ""} · review below
             </p>
             {bulkResults.touched.length === 0 ? (
               <p className="mt-1 text-[15px] text-purple-300/70 italic">Nothing could be divined.</p>
@@ -6467,7 +6521,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
                 <div className="mt-3">
                   <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60 mb-1.5">Tropes</p>
                   <TropePicker
-                    value={book.tropes || []}
+                    value={book.myTropes || []}
                     onChange={(next) => onUpdate({ tropes: next })}
                     suggested={tropeSuggestions}
                   />
