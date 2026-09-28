@@ -483,7 +483,7 @@ const TROPE_GROUPS = {
   ],
   "Plot & Structure": [
     "Found Family", "Redemption Arc", "Revenge", "Trials/Tournament",
-    "Court Intrigue", "Heist", "Road Trip", "Betrayal", "Prophecy",
+    "Court Intrigue", "Heist", "Road Trip", "Betrayal", "Prophecy", "Dual POV",
   ],
   Heat: ["Closed Door", "Open Door", "Why Choose"],
 };
