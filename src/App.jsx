@@ -3219,16 +3219,23 @@ function OracleSection({ books, onAddToWishlist }) {
   const [recs, setRecs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [added, setAdded] = useState({});
   const [consulted, setConsulted] = useState(false);
 
   const ownedTitles = new Set(books.map((b) => b.title.toLowerCase()));
+
+  // Show five, hold the rest in reserve. A recommendation you add lands in
+  // `books` immediately (addBook updates state optimistically), so it drops out
+  // of this list on the next render and the next reserve slides up — that is
+  // the whole mechanism; no "added" bookkeeping to drift out of sync.
+  const ORACLE_VISIBLE = 5;
+  const visible = recs
+    .filter((r) => !ownedTitles.has((r.title || "").toLowerCase()))
+    .slice(0, ORACLE_VISIBLE);
 
   const consult = async () => {
     setLoading(true);
     setError("");
     setRecs([]);
-    setAdded({});
     try {
       const library = books.map((b) => ({
         title: b.title,
@@ -3245,14 +3252,14 @@ function OracleSection({ books, onAddToWishlist }) {
 Here is the user's current library as JSON. "shelf" is owned or wishlist, "verdict" is their 1-5 overall rating, "spicy" is their 1-5 spice rating (null means unrated):
 ${JSON.stringify(library)}
 
-Infer the genres, vibes, and spice preferences from this library, weighting highly-rated and wishlisted books most. Recommend exactly 5 real, published books that are NOT already in the library.
+Infer the genres, vibes, and spice preferences from this library, weighting highly-rated and wishlisted books most. Recommend exactly 10 real, published books that are NOT already in the library, best fit first.
 
 Respond with ONLY a valid JSON array and nothing else — no preamble, no markdown fences. Each element must have exactly these keys:
 "title" (string), "author" (string), "genre" (short string, e.g. "Vampire romantasy"), "reason" (one sentence explaining why it fits THIS library — reference their taste specifically), "spice" (integer 1-5, your estimate of its spice level).`;
 
       const data = await callClaude({
           model: "claude-sonnet-4-6",
-          max_tokens: 1000,
+          max_tokens: 1800,
           messages: [{ role: "user", content: prompt }],
       });
       const parsed = parseClaudeJson(data, "[");
@@ -3282,7 +3289,7 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
     }
   };
 
-  const addRec = (rec, idx) => {
+  const addRec = (rec) => {
     onAddToWishlist({
       title: rec.title,
       author: rec.author,
@@ -3295,7 +3302,6 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
       smut: 0,
       notes: [],
     });
-    setAdded((a) => ({ ...a, [idx]: true }));
   };
 
   return (
@@ -3323,10 +3329,9 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
       {error && <p className="text-center text-[15px] text-pink-300">{error}</p>}
 
       <div className="space-y-3">
-        {recs.map((r, idx) => {
-          const alreadyHave = ownedTitles.has(r.title.toLowerCase());
+        {visible.map((r) => {
           return (
-            <div key={idx} className="ht-card rounded-md p-3.5 flex gap-3.5">
+            <div key={`${r.title}|${r.author}`} className="ht-card rounded-md p-3.5 flex gap-3.5">
               <div className="w-16 h-24 rounded-sm overflow-hidden bg-purple-950/60 flex-shrink-0 flex items-center justify-center">
                 <CoverImage
                   src={r.coverUrl}
@@ -3352,11 +3357,10 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
                     <Meter value={Math.max(0, Math.min(5, r.spice || 0))} Icon={Candle} label="Predicted smoulder" readOnly size={13} />
                   </div>
                   <button
-                    onClick={() => addRec(r, idx)}
-                    disabled={added[idx] || alreadyHave}
-                    className="ht-display text-[10px] uppercase px-3 py-1 rounded-sm bg-pink-500/40 hover:bg-pink-500/70 disabled:opacity-50 disabled:hover:bg-pink-500/40 text-pink-100"
+                    onClick={() => addRec(r)}
+                    className="ht-display text-[10px] uppercase px-3 py-1 rounded-sm bg-pink-500/40 hover:bg-pink-500/70 text-pink-100"
                   >
-                    {alreadyHave ? "In your archive" : added[idx] ? "Added ✓" : "+ Wishlist"}
+                    + Wishlist
                   </button>
                 </div>
               </div>
@@ -3365,9 +3369,15 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
         })}
       </div>
 
-      {consulted && recs.length > 0 && (
+      {consulted && visible.length > 0 && (
         <p className="mt-5 text-center text-sm text-purple-400/60 italic">
           The Oracle estimates each Smoulder rating — your own judgment, as always, is final.
+        </p>
+      )}
+
+      {consulted && !loading && visible.length === 0 && (
+        <p className="mt-5 text-center text-[15px] text-purple-300/70 italic">
+          The Oracle has given all it saw — consult again for a fresh reading.
         </p>
       )}
     </div>
