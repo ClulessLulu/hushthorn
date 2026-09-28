@@ -2749,7 +2749,11 @@ export default function Hushthorn() {
                   key={b.id || b.key}
                   onClick={() => setActiveId(openId)}
                   title={tip}
-                  className="ht-card rounded-md p-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
+                  // flex-col is load-bearing: a <button> centres its content
+                  // vertically, and as a grid item it stretches to the row's
+                  // height — so a card with less content had its whole contents
+                  // pushed down by half the slack, misaligning the row.
+                  className="ht-card rounded-md p-3 text-left flex flex-col focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
                 >
                   <div className={`ht-tome ht-tome-lift ${b.shelf === "wishlist" ? "ht-tome-ghost" : ""}`}>
                     <div className="ht-tome-cover aspect-[2/3] bg-purple-950/60 flex items-center justify-center">
@@ -2771,9 +2775,17 @@ export default function Hushthorn() {
                       <span className="ht-rail ht-rail-audio" aria-hidden="true" style={{ height: `${audioPct}%` }} />
                     )}
                   </div>
-                  <h3 className="mt-2 text-[15px] font-semibold leading-tight line-clamp-2 break-words">{b.title}</h3>
+                  {/* Title and genre row both RESERVE their space, so a
+                      one-line title or a book with no genres doesn't pull the
+                      meters and badges up and leave the row ragged. Title is
+                      clamped to 2 lines and always occupies 2; the genre row
+                      always occupies one chip's height (20px, measured) even
+                      when empty. */}
+                  <h3 className="mt-2 text-[15px] font-semibold leading-tight line-clamp-2 break-words min-h-[2.5em]">{b.title}</h3>
                   <p className="text-sm text-purple-300/70 line-clamp-1 italic">{b.author}</p>
-                  <GenreChips genres={b.genres} max={2} className="mt-1" oneLine />
+                  <div className="mt-1 min-h-[1.25rem]">
+                    <GenreChips genres={b.genres} max={2} oneLine />
+                  </div>
 
                   {isUnion ? (
                     /* Archive card: WhoHasIt compact + owner count badge */
