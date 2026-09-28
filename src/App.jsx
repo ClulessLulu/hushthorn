@@ -6437,19 +6437,20 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
   // never see the editable card or the save bar, so isDirty is gated on isMine.
   // Buffered edit-details fields ONLY. Reading progress saves instantly (like
   // ratings/toggles) — it is NOT part of the buffer or the save bar.
+  // Genres save instantly (like tropes, ratings, progress) — only title/author
+  // stay buffered, because a rename needs the duplicate-title check below
+  // before it can commit. Genres carry no such collision risk.
   const [buf, setBuf] = useState({
     title: book.title || "",
     author: book.author || "",
-    genres: book.genres || [],
   });
   const [genreInput, setGenreInput] = useState("");
   const [titleErr, setTitleErr] = useState("");
   const isDirty = isMine && (
     buf.title !== (book.title || "") ||
-    buf.author !== (book.author || "") ||
-    JSON.stringify(buf.genres) !== JSON.stringify(book.genres || [])
+    buf.author !== (book.author || "")
   );
-  const discard = () => { setBuf({ title: book.title || "", author: book.author || "", genres: book.genres || [] }); setGenreInput(""); };
+  const discard = () => { setBuf({ title: book.title || "", author: book.author || "" }); setGenreInput(""); };
   const saveAndClose = () => {
     const t = buf.title.trim();
     // Hard-block a rename that collides with another of my books (unique by
@@ -6464,19 +6465,22 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
     const patch = {};
     if (t !== (book.title || "")) patch.title = t || (book.title || ""); // blank-title guard
     if (buf.author.trim() !== (book.author || "")) patch.author = buf.author.trim();
-    if (JSON.stringify(buf.genres) !== JSON.stringify(book.genres || [])) patch.genres = buf.genres;
     if (Object.keys(patch).length) onUpdate(patch);
     onClose();
   };
   const addGenre = (raw = genreInput) => {
     const g = canonicalGenre(raw);
-    if (!g || buf.genres.some((x) => x.toLowerCase() === g.toLowerCase())) return;
-    setBuf((b) => ({ ...b, genres: [...b.genres, g].slice(0, 6) }));
+    const current = book.genres || [];
+    if (!g || current.some((x) => x.toLowerCase() === g.toLowerCase())) return;
+    onUpdate({ genres: [...current, g].slice(0, 6) });
     setGenreInput("");
   };
-  const removeGenre = (g) => setBuf((b) => ({ ...b, genres: b.genres.filter((x) => x !== g) }));
+  const removeGenre = (g) => onUpdate({ genres: (book.genres || []).filter((x) => x !== g) });
 
-  // Editable details card — title/author/genres staged in `buf`. Read-only
+  // Editable details card. Title/author stage in `buf` and commit on Save &
+  // Close (title needs the duplicate check below before it can write). Genres
+  // save instantly on add/remove, same as the trope picker just below this
+  // card — nothing about genres feeds the save bar or `isDirty`. Read-only
   // books (!isMine) get neither this card nor the save bar.
   const editable = isMine ? (
     <div className={`ht-card rounded-md p-4 space-y-3 ${isDirty ? "!border-pink-400/50" : ""}`}>
@@ -6503,9 +6507,9 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
       />
       <div className="space-y-1.5">
         <span className="ht-display text-[10px] uppercase text-purple-300 font-semibold">Genres</span>
-        {buf.genres.length > 0 && (
+        {(book.genres || []).length > 0 && (
           <div className="flex gap-1.5 flex-wrap">
-            {buf.genres.map((g) => (
+            {(book.genres || []).map((g) => (
               <span key={g} className="ht-display text-[9px] uppercase pl-1.5 pr-1 py-0.5 rounded-sm border border-purple-500/40 bg-purple-900/40 text-purple-200/90 flex items-center gap-1">
                 {g}
                 <button onClick={() => removeGenre(g)} aria-label={`Remove genre ${g}`} className="text-purple-400 hover:text-pink-300 px-0.5">✕</button>
@@ -6518,7 +6522,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
             value={genreInput}
             onChange={setGenreInput}
             onCommit={addGenre}
-            exclude={buf.genres}
+            exclude={book.genres || []}
             placeholder="Add a genre…"
           />
           <button onClick={() => addGenre()} disabled={!genreInput.trim()} className="ht-display text-[10px] uppercase px-3 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100">
