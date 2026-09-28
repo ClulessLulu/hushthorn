@@ -390,6 +390,78 @@ function cleanGenres(subjects, max = 3) {
   return out;
 }
 
+/* ── genres ─────────────────────────────────────────────────
+   A SUGGESTION list, deliberately not closed: you can still commit a genre
+   that isn't here. What it does guarantee is spelling — `canonicalGenre`
+   snaps a case-insensitive match onto the canonical form, so typing
+   "dark romance" joins "Dark Romance" instead of forking a second entry.
+   (The real library had Dark Romance x3 and Dark romance x2 before this.) */
+const GENRES = [
+  "Romance", "Romantasy", "Fantasy", "Dark Romance", "Dark Fantasy",
+  "Fantasy Romance", "Paranormal Romance", "Contemporary Romance",
+  "Historical Romance", "Romantic Suspense", "Erotica", "Urban Fantasy",
+  "Epic Fantasy", "High Fantasy", "Fae Fantasy", "Vampire Romance",
+  "Shifter Romance", "Monster Romance", "Reverse Harem", "Bully Romance",
+  "Sports Romance", "Small Town Romance", "Dark Academia", "New Adult",
+  "Young Adult", "Fairy Tale Retelling", "Mythology Retelling",
+  "Magical Realism", "Gothic", "Horror", "Thriller", "Mystery",
+  "Crime Fiction", "Science Fiction", "Dystopian", "Steampunk",
+  "Adventure", "Literary Fiction", "Contemporary", "Feminist Fiction",
+];
+
+// Snap to a known spelling when one matches case-insensitively; otherwise keep
+// what was typed. Free text is allowed — only the casing is normalised.
+function canonicalGenre(input, known = GENRES) {
+  const g = (input || "").trim();
+  if (!g) return "";
+  return known.find((k) => k.toLowerCase() === g.toLowerCase()) || g;
+}
+
+// Text input with a matching-as-you-type dropdown over GENRES. Committing is
+// still free-form: Enter or Add takes whatever is typed (canonicalised).
+function GenreSuggestInput({ value, onChange, onCommit, exclude = [], placeholder, disabled }) {
+  const [open, setOpen] = useState(false);
+  const q = value.trim().toLowerCase();
+  const taken = new Set(exclude.map((g) => g.toLowerCase()));
+  const matches = q
+    ? GENRES.filter((g) => g.toLowerCase().includes(q) && !taken.has(g.toLowerCase())).slice(0, 6)
+    : [];
+  return (
+    <div className="relative flex-1">
+      <input
+        value={value}
+        disabled={disabled}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        // blur is delayed so a click on a suggestion lands before the list closes
+        onBlur={() => setTimeout(() => setOpen(false), 120)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === ",") { e.preventDefault(); setOpen(false); onCommit(value); }
+          if (e.key === "Escape") setOpen(false);
+        }}
+        placeholder={placeholder}
+        className="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400 disabled:opacity-50"
+      />
+      {open && matches.length > 0 && (
+        <ul className="absolute z-30 left-0 right-0 mt-1 max-h-44 overflow-y-auto rounded-sm border border-purple-700/60 bg-[#160d28] shadow-lg">
+          {matches.map((g) => (
+            <li key={g}>
+              <button
+                type="button"
+                // onMouseDown beats the input's blur, so the click always registers
+                onMouseDown={(e) => { e.preventDefault(); setOpen(false); onCommit(g); }}
+                className="w-full text-left px-3 py-1.5 text-sm text-purple-100 hover:bg-purple-800/60"
+              >
+                {g}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /* ── tropes ─────────────────────────────────────────────────
    A CLOSED vocabulary. Filtering only works if every book spells a trope the
    same way, so free text is never stored: `normalizeTropes` maps whatever it
@@ -5292,8 +5364,8 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
     scanCover(dataUrl);
   };
 
-  const addGenre = () => {
-    const g = genreInput.trim();
+  const addGenre = (raw = genreInput) => {
+    const g = canonicalGenre(raw);
     if (!g) return;
     setManual((m) => {
       if (m.genres.some((x) => x.toLowerCase() === g.toLowerCase())) return m;
@@ -5567,14 +5639,14 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
               </div>
             )}
             <div className="flex gap-2">
-              <input
+              <GenreSuggestInput
                 value={genreInput}
-                onChange={(e) => setGenreInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addGenre(); } }}
+                onChange={setGenreInput}
+                onCommit={addGenre}
+                exclude={manual.genres}
                 placeholder={manual.title.trim() ? "Add a genre…" : "Inscribe a title first, then divine or add genres"}
-                className="flex-1 bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400"
               />
-              <button onClick={addGenre} disabled={!genreInput.trim()} className="ht-display text-[10px] uppercase px-3 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100">
+              <button onClick={() => addGenre()} disabled={!genreInput.trim()} className="ht-display text-[10px] uppercase px-3 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100">
                 Add
               </button>
             </div>
@@ -6374,8 +6446,8 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
     if (Object.keys(patch).length) onUpdate(patch);
     onClose();
   };
-  const addGenre = () => {
-    const g = genreInput.trim();
+  const addGenre = (raw = genreInput) => {
+    const g = canonicalGenre(raw);
     if (!g || buf.genres.some((x) => x.toLowerCase() === g.toLowerCase())) return;
     setBuf((b) => ({ ...b, genres: [...b.genres, g].slice(0, 6) }));
     setGenreInput("");
@@ -6420,14 +6492,14 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
           </div>
         )}
         <div className="flex gap-2">
-          <input
+          <GenreSuggestInput
             value={genreInput}
-            onChange={(e) => setGenreInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addGenre(); } }}
+            onChange={setGenreInput}
+            onCommit={addGenre}
+            exclude={buf.genres}
             placeholder="Add a genre…"
-            className="flex-1 bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400"
           />
-          <button onClick={addGenre} disabled={!genreInput.trim()} className="ht-display text-[10px] uppercase px-3 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100">
+          <button onClick={() => addGenre()} disabled={!genreInput.trim()} className="ht-display text-[10px] uppercase px-3 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100">
             Add
           </button>
         </div>
