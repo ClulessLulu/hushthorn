@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hushthorn — The Nave at 1,000+ Tomes</title>
+<script src="./support.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Rozha+One&family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  body{margin:0;font-family:'EB Garamond',Georgia,serif;background:#07050d;}
+  a{color:#d8d2ea;}a:hover{color:#f1d58f;}
+  .sc{font-family:'Cinzel',Georgia,serif;letter-spacing:2px;text-transform:uppercase;}
+  .seg{display:inline-flex;border:1px solid rgba(201,205,216,0.28);border-radius:2px;overflow:hidden;}
+  .seg button{appearance:none;min-height:44px;padding:0 16px;border:none;background:rgba(14,10,28,0.7);color:#b7b0cf;font-family:'Cinzel',Georgia,serif;font-size:10.5px;letter-spacing:1.6px;text-transform:uppercase;}
+  .seg button.on{background:linear-gradient(180deg, rgba(226,103,176,0.45), rgba(91,124,230,0.3));color:#fff3fa;}
+  .wood{background:repeating-linear-gradient(90deg, rgba(255,255,255,0.022) 0 1px, transparent 1px 6px, rgba(0,0,0,0.18) 6px 7px, transparent 7px 11px), linear-gradient(180deg, #2a1834 0%, #1a0f22 50%, #120a18 100%);}
+  .flute{background:repeating-linear-gradient(90deg, #170d1e 0 3px, #2e1c3a 3px 7px, #1f1228 7px 9px);}
+  .plank{height:12px;background:linear-gradient(180deg, #3a2448 0%, #26163a 45%, #160c20 100%);border-top:1px solid rgba(232,200,119,0.6);box-shadow:0 8px 14px rgba(0,0,0,0.6);}
+  .sp{position:relative;flex-shrink:0;border-radius:2px 2px 1px 1px;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.05), 0 6px 10px rgba(0,0,0,0.55);}
+  .band{position:absolute;left:0;right:0;height:2px;opacity:0.9;}
+  .gilt{position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1px rgba(232,200,119,0.55);}
+  .dot{position:absolute;top:12px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;}
+  .foot{position:absolute;left:0;right:0;bottom:0;height:4px;}
+  .rail-btn{appearance:none;cursor:pointer;width:44px;height:40px;border:none;background:transparent;font-family:'Cinzel',Georgia,serif;font-size:13px;font-weight:600;color:#b7b0cf;}
+  .rail-btn.on{color:#fff3fa;background:linear-gradient(180deg, rgba(226,103,176,0.45), rgba(91,124,230,0.3));border:1px solid #e8c877;border-radius:2px;box-shadow:0 0 14px rgba(226,103,176,0.45);}
+  .rail-btn.off{color:#4d4663;cursor:default;}
+  .mini{position:relative;width:118px;height:34px;box-sizing:border-box;border:1px solid rgba(201,205,216,0.25);border-radius:30px 30px 2px 2px;background:linear-gradient(180deg,#24142e,#130b1a);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',Georgia,serif;font-size:10px;letter-spacing:1px;color:#8f88a8;}
+  .mini.lit{color:#f7d6ea;border-color:rgba(232,200,119,0.6);}
+  .flame{animation:flicker 2.4s ease-in-out infinite;}
+  @keyframes flicker{0%,100%{opacity:1;}40%{opacity:0.8;}70%{opacity:0.75;}}
+  @media (prefers-reduced-motion: reduce){.flame{animation:none;}}
+</style>
+</helmet>
+
+<div style="width:1440px; height:1500px; position:relative; overflow:hidden; box-sizing:border-box; color:#e9e4f7; background: radial-gradient(ellipse 900px 500px at 50% 0%, rgba(226,103,176,0.16), transparent 70%), radial-gradient(ellipse 1000px 800px at 50% 60%, rgba(60,76,200,0.12), transparent 70%), linear-gradient(180deg, #0b0716 0%, #0d0a22 50%, #07050d 100%);">
+
+  <!-- condensed header once the reader has scrolled into the nave -->
+  <div style="height:96px; display:flex; align-items:center; justify-content:space-between; padding:0 56px; border-bottom:1px solid rgba(232,200,119,0.25); background:linear-gradient(180deg, rgba(20,12,34,0.95), rgba(12,8,22,0.9));">
+    <div style="font-family:'Rozha One',Georgia,serif; font-size:32px; background:linear-gradient(180deg,#ffd3ec,#a58cf0); -webkit-background-clip:text; background-clip:text; color:transparent;">Hushthorn</div>
+    <div style="font-family:'Rozha One',Georgia,serif; font-size:13px; letter-spacing:3px; text-transform:uppercase; color:#b7b0cf;">My Library <span style="color:#e8c877; margin:0 8px;">✦</span> 1,048 Tomes <span style="color:#e8c877; margin:0 8px;">✦</span> 312 Read</div>
+    <div class="seg" role="group" aria-label="Shelf view">
+      <button type="button">Covers</button>
+      <button type="button" class="on">Spines</button>
+    </div>
+  </div>
+
+  <div style="display:flex; gap:40px; padding:36px 56px 0 56px; box-sizing:border-box;">
+
+    <!-- minimap of the whole nave -->
+    <nav aria-label="Nave overview" style="width:150px; flex-shrink:0;">
+      <div class="sc" style="font-size:9.5px; color:#e8c877;">The Nave</div>
+      <div style="font-style:italic; font-size:13.5px; color:#8f88a8; margin-top:2px;">20 bookcases</div>
+      <div style="position:relative; display:flex; flex-direction:column; gap:6px; margin-top:14px;">
+        <sc-for list="{{minimap}}" as="m" hint-placeholder-count="20">
+          <div class="{{m.cls}}">{{m.label}}</div>
+        </sc-for>
+        <div style="position:absolute; left:-8px; top:240px; width:134px; height:116px; border:1px solid #f59ad0; border-radius:2px; box-shadow:0 0 12px rgba(226,103,176,0.5); pointer-events:none;"></div>
+        <div style="margin-top:8px; text-align:center; font-family:'Cinzel',Georgia,serif; font-size:10px; letter-spacing:1.4px; color:#f1d58f;">THE APSE</div>
+        <div style="text-align:center; font-style:italic; font-size:12.5px; color:#8f88a8;">where the nave ends</div>
+      </div>
+    </nav>
+
+    <!-- viewport into the nave -->
+    <div style="position:relative; width:880px; height:1330px; overflow:hidden; flex-shrink:0;">
+      <div style="position:absolute; left:0; right:0; top:-330px; display:flex; flex-direction:column; align-items:center; gap:44px;">
+        <sc-for list="{{bays}}" as="bay" hint-placeholder-count="3">
+          <section aria-label="{{bay.aria}}" style="width:800px;">
+            <!-- arch crown -->
+            <div style="position:relative; height:120px;">
+              <svg width="800" height="120" viewBox="0 0 800 120" fill="none" style="position:absolute; inset:0;" aria-hidden="true">
+                <path d="M30 120 L30 84 Q30 30 400 8 Q770 30 770 84 L770 120 Z" fill="#1f1228" stroke="#c9a15a" stroke-width="1.6"/>
+                <path d="M50 120 L50 90 Q50 44 400 26 Q750 44 750 90 L750 120 Z" fill="#0b0613" stroke="#c9cdd8" stroke-opacity="0.4"/>
+                <circle cx="400" cy="72" r="34" fill="#0a0612" stroke="#c9cdd8" stroke-width="1.4"/>
+                <circle cx="400" cy="72" r="28" fill="url(#g{{bay.n}})" opacity="0.95"/>
+                <circle cx="400" cy="72" r="8" fill="#3a58c8" stroke="#e8c877"/>
+                <path d="M0 120 L0 60 L15 20 L30 60 L30 120 Z M770 120 L770 60 L785 20 L800 60 L800 120 Z" fill="#1c1022" stroke="#c9a15a" stroke-width="1"/>
+                <defs><radialGradient id="g{{bay.n}}"><stop offset="0" stop-color="#f59ad0"/><stop offset="0.55" stop-color="#9a63e0"/><stop offset="1" stop-color="#3f5fd0"/></radialGradient></defs>
+              </svg>
+              <div class="sc" style="position:absolute; left:50%; bottom:2px; translate:-50% 0; padding:4px 14px; font-size:10px; color:#fbeedc; border:1px solid rgba(232,200,119,0.6); border-radius:2px; background:rgba(20,12,34,0.95); white-space:nowrap;">{{bay.plaque}}</div>
+            </div>
+            <!-- body -->
+            <div class="wood" style="position:relative; display:flex;">
+              <div class="flute" style="width:30px; flex-shrink:0; border-right:1px solid rgba(201,205,216,0.2); display:flex; flex-direction:column; align-items:center; justify-content:space-around;">
+                <sc-for list="{{bay.sconces}}" as="x" hint-placeholder-count="3">
+                  <svg class="flame" width="10" height="14" viewBox="0 0 14 18" aria-hidden="true" style="filter: drop-shadow(0 0 6px rgba(255,190,140,0.9));"><path d="M7 0 C7 4 2 6 2 11 C2 14.5 4.5 17 7 17 C9.5 17 12 14.5 12 11 C12 6 7 4 7 0Z" fill="#ffb38a"/></svg>
+                </sc-for>
+              </div>
+              <div style="flex:1; background:radial-gradient(ellipse 60% 40% at 50% 0%, rgba(91,124,230,0.14), transparent 70%), #0c0714; box-shadow:inset 0 0 30px rgba(0,0,0,0.85);">
+                <sc-for list="{{bay.shelves}}" as="shelf" hint-placeholder-count="3">
+                  <div style="height:150px; display:flex; align-items:flex-end; gap:2px; padding:0 10px; box-sizing:border-box; position:relative;">
+                    <sc-for list="{{shelf.spines}}" as="b" hint-placeholder-count="24">
+                      <div class="sp" style="width:{{b.w}}px; height:{{b.h}}px; background:{{b.bg}}; transform:{{b.rot}}; margin:0 {{b.mx}}px;">
+                        <div class="band" style="top:6px; background:{{b.foil}};"></div>
+                        <div class="dot" style="background:{{b.dot}};"></div>
+                        <div class="foot" style="background:{{b.foot}};"></div>
+                        <sc-if value="{{b.read}}" hint-placeholder-val="{{false}}"><div class="gilt"></div></sc-if>
+                      </div>
+                    </sc-for>
+                    <sc-if value="{{shelf.roses}}" hint-placeholder-val="{{false}}">
+                      <svg width="40" height="66" viewBox="0 0 60 100" fill="none" style="margin-left:8px; flex-shrink:0; filter: drop-shadow(0 0 8px rgba(226,103,176,0.45));" aria-hidden="true">
+                        <path d="M30 62 C28 45 22 35 18 24 M30 62 C31 44 32 30 31 16 M30 62 C33 46 40 36 44 28" stroke="#2c5a50" stroke-width="1.6"/>
+                        <circle cx="18" cy="24" r="7" fill="#e267b0"/><circle cx="31" cy="15" r="8" fill="#e267b0"/><circle cx="44" cy="28" r="6.5" fill="#e267b0"/>
+                        <circle cx="18" cy="24" r="4.5" fill="#f59ad0"/><circle cx="31" cy="15" r="5" fill="#f59ad0"/><circle cx="44" cy="28" r="4" fill="#f59ad0"/>
+                        <path d="M16 62 L44 62 L40 84 Q30 92 20 84 Z" fill="#c9cdd8"/><rect x="20" y="92" width="20" height="6" rx="1.5" fill="#dfe3ee"/>
+                      </svg>
+                    </sc-if>
+                    <sc-if value="{{shelf.cat}}" hint-placeholder-val="{{false}}">
+                      <svg width="44" height="32" viewBox="0 0 44 32" fill="none" style="position:absolute; left:{{shelf.catX}}px; bottom:0; overflow:visible;" aria-label="Your familiar patrols the bookcase in view">
+                        <path d="M9 19 C3 17 1 11 4 4" stroke="#0a0710" stroke-width="3" stroke-linecap="round"/>
+                        <rect x="12" y="22" width="2.6" height="8" rx="1.2" fill="#0a0710"/><rect x="16" y="22" width="2.6" height="8" rx="1.2" fill="#0a0710"/><rect x="27" y="22" width="2.6" height="8" rx="1.2" fill="#0a0710"/><rect x="31" y="22" width="2.6" height="8" rx="1.2" fill="#0a0710"/>
+                        <ellipse cx="22" cy="19" rx="13" ry="6.5" fill="#0a0710" stroke="rgba(226,103,176,0.6)" stroke-width="0.7"/>
+                        <circle cx="35" cy="12" r="6.2" fill="#0a0710" stroke="rgba(226,103,176,0.6)" stroke-width="0.7"/>
+                        <path d="M30.5 8.5 L31.5 1.8 L34.5 6.6 Z M36 6.4 L39.2 1.8 L40.2 8.6 Z" fill="#0a0710" stroke="rgba(226,103,176,0.6)" stroke-width="0.6"/>
+                        <ellipse cx="33.6" cy="11.4" rx="1.2" ry="1.5" fill="#ff8fd2"/><ellipse cx="37.4" cy="11.4" rx="1.2" ry="1.5" fill="#ff8fd2"/>
+                      </svg>
+                    </sc-if>
+                  </div>
+                  <div class="plank"></div>
+                </sc-for>
+              </div>
+              <div class="flute" style="width:30px; flex-shrink:0; border-left:1px solid rgba(201,205,216,0.2); display:flex; flex-direction:column; align-items:center; justify-content:space-around;">
+                <sc-for list="{{bay.sconces}}" as="x" hint-placeholder-count="3">
+                  <svg class="flame" width="10" height="14" viewBox="0 0 14 18" aria-hidden="true" style="filter: drop-shadow(0 0 6px rgba(255,190,140,0.9));"><path d="M7 0 C7 4 2 6 2 11 C2 14.5 4.5 17 7 17 C9.5 17 12 14.5 12 11 C12 6 7 4 7 0Z" fill="#ffb38a"/></svg>
+                </sc-for>
+              </div>
+            </div>
+            <div class="wood" style="height:22px; border-top:2px solid rgba(232,200,119,0.55);"></div>
+          </section>
+        </sc-for>
+      </div>
+      <div style="position:absolute; left:0; right:0; top:0; height:90px; background:linear-gradient(180deg, #0b0716, transparent); pointer-events:none;"></div>
+      <div style="position:absolute; left:0; right:0; bottom:0; height:120px; background:linear-gradient(0deg, #07050d, transparent); pointer-events:none;"></div>
+    </div>
+
+    <!-- A–Z jump rail -->
+    <nav aria-label="Jump to letter" style="width:60px; flex-shrink:0; display:flex; flex-direction:column; align-items:center;">
+      <div class="sc" style="font-size:9px; color:#e8c877; margin-bottom:8px;">Jump</div>
+      <sc-for list="{{letters}}" as="l" hint-placeholder-count="26">
+        <button type="button" class="{{l.cls}}" aria-label="{{l.aria}}">{{l.ch}}</button>
+      </sc-for>
+    </nav>
+
+    <div style="width:110px; padding-top:540px;">
+      <div class="sc" style="font-size:9.5px; color:#e8c877;">Bookcase</div>
+      <div style="font-family:'Rozha One',Georgia,serif; font-size:40px; line-height:1.1; color:#f7d6ea;">VIII</div>
+      <div style="font-style:italic; font-size:14px; color:#a9a2c2;">of 20 · He – Ho</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  rng(seed) {
+    let x = seed >>> 0;
+    return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+  }
+
+  renderVals() {
+    const tones = [['#1f2458','#0b0d26'],['#35307a','#15133d'],['#5b2a8c','#261043'],['#702463','#300e2b'],['#a4417c','#521a40'],['#8458b8','#3b2260'],['#1d1624','#07050b'],['#2b4f95','#10214a'],['#c0588f','#6a2350']];
+    const GOLD = 'linear-gradient(90deg, #7a5a22, #f3dc9a, #7a5a22)';
+    const SILVER = 'linear-gradient(90deg, #5d6172, #f2f4fa, #5d6172)';
+    const roman = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV','XVI','XVII','XVIII','XIX','XX'];
+
+    const shelfOf = (seed, roses, cat) => {
+      const r = this.rng(seed);
+      const n = roses ? 22 : 25;
+      const spines = [];
+      for (let i = 0; i < n; i++) {
+        const t = tones[Math.floor(r() * tones.length)];
+        const rot = r() < 0.07 ? (r() < 0.5 ? -2.5 : 2) : 0;
+        const read = r() < 0.3;
+        const v = r();
+        spines.push({
+          w: 20 + Math.floor(r() * 9),
+          h: 108 + Math.floor(r() * 36),
+          rot: rot ? 'rotate(' + rot + 'deg)' : 'none',
+          mx: rot ? 3 : 0,
+          bg: 'linear-gradient(90deg, rgba(0,0,0,0.45) 0%, rgba(255,255,255,0.10) 22%, rgba(0,0,0,0.5) 100%), linear-gradient(180deg, ' + t[0] + ', ' + t[1] + ')',
+          foil: r() < 0.33 ? SILVER : GOLD,
+          read: read,
+          dot: read ? (v < 0.35 ? '#e8c877' : '#b9c3f5') : 'rgba(255,255,255,0.15)',
+          foot: read && v < 0.6 ? 'rgba(244,114,182,' + (0.35 + v).toFixed(2) + ')' : 'rgba(255,255,255,0.08)'
+        });
+      }
+      return { spines: spines, roses: roses, cat: cat, catX: 360 };
+    };
+
+    const ranges = { 7: 'Gi – He', 8: 'He – Ho', 9: 'Ho – In' };
+    const bays = [7, 8, 9].map((n) => ({
+      n: n,
+      plaque: 'Bookcase ' + roman[n - 1] + ' · ' + ranges[n],
+      aria: 'Bookcase ' + roman[n - 1] + ', titles ' + ranges[n],
+      sconces: [1, 2, 3],
+      shelves: [0, 1, 2].map((k) => shelfOf(n * 97 + k * 13, n === 8 && k === 1, n === 8 && k === 0))
+    }));
+
+    const minimap = roman.map((r, i) => ({ label: r, cls: i >= 6 && i <= 8 ? 'mini lit' : 'mini' }));
+    const empty = { Q: true, X: true, Z: true };
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map((ch) => ({
+      ch: ch,
+      cls: ch === 'H' ? 'rail-btn on' : (empty[ch] ? 'rail-btn off' : 'rail-btn'),
+      aria: empty[ch] ? 'No titles under ' + ch : 'Jump to ' + ch
+    }));
+
+    return { bays: bays, minimap: minimap, letters: letters };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,1151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hushthorn — Cathedral Library</title>
+<script src="./support.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Cinzel+Decorative:wght@700;900&family=Rozha+One&family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  body{margin:0;font-family:'EB Garamond',Georgia,serif;background:#07050d;}
+  a{color:#d8d2ea;text-decoration:none;}
+  a:hover{color:#f1d58f;}
+  .small-caps{font-family:'Cinzel',Georgia,serif;letter-spacing:2px;text-transform:uppercase;}
+
+  .tab{appearance:none;cursor:pointer;min-height:44px;display:inline-flex;align-items:center;gap:6px;padding:0 16px;border-radius:2px;font-family:'Cinzel',Georgia,serif;font-size:11px;letter-spacing:1.6px;text-transform:uppercase;border:1px solid rgba(201,205,216,0.28);color:#cfc8e6;background:linear-gradient(180deg, rgba(44,30,78,0.6), rgba(14,10,28,0.7));}
+  .tab.active{background:linear-gradient(180deg, rgba(226,103,176,0.45), rgba(91,124,230,0.3));border-color:#e8c877;color:#fff3fa;box-shadow:0 0 16px rgba(226,103,176,0.4);}
+  .search{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;border-radius:2px;border:1px solid rgba(201,205,216,0.28);background:rgba(14,10,28,0.7);}
+  .search input{background:transparent;border:none;outline:none;color:#e9e4f7;font-family:'EB Garamond',Georgia,serif;font-style:italic;font-size:14px;width:160px;}
+  .search input::placeholder{color:#8f88a8;}
+
+  .inscribe{appearance:none;cursor:pointer;width:100%;min-height:52px;margin-top:22px;border-radius:2px;border:1px solid #e8c877;font-family:'Cinzel',Georgia,serif;font-weight:700;font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#fff5fb;background:linear-gradient(180deg,#e267b0 0%,#9a4fc4 55%,#4f5fcf 100%);box-shadow:0 0 22px rgba(226,103,176,0.55), inset 0 1px 0 rgba(255,255,255,0.3);}
+  .inscribe:hover{box-shadow:0 0 30px rgba(226,103,176,0.8), inset 0 1px 0 rgba(255,255,255,0.35);}
+  .ghost{appearance:none;cursor:pointer;flex:1;min-height:44px;border-radius:2px;border:1px solid rgba(201,205,216,0.35);background:rgba(14,10,28,0.7);color:#cfc8e6;font-family:'Cinzel',Georgia,serif;font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;}
+  .ghost:hover{border-color:#e8c877;color:#fff3fa;}
+
+  .spine{appearance:none;padding:0;font:inherit;cursor:pointer;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0;border-radius:3px 3px 1px 1px;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.05), 0 10px 14px rgba(0,0,0,0.6);transform-origin:bottom center;transition:translate .2s ease, rotate .2s ease, box-shadow .2s ease;animation:spineIn .7s cubic-bezier(.2,.8,.2,1) backwards;}
+  .spine:hover,.spine:focus-visible{translate:0 -8px;rotate:-3deg;z-index:6;outline:none;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.08), 0 14px 22px rgba(0,0,0,0.7), 0 0 14px rgba(226,103,176,0.35);}
+  .band{position:absolute;left:0;right:0;height:3px;opacity:0.9;}
+  .band.thin{height:1px;opacity:0.7;}
+  .verdict{position:absolute;top:21px;left:50%;transform:translateX(-50%);width:7px;height:7px;border-radius:50%;}
+  .audio-ring{position:absolute;top:33px;left:50%;transform:translateX(-50%);width:7px;height:7px;border-radius:50%;border:1px solid rgba(103,232,249,0.95);box-sizing:border-box;}
+  .smoulder{position:absolute;left:0;right:0;bottom:0;height:5px;}
+  .rail{position:absolute;bottom:5px;width:2px;pointer-events:none;}
+  .spine-title{writing-mode:vertical-rl;transform:rotate(180deg);font-family:'Cinzel',Georgia,serif;font-weight:600;font-size:10.5px;letter-spacing:1.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-height:calc(100% - 84px);text-shadow:0 1px 2px rgba(0,0,0,0.85);}
+
+  .wood{background:repeating-linear-gradient(90deg, rgba(255,255,255,0.022) 0 1px, transparent 1px 6px, rgba(0,0,0,0.18) 6px 7px, transparent 7px 11px), linear-gradient(180deg, #2a1834 0%, #1a0f22 50%, #120a18 100%);}
+  .flute{background:repeating-linear-gradient(90deg, #170d1e 0 3px, #2e1c3a 3px 7px, #1f1228 7px 9px);}
+  .plank{position:relative;height:18px;background:linear-gradient(180deg, #3a2448 0%, #26163a 45%, #160c20 100%);border-top:1px solid rgba(232,200,119,0.6);border-bottom:1px solid rgba(201,205,216,0.25);box-shadow:0 10px 18px rgba(0,0,0,0.65);z-index:2;}
+  .dentil{height:8px;background:repeating-linear-gradient(90deg, #1d1126 0 10px, #0b0612 10px 14px);border-bottom:1px solid rgba(232,200,119,0.25);}
+
+  .awaken{animation:awaken 1.4s ease-out both;}
+  .flame{animation:flicker 2.4s ease-in-out infinite;}
+  .halo{animation:haloPulse 2.4s ease-in-out infinite;}
+  .familiar{position:absolute;bottom:0;left:12px;z-index:4;animation:patrol 34s linear infinite;}
+  .facing{animation:face 34s linear infinite;}
+  .cat-body{animation:bob .5s ease-in-out infinite alternate;}
+  .legs-a{animation:shuffle .5s ease-in-out infinite alternate;}
+  .legs-b{animation:shuffle .5s ease-in-out infinite alternate-reverse;}
+  .tail{transform-box:fill-box;transform-origin:100% 100%;animation:sway 1.8s ease-in-out infinite alternate;}
+  .wisp{position:absolute;width:7px;height:7px;border-radius:50%;animation:drift 7s ease-in-out infinite alternate;}
+  .cta{appearance:none;cursor:pointer;min-height:44px;display:inline-flex;align-items:center;gap:7px;padding:0 20px;border-radius:2px;border:1px solid #e8c877;font-family:'Cinzel',Georgia,serif;font-weight:700;font-size:11px;letter-spacing:1.8px;text-transform:uppercase;color:#fff5fb;background:linear-gradient(180deg,#e267b0 0%,#9a4fc4 55%,#4f5fcf 100%);box-shadow:0 0 18px rgba(226,103,176,0.5), inset 0 1px 0 rgba(255,255,255,0.3);}
+  .cta:hover{box-shadow:0 0 28px rgba(226,103,176,0.8), inset 0 1px 0 rgba(255,255,255,0.35);}
+  .seg{display:inline-flex;border:1px solid rgba(201,205,216,0.28);border-radius:2px;overflow:hidden;}
+  .seg button{appearance:none;cursor:pointer;min-height:44px;padding:0 16px;border:none;background:rgba(14,10,28,0.7);color:#b7b0cf;font-family:'Cinzel',Georgia,serif;font-size:10.5px;letter-spacing:1.6px;text-transform:uppercase;display:inline-flex;align-items:center;gap:6px;}
+  .seg button.on{background:linear-gradient(180deg, rgba(226,103,176,0.45), rgba(91,124,230,0.3));color:#fff3fa;}
+  .curio-btn{appearance:none;cursor:pointer;min-height:44px;display:inline-flex;align-items:center;gap:8px;padding:0 14px;border-radius:2px;border:1px solid rgba(232,200,119,0.45);background:rgba(14,10,28,0.7);color:#e8dcb8;font-family:'Cinzel',Georgia,serif;font-size:10.5px;letter-spacing:1.6px;text-transform:uppercase;animation:awaken 1s ease-out both;}
+  .curio-btn:hover{border-color:#e8c877;color:#fff3fa;}
+  .curio-pop{position:absolute;top:54px;right:0;width:320px;z-index:30;text-align:left;padding:16px 18px;border-radius:2px;border:1px solid rgba(232,200,119,0.5);background:linear-gradient(180deg, rgba(40,24,70,0.97), rgba(12,8,22,0.98));box-shadow:0 24px 48px rgba(0,0,0,0.7), 0 0 20px rgba(226,103,176,0.2);animation:awaken .4s ease-out both;}
+  .whisper{position:absolute;top:318px;left:50%;translate:-50% 0;width:400px;box-sizing:border-box;z-index:40;padding:18px 44px 18px 44px;text-align:center;border-radius:2px;border:1px solid rgba(232,200,119,0.55);border-top:2px solid #e267b0;background:linear-gradient(180deg, rgba(38,22,64,0.97), rgba(12,8,22,0.97));box-shadow:0 22px 50px rgba(0,0,0,0.65), 0 0 34px rgba(226,103,176,0.32);animation:whisperIn .9s cubic-bezier(.2,.8,.2,1) both;}
+  .whisper-x{appearance:none;cursor:pointer;position:absolute;top:2px;right:2px;width:44px;height:44px;border:none;background:transparent;color:#8f88a8;font-size:16px;}
+  .whisper-x:hover{color:#fff3fa;}
+  .shimmer{position:absolute;inset:0;pointer-events:none;z-index:7;background:linear-gradient(105deg, transparent 35%, rgba(245,154,208,0.16) 45%, rgba(159,178,255,0.12) 52%, transparent 62%);background-size:300% 100%;animation:shimmer 2.2s ease-out forwards;}
+  .proto{display:flex;align-items:center;justify-content:center;gap:10px;margin:22px auto 0 auto;width:fit-content;padding:10px 14px;border:1px dashed rgba(201,205,216,0.3);border-radius:2px;}
+  .ghost{flex:none;padding:0 16px;}
+
+  .card{appearance:none;cursor:pointer;font:inherit;color:inherit;text-align:left;display:flex;flex-direction:column;padding:12px;border-radius:6px;background:linear-gradient(165deg, rgba(38,23,64,0.92), rgba(17,10,30,0.96));border:1px solid rgba(217,131,222,0.20);box-shadow:inset 0 0 0 1px rgba(10,6,18,0.9), 0 0 18px rgba(124,58,237,0.10);transition:border-color .25s ease, translate .25s ease, box-shadow .25s ease;}
+  .card:hover,.card:focus-visible{outline:none;border-color:rgba(240,166,224,0.55);translate:0 -2px;box-shadow:inset 0 0 0 1px rgba(10,6,18,0.9), 0 0 22px rgba(217,70,239,0.18);}
+  .card:hover .tome,.card:focus-visible .tome{translate:0 -5px;box-shadow:0 20px 38px rgba(0,0,0,0.76), 0 0 0 1px rgba(244,114,182,0.55), 0 0 26px rgba(244,114,182,0.26);}
+  .card .tome{padding:10px;}
+  .grid-cover{width:100%;height:auto;aspect-ratio:2 / 3;}
+  .card-title{margin-top:8px;font-weight:600;font-size:15px;line-height:1.2;color:#efe9fb;height:36px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+  .badge{font-family:'Cinzel',Georgia,serif;font-size:9px;letter-spacing:1px;text-transform:uppercase;padding:2px 8px;border-radius:2px;}
+  .gilt{position:absolute;inset:0;pointer-events:none;border-radius:inherit;box-shadow:inset 0 0 0 1px rgba(232,200,119,0.55), inset 0 0 8px rgba(232,200,119,0.25);}
+  .whisper.nudge{border-top-color:#9fb2ff;box-shadow:0 18px 40px rgba(0,0,0,0.6), 0 0 22px rgba(91,124,230,0.28);}
+  .whisper-link{appearance:none;cursor:pointer;margin:10px auto 0 auto;display:block;min-height:44px;padding:0;border:none;background:transparent;color:#f59ad0;font-family:'Cinzel',Georgia,serif;font-size:10px;letter-spacing:1.4px;text-transform:uppercase;text-align:center;}
+  .whisper-link:hover{color:#fff3fa;}
+  .scrim{position:absolute;inset:0;z-index:45;background:rgba(5,3,10,0.62);backdrop-filter:blur(2px);}
+  .dialog{position:absolute;top:360px;left:50%;translate:-50% 0;width:520px;box-sizing:border-box;z-index:50;padding:24px 26px;border-radius:2px;border:1px solid rgba(232,200,119,0.5);background:linear-gradient(180deg, rgba(40,24,70,0.98), rgba(12,8,22,0.99));box-shadow:0 30px 60px rgba(0,0,0,0.75), 0 0 26px rgba(226,103,176,0.2);animation:awaken .35s ease-out both;}
+  .shelf-pick{appearance:none;cursor:pointer;min-height:44px;display:inline-flex;align-items:center;gap:10px;padding:0 16px;border-radius:2px;border:1px solid rgba(232,200,119,0.45);background:rgba(14,10,28,0.7);color:#f3ecff;font-family:'Cinzel',Georgia,serif;font-size:11px;letter-spacing:1.6px;text-transform:uppercase;}
+  .shelf-pick:hover{border-color:#e8c877;}
+  .owners{position:absolute;top:19px;left:50%;transform:translateX(-50%);width:14px;height:14px;border-radius:2px;background:rgba(236,72,153,0.6);color:rgba(255,235,255,0.95);font-family:'Cinzel',Georgia,serif;font-size:8px;line-height:14px;text-align:center;}
+  .shared-banner{position:absolute;left:50%;bottom:4px;translate:-50% 0;display:inline-flex;align-items:center;gap:8px;padding:5px 16px;border:1px solid rgba(232,200,119,0.6);border-radius:2px;background:linear-gradient(180deg, rgba(58,32,96,0.95), rgba(20,12,34,0.95));color:#fbeedc;font-family:'Cinzel',Georgia,serif;font-size:10px;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;box-shadow:0 0 16px rgba(226,103,176,0.35);}
+  .tome-card{appearance:none;cursor:pointer;background:transparent;border:none;padding:0;width:124px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;color:inherit;font:inherit;animation:spineIn .7s cubic-bezier(.2,.8,.2,1) backwards;}
+  .tome{position:relative;display:block;padding:8px;background:linear-gradient(158deg,#2a1b3d,#150d24);border:1px solid rgba(240,166,224,0.30);box-shadow:0 16px 30px rgba(0,0,0,0.7);transition:translate .25s ease, box-shadow .25s ease;}
+  .tome-card:hover .tome,.tome-card:focus-visible .tome{translate:0 -5px;box-shadow:0 20px 38px rgba(0,0,0,0.76), 0 0 0 1px rgba(244,114,182,0.55), 0 0 26px rgba(244,114,182,0.26);}
+  .tome-card:focus-visible{outline:none;}
+  .tome.ghost{border-style:dashed;}
+  .tome.ghost .tome-cover{opacity:0.55;}
+  .tome-cover{position:relative;display:flex;align-items:center;justify-content:center;width:80px;height:120px;overflow:hidden;border:1px solid rgba(240,166,224,0.16);}
+  .cover-inner{position:absolute;inset:6px;border:1px solid;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:4px;box-sizing:border-box;}
+  .cover-title{font-family:'Cinzel',Georgia,serif;font-weight:600;font-size:8.5px;letter-spacing:0.8px;line-height:1.3;text-align:center;text-transform:uppercase;text-shadow:0 1px 2px rgba(0,0,0,0.8);}
+  .corner{position:absolute;font-size:7px;line-height:1;color:rgba(240,166,224,0.55);pointer-events:none;}
+  .rail-c{position:absolute;bottom:-1px;width:3px;pointer-events:none;}
+  .tome-title{margin-top:8px;font-weight:600;font-size:13.5px;line-height:1.2;text-align:center;color:#efe9fb;height:33px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+  .meter{display:flex;gap:2px;margin-top:3px;}
+
+  @keyframes spineIn{from{opacity:0;translate:0 -30px;filter:drop-shadow(0 0 14px #e267b0);}to{opacity:1;translate:0 0;filter:none;}}
+  @keyframes awaken{from{opacity:0;scale:0.9;filter:blur(4px);}to{opacity:1;scale:1;filter:none;}}
+  @keyframes flicker{0%,100%{opacity:1;}40%{opacity:0.8;}55%{opacity:0.95;}70%{opacity:0.75;}}
+  @keyframes haloPulse{0%,100%{opacity:0.9;scale:1;}50%{opacity:0.6;scale:0.9;}}
+  @keyframes patrol{0%{left:12px;}46%{left:calc(100% - 64px);}50%{left:calc(100% - 64px);}96%{left:12px;}100%{left:12px;}}
+  @keyframes face{0%,47.9%{transform:scaleX(1);}48%,97.9%{transform:scaleX(-1);}98%,100%{transform:scaleX(1);}}
+  @keyframes bob{from{translate:0 0;}to{translate:0 -0.8px;}}
+  @keyframes shuffle{from{translate:-1.3px 0;}to{translate:1.3px 0;}}
+  @keyframes sway{from{rotate:-10deg;}to{rotate:12deg;}}
+  @keyframes whisperIn{from{opacity:0;translate:-50% -14px;filter:blur(3px);}to{opacity:1;translate:-50% 0;filter:none;}}
+  @keyframes shimmer{0%{background-position:100% 0;opacity:1;}100%{background-position:-50% 0;opacity:0;}}
+  @media (prefers-reduced-motion: reduce){.spine,.tome-card,.awaken,.whisper,.shimmer,.flame,.halo,.wisp,.familiar,.facing,.cat-body,.legs-a,.legs-b,.tail{animation:none !important;}}
+  @keyframes drift{0%{translate:0 0;opacity:0.45;}50%{translate:16px -22px;opacity:1;}100%{translate:-12px -42px;opacity:0.55;}}
+</style>
+</helmet>
+
+<div style="width: 1440px; height: 1720px; position: relative; overflow: hidden; box-sizing: border-box; color: #e9e4f7; background: radial-gradient(ellipse 820px 420px at 50% 0%, rgba(226,103,176,0.22), transparent 70%), radial-gradient(ellipse 1000px 700px at 35% 55%, rgba(60,76,200,0.14), transparent 70%), linear-gradient(180deg, #0b0716 0%, #0d0a22 50%, #07050d 100%);">
+
+  <!-- starfield -->
+  <div style="position:absolute; inset:0; pointer-events:none; opacity:0.8; background-image: radial-gradient(1.4px 1.4px at 6% 8%, rgba(223,227,238,0.7), transparent), radial-gradient(1px 1px at 18% 4%, rgba(226,103,176,0.7), transparent), radial-gradient(1.2px 1.2px at 31% 12%, rgba(223,227,238,0.5), transparent), radial-gradient(1px 1px at 72% 6%, rgba(159,178,255,0.8), transparent), radial-gradient(1.4px 1.4px at 86% 11%, rgba(223,227,238,0.6), transparent), radial-gradient(1px 1px at 94% 3%, rgba(226,103,176,0.6), transparent), radial-gradient(1.2px 1.2px at 58% 2%, rgba(223,227,238,0.5), transparent);"></div>
+
+  <div style="position:relative; padding: 34px 40px 40px 40px; box-sizing:border-box;">
+
+    <!-- header -->
+    <header style="text-align:center;">
+      <svg width="34" height="28" viewBox="0 0 30 24" fill="none" style="filter: drop-shadow(0 0 8px rgba(226,103,176,0.6));" aria-hidden="true">
+        <path d="M2 20L4 7L10 13L15 3L20 13L26 7L28 20H2Z" fill="rgba(226,103,176,0.35)" stroke="#e8c877" stroke-width="1.3" stroke-linejoin="round"/>
+        <circle cx="4" cy="7" r="1.5" fill="#dfe3ee"/><circle cx="15" cy="3" r="1.6" fill="#e8c877"/><circle cx="26" cy="7" r="1.5" fill="#dfe3ee"/>
+        <line x1="4" y1="20" x2="26" y2="20" stroke="#dfe3ee" stroke-width="1.2"/>
+      </svg>
+      <h1 style="margin: 4px 0 0 0; font-family:'Rozha One',Georgia,serif; font-weight:400; font-size:60px; letter-spacing:2px; line-height:1.1; background:linear-gradient(180deg,#ffd3ec 0%,#e58fd0 45%,#a58cf0 75%,#7f9df5 100%); -webkit-background-clip:text; background-clip:text; color:transparent; filter: drop-shadow(0 0 18px rgba(226,103,176,0.5));">Hushthorn</h1>
+      <div style="font-style:italic; font-size:17px; color:#c9c1e0; margin-top:4px;">a candlelit archive for the books you shouldn't read in public</div>
+      <svg width="440" height="18" viewBox="0 0 440 18" fill="none" style="display:block; margin:14px auto 0 auto;" aria-hidden="true">
+        <path d="M0 9 C60 0, 100 18, 160 9 C 196 3, 206 9, 212 9" stroke="#c9cdd8" stroke-width="1" opacity="0.6"/>
+        <path d="M228 9 C 234 9, 244 3, 280 9 C 340 18, 380 0, 440 9" stroke="#c9cdd8" stroke-width="1" opacity="0.6"/>
+        <path d="M220 2 L227 9 L220 16 L213 9 Z" fill="#e8c877"/>
+        <circle cx="220" cy="9" r="2" fill="#e267b0"/>
+      </svg>
+
+      <div style="display:flex; align-items:center; justify-content:center; gap:12px; margin-top:16px;">
+        <span class="small-caps" style="font-size:10px; color:#b7b0cf;">Shelf</span>
+        <button type="button" class="shelf-pick" onClick="{{toggleShelf}}" aria-label="Switch shelf">
+          {{shelfName}}
+          <svg width="14" height="10" viewBox="0 0 24 16" fill="none" stroke="#e8c877" stroke-width="2" aria-hidden="true"><path d="M2 5 L12 13 L22 5"/></svg>
+        </button>
+        <sc-if value="{{isShared}}" hint-placeholder-val="{{false}}">
+          <span style="font-style:italic; font-size:14px; color:#a9a2c2;">shared with [Partner]</span>
+        </sc-if>
+      </div>
+
+      <nav aria-label="Shelf filters" style="display:flex; align-items:center; justify-content:center; gap:8px; margin-top:12px;">
+        <button type="button" class="tab active">All</button>
+        <button type="button" class="tab">Owned</button>
+        <button type="button" class="tab">Wishlist</button>
+        <button type="button" class="tab">Read</button>
+        <button type="button" class="tab">Unread</button>
+        <button type="button" class="tab">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 14v-3a8 8 0 0116 0v3"/><rect x="2" y="14" width="5" height="7" rx="1.5"/><rect x="17" y="14" width="5" height="7" rx="1.5"/></svg>
+          Audio
+        </button>
+        <button type="button" class="tab">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 2 L20 9 L16 22 L8 22 L4 9 Z"/></svg>
+          Oracle
+        </button>
+        <button type="button" class="tab">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="1.5"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+          Codex
+        </button>
+        <button type="button" class="cta" style="margin-left:10px;" onClick="{{openInscribe}}">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
+          Inscribe
+        </button>
+      </nav>
+
+      <div style="display:flex; align-items:center; justify-content:center; gap:10px; margin-top:10px;">
+        <div class="seg" role="group" aria-label="Shelf view">
+          <button type="button" class="{{coversCls}}" aria-pressed="{{isCovers}}" onClick="{{showCovers}}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="10"/><rect x="14" y="3" width="7" height="10"/><rect x="3" y="15" width="7" height="6"/><rect x="14" y="15" width="7" height="6"/></svg>
+            Covers
+          </button>
+          <button type="button" class="{{spinesCls}}" aria-pressed="{{isSpines}}" onClick="{{showSpines}}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="4" height="17"/><rect x="9" y="7" width="4" height="14"/><rect x="15" y="3" width="4" height="18" transform="rotate(-8 17 12)"/></svg>
+            Spines
+          </button>
+        </div>
+        <label class="search">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#b7b0cf" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></svg>
+          <input type="text" aria-label="Search the shelves" placeholder="Search the shelves…">
+        </label>
+        <sc-if value="{{hasRelics}}" hint-placeholder-val="{{false}}">
+          <div style="position:relative;">
+            <button type="button" class="curio-btn" aria-expanded="{{cabinetOpen}}" onClick="{{toggleCabinet}}">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="#8e2a66" stroke="#e8c877" stroke-width="1.2"/><path d="M12 6 L13.6 10.4 L18 12 L13.6 13.6 L12 18 L10.4 13.6 L6 12 L10.4 10.4 Z" fill="#f59ad0"/></svg>
+              Curiosities
+            </button>
+            <sc-if value="{{cabinetOpen}}" hint-placeholder-val="{{false}}">
+              <div class="curio-pop">
+                <div class="small-caps" style="font-size:9.5px; color:#e8c877;">What the archive has shown you</div>
+                <div style="display:flex; flex-direction:column; gap:12px; margin-top:12px;">
+                  <sc-for list="{{foundRelics}}" as="relic" hint-placeholder-count="2">
+                    <div style="display:flex; gap:10px; align-items:flex-start;">
+                      <span style="color:#f59ad0; font-size:11px; line-height:1.6;">✦</span>
+                      <div>
+                        <div style="font-family:'Cinzel',Georgia,serif; font-weight:600; font-size:12.5px; color:#f7d6ea;">{{relic.name}}</div>
+                        <div style="font-style:italic; font-size:13.5px; line-height:1.3; color:#b7b0cf;">{{relic.desc}}</div>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="margin-top:14px; font-style:italic; font-size:13px; color:#8f88a8;">Keep filling the shelves. Not everything has woken yet.</div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+      </div>
+
+      <div style="margin-top:14px; font-family:'Rozha One',Georgia,serif; font-size:12.5px; letter-spacing:3px; text-transform:uppercase; color:#b7b0cf;">
+        {{count}} Tomes <span style="color:#e8c877; margin:0 8px;">✦</span> {{readCount}} Read
+      </div>
+    </header>
+
+    <!-- whisper: the only sign the archive gives. Two kinds, never a number. -->
+    <sc-if value="{{hasToast}}" hint-placeholder-val="{{false}}">
+      <div class="{{whisperCls}}" role="status" aria-live="polite">
+        <button type="button" class="whisper-x" aria-label="Dismiss" onClick="{{dismissToast}}">×</button>
+        <div style="font-style:italic; font-size:14px; color:#cfc6e8;">{{toastHeading}}</div>
+        <sc-if value="{{toastIsNudge}}" hint-placeholder-val="{{false}}">
+          <div style="margin-top:8px; font-family:'Cinzel',Georgia,serif; font-weight:600; font-size:12.5px; line-height:1.4; letter-spacing:0.4px; color:#e6ddf7;">{{toastHint}}</div>
+          <div style="margin-top:8px; font-style:italic; font-size:12.5px; color:#8f88a8;">Finish another tome or two.</div>
+        </sc-if>
+        <sc-if value="{{toastIsUnlock}}" hint-placeholder-val="{{false}}">
+          <sc-for list="{{toastList}}" as="t" hint-placeholder-count="1">
+            <div style="margin-top:8px;">
+              <div style="font-family:'Cinzel',Georgia,serif; font-weight:700; font-size:13px; letter-spacing:0.6px; color:#ffe3f3; text-shadow:0 0 10px rgba(226,103,176,0.6);">{{t.name}}</div>
+              <div style="font-style:italic; font-size:13px; line-height:1.3; color:#a9a2c2; margin-top:2px;">{{t.desc}}</div>
+            </div>
+          </sc-for>
+          <sc-if value="{{isCovers}}" hint-placeholder-val="{{false}}">
+            <button type="button" class="whisper-link" onClick="{{showSpines}}">See it on your spine shelf</button>
+          </sc-if>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{isSpines}}" hint-placeholder-val="{{true}}">
+    <!-- main row -->
+    <div style="display:flex; justify-content:center; align-items:flex-start; margin-top:26px;">
+
+      <!-- ============ CATHEDRAL BOOKCASE ============ -->
+      <div style="width:960px; flex-shrink:0; position:relative;">
+
+        <!-- arch crown -->
+        <div style="position:relative; width:960px; height:210px;">
+          <svg width="960" height="210" viewBox="0 0 960 210" fill="none" style="position:absolute; inset:0;" aria-hidden="true">
+            <defs>
+              <linearGradient id="archWood" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2d1a3a"/><stop offset="1" stop-color="#150b1c"/></linearGradient>
+              <linearGradient id="goldLine" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8a6a2c"/><stop offset="0.5" stop-color="#f3dc9a"/><stop offset="1" stop-color="#8a6a2c"/></linearGradient>
+            </defs>
+            <!-- pinnacles -->
+            <rect x="6" y="72" width="32" height="138" fill="#1c1022" stroke="#c9cdd8" stroke-opacity="0.4" stroke-width="0.8"/>
+            <path d="M6 72 L22 14 L38 72 Z" fill="#1c1022" stroke="url(#goldLine)" stroke-width="1.2"/>
+            <circle cx="14" cy="50" r="2" fill="#c9cdd8"/><circle cx="30" cy="50" r="2" fill="#c9cdd8"/><circle cx="18" cy="32" r="1.6" fill="#c9cdd8"/><circle cx="26" cy="32" r="1.6" fill="#c9cdd8"/>
+            <circle cx="22" cy="11" r="3.6" fill="#e8c877"/>
+            <rect x="922" y="72" width="32" height="138" fill="#1c1022" stroke="#c9cdd8" stroke-opacity="0.4" stroke-width="0.8"/>
+            <path d="M922 72 L938 14 L954 72 Z" fill="#1c1022" stroke="url(#goldLine)" stroke-width="1.2"/>
+            <circle cx="930" cy="50" r="2" fill="#c9cdd8"/><circle cx="946" cy="50" r="2" fill="#c9cdd8"/><circle cx="934" cy="32" r="1.6" fill="#c9cdd8"/><circle cx="942" cy="32" r="1.6" fill="#c9cdd8"/>
+            <circle cx="938" cy="11" r="3.6" fill="#e8c877"/>
+            <!-- main pointed arch -->
+            <path d="M44 210 L44 150 Q44 52 480 14 Q916 52 916 150 L916 210 Z" fill="url(#archWood)" stroke="url(#goldLine)" stroke-width="2"/>
+            <path d="M62 210 L62 155 Q62 68 480 34 Q898 68 898 155 L898 210" stroke="#c9cdd8" stroke-opacity="0.5" stroke-width="1"/>
+            <path d="M80 210 L80 160 Q80 86 480 54 Q880 86 880 160 L880 210 Z" fill="#0b0613"/>
+            <!-- cusps along inner arch -->
+            <circle cx="120" cy="104" r="3" fill="#c9cdd8" fill-opacity="0.5"/><circle cx="200" cy="80" r="3" fill="#c9cdd8" fill-opacity="0.5"/><circle cx="310" cy="62" r="3" fill="#c9cdd8" fill-opacity="0.5"/>
+            <circle cx="840" cy="104" r="3" fill="#c9cdd8" fill-opacity="0.5"/><circle cx="760" cy="80" r="3" fill="#c9cdd8" fill-opacity="0.5"/><circle cx="650" cy="62" r="3" fill="#c9cdd8" fill-opacity="0.5"/>
+            <!-- cornice -->
+            <rect x="0" y="198" width="960" height="12" fill="#221428"/>
+            <line x1="0" y1="198" x2="960" y2="198" stroke="url(#goldLine)" stroke-width="1.5"/>
+            <line x1="0" y1="204" x2="960" y2="204" stroke="#c9cdd8" stroke-opacity="0.3" stroke-width="1"/>
+          </svg>
+
+          <!-- stained glass: dim until awakened -->
+          <div style="position:absolute; inset:0; pointer-events:none; opacity:{{glassOpacity}}; filter:{{glassFilter}}; transition: opacity 1s ease, filter 1s ease;">
+            <svg width="960" height="210" viewBox="0 0 960 210" fill="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="lancetGlass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e267b0"/><stop offset="0.5" stop-color="#8a5bd0"/><stop offset="1" stop-color="#3f5fd0"/></linearGradient>
+              </defs>
+              <path d="M150 196 L150 146 Q150 118 170 108 Q190 118 190 146 L190 196 Z" fill="url(#lancetGlass)" stroke="#c9cdd8" stroke-width="1.4"/>
+              <path d="M270 196 L270 146 Q270 118 290 108 Q310 118 310 146 L310 196 Z" fill="url(#lancetGlass)" stroke="#c9cdd8" stroke-width="1.4"/>
+              <path d="M650 196 L650 146 Q650 118 670 108 Q690 118 690 146 L690 196 Z" fill="url(#lancetGlass)" stroke="#c9cdd8" stroke-width="1.4"/>
+              <path d="M770 196 L770 146 Q770 118 790 108 Q810 118 810 146 L810 196 Z" fill="url(#lancetGlass)" stroke="#c9cdd8" stroke-width="1.4"/>
+              <line x1="170" y1="130" x2="170" y2="196" stroke="#c9cdd8" stroke-width="0.8"/><line x1="290" y1="130" x2="290" y2="196" stroke="#c9cdd8" stroke-width="0.8"/>
+              <line x1="670" y1="130" x2="670" y2="196" stroke="#c9cdd8" stroke-width="0.8"/><line x1="790" y1="130" x2="790" y2="196" stroke="#c9cdd8" stroke-width="0.8"/>
+              <!-- rose window -->
+              <circle cx="480" cy="128" r="62" fill="#0a0612" stroke="#c9cdd8" stroke-width="2"/>
+              <ellipse cx="480" cy="96" rx="12" ry="24" fill="#e267b0" stroke="#c9cdd8" stroke-width="1.2"/>
+              <ellipse cx="480" cy="96" rx="12" ry="24" fill="#5b7ce6" stroke="#c9cdd8" stroke-width="1.2" transform="rotate(45 480 128)"/>
+              <ellipse cx="480" cy="96" rx="12" ry="24" fill="#9a63e0" stroke="#c9cdd8" stroke-width="1.2" transform="rotate(90 480 128)"/>
+              <ellipse cx="480" cy="96" rx="12" ry="24" fill="#f59ad0" stroke="#c9cdd8" stroke-width="1.2" transform="rotate(135 480 128)"/>
+              <ellipse cx="480" cy="96" rx="12" ry="24" fill="#e267b0" stroke="#c9cdd8" stroke-width="1.2" transform="rotate(180 480 128)"/>
+              <ellipse cx="480" cy="96" rx="12" ry="24" fill="#5b7ce6" stroke="#c9cdd8" stroke-width="1.2" transform="rotate(225 480 128)"/>
+              <ellipse cx="480" cy="96" rx="12" ry="24" fill="#9a63e0" stroke="#c9cdd8" stroke-width="1.2" transform="rotate(270 480 128)"/>
+              <ellipse cx="480" cy="96" rx="12" ry="24" fill="#f59ad0" stroke="#c9cdd8" stroke-width="1.2" transform="rotate(315 480 128)"/>
+              <circle cx="480" cy="128" r="57" stroke="#e8c877" stroke-width="0.8" stroke-opacity="0.7"/>
+              <circle cx="480" cy="128" r="15" fill="#3a58c8" stroke="#e8c877" stroke-width="1.4"/>
+              <circle cx="480" cy="128" r="5.5" fill="#f3dc9a"/>
+            </svg>
+          </div>
+
+          <sc-if value="{{ivy}}" hint-placeholder-val="{{false}}">
+            <div class="awaken" style="position:absolute; inset:0; pointer-events:none;">
+              <svg width="960" height="210" viewBox="0 0 960 210" fill="none" aria-hidden="true">
+                <defs>
+                  <path id="lfA" d="M0 0 C3 -6 10 -7 12 -2 C13 2 8 6 0 0 Z" fill="#2f6f62"/>
+                  <path id="lfB" d="M0 0 C3 -6 10 -7 12 -2 C13 2 8 6 0 0 Z" fill="#4a917c"/>
+                </defs>
+                <path d="M44 196 C40 170 50 150 46 130 Q52 70 200 50 Q320 30 470 18" stroke="#2c5a50" stroke-width="2"/>
+                <path d="M916 196 C920 170 910 150 914 130 Q908 70 760 50 Q640 30 490 18" stroke="#2c5a50" stroke-width="2"/>
+                <path d="M114 81 C110 100 120 118 112 140" stroke="#2c5a50" stroke-width="1.4"/>
+                <path d="M846 81 C850 100 840 118 848 140" stroke="#2c5a50" stroke-width="1.4"/>
+                <use href="#lfA" transform="translate(46 176) rotate(-100)"/><use href="#lfB" transform="translate(48 150) rotate(-70)"/>
+                <use href="#lfA" transform="translate(52 120) rotate(-30)"/><use href="#lfB" transform="translate(70 100) rotate(10)"/>
+                <use href="#lfA" transform="translate(92 88) rotate(-40)"/><use href="#lfB" transform="translate(120 76) rotate(20)"/>
+                <use href="#lfA" transform="translate(150 64) rotate(-15)"/><use href="#lfB" transform="translate(186 56) rotate(30)"/>
+                <use href="#lfA" transform="translate(226 48) rotate(-25)"/><use href="#lfB" transform="translate(270 40) rotate(15)"/>
+                <use href="#lfA" transform="translate(320 32) rotate(-30)"/><use href="#lfB" transform="translate(372 26) rotate(20)"/>
+                <use href="#lfA" transform="translate(420 20) rotate(-10)"/>
+                <use href="#lfB" transform="translate(110 118) rotate(80)"/><use href="#lfA" transform="translate(112 140) rotate(100)"/>
+                <use href="#lfA" transform="translate(914 176) scale(-1 1) rotate(-100)"/><use href="#lfB" transform="translate(912 150) scale(-1 1) rotate(-70)"/>
+                <use href="#lfA" transform="translate(908 120) scale(-1 1) rotate(-30)"/><use href="#lfB" transform="translate(890 100) scale(-1 1) rotate(10)"/>
+                <use href="#lfA" transform="translate(868 88) scale(-1 1) rotate(-40)"/><use href="#lfB" transform="translate(840 76) scale(-1 1) rotate(20)"/>
+                <use href="#lfA" transform="translate(810 64) scale(-1 1) rotate(-15)"/><use href="#lfB" transform="translate(774 56) scale(-1 1) rotate(30)"/>
+                <use href="#lfA" transform="translate(734 48) scale(-1 1) rotate(-25)"/><use href="#lfB" transform="translate(690 40) scale(-1 1) rotate(15)"/>
+                <use href="#lfA" transform="translate(640 32) scale(-1 1) rotate(-30)"/><use href="#lfB" transform="translate(588 26) scale(-1 1) rotate(20)"/>
+                <use href="#lfA" transform="translate(540 20) scale(-1 1) rotate(-10)"/>
+                <use href="#lfB" transform="translate(850 118) scale(-1 1) rotate(80)"/><use href="#lfA" transform="translate(848 140) scale(-1 1) rotate(100)"/>
+              </svg>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{bloom}}" hint-placeholder-val="{{false}}">
+            <div class="awaken" style="position:absolute; inset:0; pointer-events:none; filter: drop-shadow(0 0 8px rgba(226,103,176,0.7));">
+              <svg width="960" height="210" viewBox="0 0 960 210" fill="none" aria-hidden="true">
+                <defs>
+                  <g id="rose"><circle r="7" fill="#e267b0"/><circle r="4.6" fill="#f59ad0"/><path d="M-2 0 a2 2 0 1 1 2 2" stroke="#8e2a66" stroke-width="1"/></g>
+                  <g id="roseBig"><circle r="11" fill="#e267b0"/><circle r="7.5" fill="#f59ad0"/><circle r="4" fill="#e267b0"/><path d="M-2 0 a2 2 0 1 1 2 2" stroke="#8e2a66" stroke-width="1"/></g>
+                </defs>
+                <path d="M44 150 Q44 52 480 14 Q916 52 916 150" stroke="#2c1a2a" stroke-width="2.5"/>
+                <path d="M60 112 l-5 -4 M112 82 l-2 -6 M200 54 l1 -6 M322 32 l2 -6 M900 112 l5 -4 M848 82 l2 -6 M760 54 l-1 -6 M638 32 l-2 -6" stroke="#c9cdd8" stroke-width="1.2"/>
+                <use href="#rose" transform="translate(61 113)"/><use href="#rose" transform="translate(114 81)"/>
+                <use href="#rose" transform="translate(201 54)"/><use href="#rose" transform="translate(323 32)"/>
+                <use href="#rose" transform="translate(899 113)"/><use href="#rose" transform="translate(846 81)"/>
+                <use href="#rose" transform="translate(759 54)"/><use href="#rose" transform="translate(637 32)"/>
+                <use href="#roseBig" transform="translate(480 16)"/>
+              </svg>
+            </div>
+          </sc-if>
+          <sc-if value="{{isShared}}" hint-placeholder-val="{{false}}">
+            <div class="awaken shared-banner">
+              <svg width="26" height="14" viewBox="0 0 26 14" fill="none" aria-hidden="true"><circle cx="9" cy="7" r="5.5" stroke="#e8c877" stroke-width="1.4"/><circle cx="17" cy="7" r="5.5" stroke="#f59ad0" stroke-width="1.4"/></svg>
+              The Shared Archive
+            </div>
+          </sc-if>
+        </div>
+
+        <!-- nave body -->
+        <div class="wood" style="position:relative; width:960px; height:882px;">
+
+          <!-- left pilaster -->
+          <div class="flute" style="position:absolute; left:0; top:0; width:44px; height:882px; border-left:1px solid rgba(232,200,119,0.35); border-right:1px solid rgba(201,205,216,0.22); box-sizing:border-box; display:flex; flex-direction:column;">
+            <sc-for list="{{segments}}" as="seg" hint-placeholder-count="3">
+              <div style="position:relative; height:294px;">
+                <div style="height:12px; background:linear-gradient(180deg,#c9cdd8 0,#5d6172 2px,#2e1c3a 3px,#2e1c3a 9px,#8a6a2c 10px,#e8c877 12px);"></div>
+                <div style="position:absolute; top:112px; left:7px; width:30px; height:54px;">
+                  <sc-if value="{{litCandles}}" hint-placeholder-val="{{false}}">
+                    <div class="halo" style="position:absolute; left:-25px; top:-30px; width:80px; height:80px; border-radius:50%; background:radial-gradient(circle, rgba(255,184,150,0.38), rgba(226,103,176,0.12) 45%, transparent 70%); pointer-events:none;"></div>
+                  </sc-if>
+                  <svg width="30" height="54" viewBox="0 0 30 54" fill="none" style="position:absolute; inset:0;" aria-hidden="true">
+                    <path d="M15 54 L15 40" stroke="#c9cdd8" stroke-width="2"/>
+                    <path d="M4 40 Q15 47 26 40" stroke="#c9cdd8" stroke-width="2"/>
+                    <path d="M7 36 L23 36 L21 40 L9 40 Z" fill="#dfe3ee"/>
+                    <rect x="11" y="18" width="8" height="18" rx="1" fill="#e9ddf0"/>
+                    <path d="M11 20 q1.5 5 3 0" fill="#f7f1fb"/>
+                    <line x1="15" y1="18" x2="15" y2="14" stroke="#1a1020" stroke-width="1"/>
+                  </svg>
+                  <sc-if value="{{litCandles}}" hint-placeholder-val="{{false}}">
+                    <svg class="flame awaken" width="10" height="14" viewBox="0 0 14 18" fill="none" style="position:absolute; left:10px; top:1px; filter: drop-shadow(0 0 5px rgba(255,190,140,0.9));" aria-hidden="true">
+                      <defs><radialGradient id="flameL" cx="0.5" cy="0.7" r="0.6"><stop offset="0%" stop-color="#fff6e0"/><stop offset="55%" stop-color="#ffb38a"/><stop offset="100%" stop-color="#e267b0"/></radialGradient></defs>
+                      <path d="M7 0 C7 4 2 6 2 11 C2 14.5 4.5 17 7 17 C9.5 17 12 14.5 12 11 C12 6 7 4 7 0Z" fill="url(#flameL)"/>
+                    </svg>
+                  </sc-if>
+                </div>
+              </div>
+            </sc-for>
+            <sc-if value="{{ivy}}" hint-placeholder-val="{{false}}">
+              <svg class="awaken" width="44" height="882" viewBox="0 0 44 882" fill="none" style="position:absolute; left:0; top:0; pointer-events:none;" aria-hidden="true">
+                <defs>
+                  <path id="plA" d="M0 0 C3 -6 10 -7 12 -2 C13 2 8 6 0 0 Z" fill="#2f6f62"/>
+                  <path id="plB" d="M0 0 C3 -6 10 -7 12 -2 C13 2 8 6 0 0 Z" fill="#4a917c"/>
+                </defs>
+                <path d="M22 0 C6 50 38 100 22 150 S6 250 22 300 S38 400 22 450 S6 550 22 600 S38 700 22 750 S6 850 22 882" stroke="#2c5a50" stroke-width="2"/>
+                <use href="#plA" transform="translate(16 30) rotate(-150)"/><use href="#plB" transform="translate(28 75) rotate(-20)"/>
+                <use href="#plA" transform="translate(30 120) rotate(-30)"/><use href="#plB" transform="translate(14 170) rotate(-160)"/>
+                <use href="#plA" transform="translate(12 220) rotate(-140)"/><use href="#plB" transform="translate(26 265) rotate(-10)"/>
+                <use href="#plA" transform="translate(30 330) rotate(-40)"/><use href="#plB" transform="translate(16 380) rotate(-150)"/>
+                <use href="#plA" transform="translate(28 425) rotate(-20)"/><use href="#plB" transform="translate(12 480) rotate(-160)"/>
+                <use href="#plA" transform="translate(14 525) rotate(-140)"/><use href="#plB" transform="translate(30 575) rotate(-30)"/>
+                <use href="#plA" transform="translate(30 630) rotate(-20)"/><use href="#plB" transform="translate(14 680) rotate(-150)"/>
+                <use href="#plA" transform="translate(12 725) rotate(-160)"/><use href="#plB" transform="translate(28 770) rotate(-10)"/>
+                <use href="#plA" transform="translate(30 825) rotate(-30)"/><use href="#plB" transform="translate(16 868) rotate(-150)"/>
+              </svg>
+            </sc-if>
+          </div>
+
+          <!-- right pilaster -->
+          <div class="flute" style="position:absolute; right:0; top:0; width:44px; height:882px; border-right:1px solid rgba(232,200,119,0.35); border-left:1px solid rgba(201,205,216,0.22); box-sizing:border-box; display:flex; flex-direction:column;">
+            <sc-for list="{{segments}}" as="seg" hint-placeholder-count="3">
+              <div style="position:relative; height:294px;">
+                <div style="height:12px; background:linear-gradient(180deg,#c9cdd8 0,#5d6172 2px,#2e1c3a 3px,#2e1c3a 9px,#8a6a2c 10px,#e8c877 12px);"></div>
+                <div style="position:absolute; top:112px; left:7px; width:30px; height:54px;">
+                  <sc-if value="{{litCandles}}" hint-placeholder-val="{{false}}">
+                    <div class="halo" style="position:absolute; left:-25px; top:-30px; width:80px; height:80px; border-radius:50%; background:radial-gradient(circle, rgba(255,184,150,0.38), rgba(226,103,176,0.12) 45%, transparent 70%); pointer-events:none;"></div>
+                  </sc-if>
+                  <svg width="30" height="54" viewBox="0 0 30 54" fill="none" style="position:absolute; inset:0;" aria-hidden="true">
+                    <path d="M15 54 L15 40" stroke="#c9cdd8" stroke-width="2"/>
+                    <path d="M4 40 Q15 47 26 40" stroke="#c9cdd8" stroke-width="2"/>
+                    <path d="M7 36 L23 36 L21 40 L9 40 Z" fill="#dfe3ee"/>
+                    <rect x="11" y="18" width="8" height="18" rx="1" fill="#e9ddf0"/>
+                    <path d="M11 20 q1.5 5 3 0" fill="#f7f1fb"/>
+                    <line x1="15" y1="18" x2="15" y2="14" stroke="#1a1020" stroke-width="1"/>
+                  </svg>
+                  <sc-if value="{{litCandles}}" hint-placeholder-val="{{false}}">
+                    <svg class="flame awaken" width="10" height="14" viewBox="0 0 14 18" fill="none" style="position:absolute; left:10px; top:1px; filter: drop-shadow(0 0 5px rgba(255,190,140,0.9));" aria-hidden="true">
+                      <defs><radialGradient id="flameR" cx="0.5" cy="0.7" r="0.6"><stop offset="0%" stop-color="#fff6e0"/><stop offset="55%" stop-color="#ffb38a"/><stop offset="100%" stop-color="#e267b0"/></radialGradient></defs>
+                      <path d="M7 0 C7 4 2 6 2 11 C2 14.5 4.5 17 7 17 C9.5 17 12 14.5 12 11 C12 6 7 4 7 0Z" fill="url(#flameR)"/>
+                    </svg>
+                  </sc-if>
+                </div>
+              </div>
+            </sc-for>
+            <sc-if value="{{ivy}}" hint-placeholder-val="{{false}}">
+              <svg class="awaken" width="44" height="882" viewBox="0 0 44 882" fill="none" style="position:absolute; left:0; top:0; pointer-events:none; transform:scaleX(-1);" aria-hidden="true">
+                <path d="M22 0 C6 50 38 100 22 150 S6 250 22 300 S38 400 22 450 S6 550 22 600 S38 700 22 750 S6 850 22 882" stroke="#2c5a50" stroke-width="2"/>
+                <use href="#plA" transform="translate(16 50) rotate(-150)"/><use href="#plB" transform="translate(28 95) rotate(-20)"/>
+                <use href="#plA" transform="translate(30 140) rotate(-30)"/><use href="#plB" transform="translate(14 200) rotate(-160)"/>
+                <use href="#plA" transform="translate(12 245) rotate(-140)"/><use href="#plB" transform="translate(26 300) rotate(-10)"/>
+                <use href="#plA" transform="translate(30 355) rotate(-40)"/><use href="#plB" transform="translate(16 405) rotate(-150)"/>
+                <use href="#plA" transform="translate(28 455) rotate(-20)"/><use href="#plB" transform="translate(12 505) rotate(-160)"/>
+                <use href="#plA" transform="translate(14 555) rotate(-140)"/><use href="#plB" transform="translate(30 600) rotate(-30)"/>
+                <use href="#plA" transform="translate(30 655) rotate(-20)"/><use href="#plB" transform="translate(14 705) rotate(-150)"/>
+                <use href="#plA" transform="translate(12 750) rotate(-160)"/><use href="#plB" transform="translate(28 800) rotate(-10)"/>
+                <use href="#plA" transform="translate(30 850) rotate(-30)"/>
+              </svg>
+            </sc-if>
+          </div>
+
+          <!-- bays -->
+          <div style="position:absolute; left:44px; right:44px; top:0; bottom:0; box-shadow: inset 0 0 40px rgba(0,0,0,0.85); background: radial-gradient(ellipse 60% 40% at 50% 0%, rgba(91,124,230,0.16), transparent 70%), radial-gradient(ellipse 45% 55% at 50% 100%, rgba(226,103,176,0.08), transparent 70%), repeating-linear-gradient(90deg, rgba(255,255,255,0.012) 0 1px, transparent 1px 9px), #0c0714;">
+            <sc-for list="{{shelves}}" as="shelf" hint-placeholder-count="3">
+              <div style="position:relative; height:294px;">
+
+                <!-- carved arcade -->
+                <svg width="872" height="32" viewBox="0 0 872 32" fill="none" style="display:block;" aria-hidden="true">
+                  <defs>
+                    <pattern id="arcadePat" width="54.5" height="32" patternUnits="userSpaceOnUse">
+                      <rect width="54.5" height="32" fill="#241530"/>
+                      <path d="M2 32 L2 18 Q2 5 27.25 1.5 Q52.5 5 52.5 18 L52.5 32 Z" fill="#0c0714" stroke="#c9cdd8" stroke-opacity="0.45" stroke-width="1"/>
+                      <circle cx="27.25" cy="14" r="4" stroke="#e8c877" stroke-opacity="0.6" stroke-width="0.8"/>
+                    </pattern>
+                  </defs>
+                  <rect width="872" height="32" fill="url(#arcadePat)"/>
+                  <line x1="0" y1="0.5" x2="872" y2="0.5" stroke="#e8c877" stroke-opacity="0.45"/>
+                </svg>
+
+                <sc-if value="{{shelf.ivy}}" hint-placeholder-val="{{false}}">
+                  <svg class="awaken" width="872" height="64" viewBox="0 0 872 64" fill="none" style="position:absolute; left:0; top:18px; z-index:5; pointer-events:none;" aria-hidden="true">
+                    <defs>
+                      <path id="dvA" d="M0 0 C3 -6 10 -7 12 -2 C13 2 8 6 0 0 Z" fill="#2f6f62"/>
+                      <path id="dvB" d="M0 0 C3 -6 10 -7 12 -2 C13 2 8 6 0 0 Z" fill="#4a917c"/>
+                    </defs>
+                    <path d="M0 6 C60 28, 120 2, 180 20 S300 4, 360 22 S480 2, 540 20 S660 4, 720 22 S840 4, 872 12" stroke="#2c5a50" stroke-width="1.8"/>
+                    <path d="M140 14 C136 30 146 42 140 58" stroke="#2c5a50" stroke-width="1.2"/>
+                    <path d="M420 10 C424 26 416 40 422 54" stroke="#2c5a50" stroke-width="1.2"/>
+                    <path d="M700 18 C696 34 706 44 700 60" stroke="#2c5a50" stroke-width="1.2"/>
+                    <use href="#dvA" transform="translate(20 14) rotate(30)"/><use href="#dvB" transform="translate(56 22) rotate(-150)"/>
+                    <use href="#dvA" transform="translate(92 18) rotate(20)"/><use href="#dvB" transform="translate(128 12) rotate(-160)"/>
+                    <use href="#dvA" transform="translate(164 18) rotate(40)"/><use href="#dvB" transform="translate(200 16) rotate(-140)"/>
+                    <use href="#dvA" transform="translate(236 10) rotate(20)"/><use href="#dvB" transform="translate(272 12) rotate(-150)"/>
+                    <use href="#dvA" transform="translate(310 16) rotate(30)"/><use href="#dvB" transform="translate(346 20) rotate(-160)"/>
+                    <use href="#dvA" transform="translate(382 16) rotate(20)"/><use href="#dvB" transform="translate(454 10) rotate(-140)"/>
+                    <use href="#dvA" transform="translate(492 14) rotate(40)"/><use href="#dvB" transform="translate(528 18) rotate(-150)"/>
+                    <use href="#dvA" transform="translate(564 15) rotate(20)"/><use href="#dvB" transform="translate(600 8) rotate(-160)"/>
+                    <use href="#dvA" transform="translate(636 11) rotate(30)"/><use href="#dvB" transform="translate(672 16) rotate(-150)"/>
+                    <use href="#dvA" transform="translate(744 16) rotate(20)"/><use href="#dvB" transform="translate(780 8) rotate(-140)"/>
+                    <use href="#dvA" transform="translate(816 10) rotate(30)"/><use href="#dvB" transform="translate(852 14) rotate(-160)"/>
+                    <use href="#dvB" transform="translate(138 40) rotate(90)"/><use href="#dvA" transform="translate(140 58) rotate(110)"/>
+                    <use href="#dvA" transform="translate(422 36) rotate(70)"/><use href="#dvB" transform="translate(422 54) rotate(100)"/>
+                    <use href="#dvB" transform="translate(698 42) rotate(80)"/><use href="#dvA" transform="translate(700 60) rotate(110)"/>
+                  </svg>
+                </sc-if>
+
+                <!-- books zone -->
+                <div style="position:relative; height:236px; display:flex; align-items:flex-end; gap:3px; padding:0 14px; box-sizing:border-box;">
+                  <sc-for list="{{shelf.books}}" as="book" hint-placeholder-count="12">
+                    <button type="button" class="spine" title="{{book.tip}}" onClick="{{book.open}}" style="width:{{book.w}}px;height:{{book.h}}px;background:{{book.bg}};transform:{{book.rot}};margin:0 {{book.mx}}px;opacity:{{book.opacity}};border:{{book.border}};">
+                      <span class="band" style="top:8px;background:{{book.foil}};"></span>
+                      <span class="band thin" style="top:13px;background:{{book.foil}};"></span>
+                      <sc-if value="{{book.solo}}" hint-placeholder-val="{{true}}">
+                        <span class="verdict" style="background:{{book.verdictBg}};box-shadow:{{book.verdictGlow}};"></span>
+                      </sc-if>
+                      <sc-if value="{{book.union}}" hint-placeholder-val="{{false}}">
+                        <span class="owners" aria-label="{{book.ownerCount}} readers own a copy">{{book.ownerCount}}</span>
+                      </sc-if>
+                      <sc-if value="{{book.audio}}" hint-placeholder-val="{{false}}">
+                        <span class="audio-ring"></span>
+                      </sc-if>
+                      <span class="spine-title" style="color:{{book.text}};">{{book.title}}</span>
+                      <span class="band thin" style="bottom:11px;background:{{book.foil}};"></span>
+                      <sc-if value="{{book.hasRead}}" hint-placeholder-val="{{false}}">
+                        <span class="rail" style="left:0;height:{{book.readH}};background:rgba(167,139,250,0.95);box-shadow:0 0 5px rgba(167,139,250,0.9);"></span>
+                      </sc-if>
+                      <sc-if value="{{book.hasAudioRail}}" hint-placeholder-val="{{false}}">
+                        <span class="rail" style="right:0;height:{{book.audioH}};background:rgba(34,211,238,0.95);box-shadow:0 0 5px rgba(34,211,238,0.9);"></span>
+                      </sc-if>
+                      <span class="smoulder" style="background:{{book.smoulderBg}};box-shadow:{{book.smoulderGlow}};"></span>
+                      <sc-if value="{{book.finished}}" hint-placeholder-val="{{false}}">
+                        <span class="gilt"></span>
+                      </sc-if>
+                    </button>
+                  </sc-for>
+
+                  <sc-if value="{{shelf.showRoses}}" hint-placeholder-val="{{false}}">
+                    <div class="awaken" style="margin-left:12px; flex-shrink:0; filter: drop-shadow(0 0 10px rgba(226,103,176,0.45));">
+                      <svg width="60" height="100" viewBox="0 0 60 100" fill="none" aria-hidden="true">
+                        <defs>
+                          <linearGradient id="urnS" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6e7282"/><stop offset="0.45" stop-color="#eef0f6"/><stop offset="1" stop-color="#5d6172"/></linearGradient>
+                          <g id="rz"><circle r="7" fill="#e267b0"/><circle r="4.6" fill="#f59ad0"/><path d="M-2 0 a2 2 0 1 1 2 2" stroke="#8e2a66" stroke-width="1"/></g>
+                          <path id="rl" d="M0 0 C3 -6 10 -7 12 -2 C13 2 8 6 0 0 Z" fill="#2f6f62"/>
+                        </defs>
+                        <path d="M30 62 C28 45 22 35 18 24" stroke="#2c5a50" stroke-width="1.6"/>
+                        <path d="M30 62 C31 44 32 30 31 16" stroke="#2c5a50" stroke-width="1.6"/>
+                        <path d="M30 62 C33 46 40 36 44 28" stroke="#2c5a50" stroke-width="1.6"/>
+                        <use href="#rl" transform="translate(25 44) rotate(-150)"/><use href="#rl" transform="translate(33 40) rotate(-20)"/><use href="#rl" transform="translate(37 50) rotate(10)"/>
+                        <use href="#rz" transform="translate(18 24)"/>
+                        <use href="#rz" transform="translate(31 14) scale(1.15)"/>
+                        <use href="#rz" transform="translate(44 28) scale(0.9)"/>
+                        <path d="M16 62 L44 62 L40 84 Q30 92 20 84 Z" fill="url(#urnS)"/>
+                        <rect x="13" y="59" width="34" height="5" rx="2" fill="#dfe3ee"/>
+                        <rect x="25" y="88" width="10" height="5" fill="#9aa0b2"/>
+                        <rect x="20" y="93" width="20" height="6" rx="1.5" fill="#dfe3ee"/>
+                        <line x1="18" y1="72" x2="42" y2="72" stroke="#e8c877" stroke-width="1"/>
+                      </svg>
+                    </div>
+                  </sc-if>
+
+                  <sc-if value="{{shelf.showTree}}" hint-placeholder-val="{{false}}">
+                    <div class="awaken" style="margin-left:auto; flex-shrink:0; filter: drop-shadow(0 0 12px rgba(240,143,203,0.4));">
+                      <svg width="130" height="224" viewBox="0 0 130 224" fill="none" aria-hidden="true">
+                        <defs>
+                          <linearGradient id="urnT" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6e7282"/><stop offset="0.45" stop-color="#eef0f6"/><stop offset="1" stop-color="#5d6172"/></linearGradient>
+                        </defs>
+                        <path d="M65 180 C62 152 72 132 64 110 C58 94 66 80 62 60" stroke="#3a2233" stroke-width="7" stroke-linecap="round"/>
+                        <path d="M64 110 C50 98 36 92 26 78" stroke="#3a2233" stroke-width="4" stroke-linecap="round"/>
+                        <path d="M66 92 C80 82 92 76 104 62" stroke="#3a2233" stroke-width="4" stroke-linecap="round"/>
+                        <path d="M62 62 C54 48 48 38 40 26" stroke="#3a2233" stroke-width="3" stroke-linecap="round"/>
+                        <path d="M63 66 C72 52 80 42 90 30" stroke="#3a2233" stroke-width="3" stroke-linecap="round"/>
+                        <path d="M64 130 C78 124 88 118 98 106" stroke="#3a2233" stroke-width="3" stroke-linecap="round"/>
+                        <path d="M44 96 l-5 -2 M86 78 l4 -4 M52 44 l-5 1 M78 48 l4 2 M84 120 l3 4 M60 150 l-5 0" stroke="#c9cdd8" stroke-width="1.2"/>
+                        <g opacity="0.95">
+                          <circle cx="26" cy="76" r="9" fill="#e267b0"/><circle cx="18" cy="70" r="6" fill="#f59ad0"/><circle cx="33" cy="68" r="5" fill="#b28af0"/><circle cx="22" cy="84" r="5" fill="#6f8cf0"/>
+                          <circle cx="104" cy="60" r="9" fill="#b28af0"/><circle cx="112" cy="54" r="6" fill="#f59ad0"/><circle cx="96" cy="52" r="5" fill="#e267b0"/><circle cx="110" cy="68" r="5" fill="#6f8cf0"/>
+                          <circle cx="40" cy="24" r="8" fill="#f59ad0"/><circle cx="32" cy="18" r="5" fill="#e267b0"/><circle cx="48" cy="16" r="5" fill="#b28af0"/>
+                          <circle cx="90" cy="28" r="8" fill="#e267b0"/><circle cx="98" cy="20" r="5" fill="#6f8cf0"/><circle cx="82" cy="20" r="5" fill="#f59ad0"/>
+                          <circle cx="62" cy="50" r="9" fill="#b28af0"/><circle cx="55" cy="42" r="5" fill="#f59ad0"/><circle cx="70" cy="42" r="5" fill="#e267b0"/>
+                          <circle cx="98" cy="104" r="7" fill="#f59ad0"/><circle cx="105" cy="98" r="4.5" fill="#e267b0"/><circle cx="92" cy="98" r="4" fill="#6f8cf0"/>
+                        </g>
+                        <circle cx="30" cy="120" r="2.2" fill="#f59ad0" opacity="0.8"/><circle cx="100" cy="150" r="2" fill="#e267b0" opacity="0.7"/><circle cx="46" cy="160" r="1.8" fill="#b28af0" opacity="0.7"/>
+                        <path d="M40 180 L90 180 L84 206 Q65 216 46 206 Z" fill="url(#urnT)"/>
+                        <rect x="36" y="176" width="58" height="6" rx="2" fill="#dfe3ee"/>
+                        <line x1="44" y1="192" x2="86" y2="192" stroke="#e8c877" stroke-width="1.2"/>
+                        <rect x="58" y="210" width="14" height="6" fill="#9aa0b2"/>
+                        <rect x="50" y="216" width="30" height="8" rx="2" fill="#dfe3ee"/>
+                      </svg>
+                    </div>
+                  </sc-if>
+
+                  <sc-if value="{{shelf.empty}}" hint-placeholder-val="{{false}}">
+                    <div style="position:absolute; left:0; right:0; bottom:60px; text-align:center; font-style:italic; font-size:17px; color:#8f88a8; letter-spacing:0.3px;">This shelf hungers for its first tome…</div>
+                  </sc-if>
+
+                  <sc-if value="{{shelf.showCat}}" hint-placeholder-val="{{false}}">
+                    <div class="familiar awaken" aria-label="Your familiar patrols the shelf">
+                      <div class="facing">
+                        <svg width="44" height="32" viewBox="0 0 44 32" fill="none" style="overflow:visible; display:block;" aria-hidden="true">
+                          <ellipse cx="22" cy="31" rx="16" ry="1.6" fill="rgba(226,103,176,0.35)"/>
+                          <g class="cat-body">
+                            <path class="tail" d="M9 19 C3 17 1 11 4 4" stroke="#0a0710" stroke-width="3" stroke-linecap="round"/>
+                            <g class="legs-a"><rect x="12" y="22" width="2.6" height="8" rx="1.2" fill="#0a0710"/><rect x="27" y="22" width="2.6" height="8" rx="1.2" fill="#0a0710"/></g>
+                            <g class="legs-b"><rect x="16" y="22" width="2.6" height="8" rx="1.2" fill="#0a0710"/><rect x="31" y="22" width="2.6" height="8" rx="1.2" fill="#0a0710"/></g>
+                            <ellipse cx="22" cy="19" rx="13" ry="6.5" fill="#0a0710" stroke="rgba(226,103,176,0.6)" stroke-width="0.7"/>
+                            <circle cx="35" cy="12" r="6.2" fill="#0a0710" stroke="rgba(226,103,176,0.6)" stroke-width="0.7"/>
+                            <path d="M30.5 8.5 L31.5 1.8 L34.5 6.6 Z" fill="#0a0710" stroke="rgba(226,103,176,0.6)" stroke-width="0.6"/>
+                            <path d="M36 6.4 L39.2 1.8 L40.2 8.6 Z" fill="#0a0710" stroke="rgba(226,103,176,0.6)" stroke-width="0.6"/>
+                            <ellipse cx="33.6" cy="11.4" rx="1.2" ry="1.5" fill="#ff8fd2"/>
+                            <ellipse cx="37.4" cy="11.4" rx="1.2" ry="1.5" fill="#ff8fd2"/>
+                            <circle cx="31" cy="17.6" r="1.5" fill="#dfe3ee"/>
+                          </g>
+                        </svg>
+                      </div>
+                    </div>
+                  </sc-if>
+                </div>
+
+                <div class="plank"><div style="position:absolute; left:0; right:0; top:6px; height:1px; background:rgba(201,205,216,0.22);"></div></div>
+                <div class="dentil"></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <!-- plinth -->
+        <div class="wood" style="height:56px; border-top:2px solid rgba(232,200,119,0.6); box-shadow: inset 0 3px 0 rgba(201,205,216,0.18), 0 20px 40px rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center;">
+          <div class="small-caps" style="font-size:11px; color:#dfe3ee; padding:7px 24px; border:1px solid rgba(232,200,119,0.6); border-radius:3px; background:rgba(11,6,19,0.85);">Ex Libris <span style="color:#e8c877; margin:0 6px;">✦</span> {{plaqueName}}</div>
+        </div>
+
+        <sc-if value="{{isSpines}}" hint-placeholder-val="{{true}}">
+        <div style="display:flex; justify-content:center; flex-wrap:wrap; gap:18px; margin-top:16px; font-size:13.5px; font-style:italic; color:#a9a2c2;">
+          <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:7px; height:7px; border-radius:50%; background:#e8c877; box-shadow:0 0 6px #e8c877;"></span>perfect Verdict</span>
+          <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:7px; height:7px; border-radius:50%; background:#b9c3f5;"></span>rated</span>
+          <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:12px; height:4px; background:rgba(244,114,182,0.9);"></span>Smoulder at the foot</span>
+          <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:2px; height:12px; background:#a78bfa;"></span>reading</span>
+          <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:7px; height:7px; border-radius:50%; border:1px solid #67e8f9; box-sizing:border-box;"></span>audio</span>
+          <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:9px; height:12px; border:1px dashed rgba(240,166,224,0.7); box-sizing:border-box;"></span>wishlist</span>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{hasOverflow}}" hint-placeholder-val="{{false}}">
+          <div style="text-align:center; margin-top:14px; font-style:italic; font-size:15px; color:#b7b0cf;">+ {{overflow}} more tomes wait in the next bookcase down the nave</div>
+        </sc-if>
+
+        <!-- will-o'-wisps -->
+        <sc-if value="{{wisps}}" hint-placeholder-val="{{false}}">
+          <div class="awaken" style="position:absolute; inset:0; pointer-events:none; z-index:6;">
+            <div class="wisp" style="left:12%; top:30%; background:radial-gradient(circle,#fff,#f59ad0); box-shadow:0 0 14px 4px rgba(226,103,176,0.7);"></div>
+            <div class="wisp" style="left:28%; top:62%; background:radial-gradient(circle,#fff,#9fb2ff); box-shadow:0 0 14px 4px rgba(91,124,230,0.7); animation-duration:9s; animation-delay:-2s;"></div>
+            <div class="wisp" style="left:46%; top:22%; background:radial-gradient(circle,#fff,#c6a6ff); box-shadow:0 0 14px 4px rgba(154,99,224,0.7); animation-duration:8s; animation-delay:-4s;"></div>
+            <div class="wisp" style="left:63%; top:48%; background:radial-gradient(circle,#fff,#f59ad0); box-shadow:0 0 14px 4px rgba(226,103,176,0.7); animation-duration:6.5s; animation-delay:-1s;"></div>
+            <div class="wisp" style="left:78%; top:72%; background:radial-gradient(circle,#fff,#9fb2ff); box-shadow:0 0 14px 4px rgba(91,124,230,0.7); animation-duration:10s; animation-delay:-5s;"></div>
+            <div class="wisp" style="left:88%; top:30%; background:radial-gradient(circle,#fff,#f59ad0); box-shadow:0 0 14px 4px rgba(226,103,176,0.7); animation-duration:7.5s; animation-delay:-3s;"></div>
+            <div class="wisp" style="left:55%; top:84%; background:radial-gradient(circle,#fff,#c6a6ff); box-shadow:0 0 14px 4px rgba(154,99,224,0.7); animation-duration:8.5s; animation-delay:-6s;"></div>
+          </div>
+        </sc-if>
+
+        <!-- a single soft sweep of light when something wakes -->
+        <sc-if value="{{showShimmer}}" hint-placeholder-val="{{false}}">
+          <div class="shimmer"></div>
+        </sc-if>
+      </div>
+    </div>
+
+    </sc-if>
+
+    <!-- ============ COVERS: the plain grid, as it is in the app today ============ -->
+    <sc-if value="{{isCovers}}" hint-placeholder-val="{{false}}">
+      <div style="width:1000px; margin:26px auto 0 auto;">
+        <sc-if value="{{libraryEmpty}}" hint-placeholder-val="{{false}}">
+          <div style="text-align:center; padding:80px 0; color:#a9a2c2;">
+            <div style="font-family:'Rozha One',Georgia,serif; font-size:22px;">This shelf lies bare.</div>
+            <div style="font-style:italic; font-size:15px; margin-top:8px;">Inscribe a tome to begin the collection.</div>
+          </div>
+        </sc-if>
+        <div style="display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:16px;">
+          <sc-for list="{{coverGrid}}" as="c" hint-placeholder-count="10">
+            <button type="button" class="card" title="{{c.tip}}" onClick="{{c.open}}">
+              <span class="{{c.tomeCls}}">
+                <span class="tome-cover grid-cover" style="background:{{c.coverBg}};">
+                  <span class="cover-inner" style="border-color:{{c.foil}};">
+                    <span style="color:{{c.foil}}; font-size:11px;">✦</span>
+                    <span class="cover-title" style="color:{{c.text}}; font-size:11.5px;">{{c.title}}</span>
+                    <span style="width:30px; height:1px; background:{{c.foil}};"></span>
+                  </span>
+                </span>
+                <span class="corner" style="top:2px; left:3px;">◆</span>
+                <span class="corner" style="top:2px; right:3px;">◆</span>
+                <span class="corner" style="bottom:2px; left:3px;">◆</span>
+                <span class="corner" style="bottom:2px; right:3px;">◆</span>
+                <sc-if value="{{c.hasRead}}" hint-placeholder-val="{{false}}">
+                  <span class="rail-c" style="left:-1px; height:{{c.readH}}; background:rgba(167,139,250,0.9); box-shadow:0 0 6px rgba(167,139,250,0.9);"></span>
+                </sc-if>
+                <sc-if value="{{c.hasAudioRail}}" hint-placeholder-val="{{false}}">
+                  <span class="rail-c" style="right:-1px; height:{{c.audioH}}; background:rgba(34,211,238,0.95); box-shadow:0 0 6px rgba(34,211,238,0.95);"></span>
+                </sc-if>
+              </span>
+              <span class="card-title">{{c.title}}</span>
+              <span class="meter" aria-label="Verdict {{c.overall}} of 5">
+                <sc-for list="{{c.swords}}" as="s" hint-placeholder-count="5">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style="opacity:{{s.op}};" aria-hidden="true"><path d="M12 2 L13.6 13 L12 15 L10.4 13 Z" fill="#dfe3ee"/><line x1="7" y1="15" x2="17" y2="15" stroke="#e8c877" stroke-width="2"/><line x1="12" y1="15" x2="12" y2="21" stroke="#e8c877" stroke-width="2"/></svg>
+                </sc-for>
+              </span>
+              <span class="meter" aria-label="Smoulder {{c.smut}} of 5">
+                <sc-for list="{{c.candles}}" as="s" hint-placeholder-count="5">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style="opacity:{{s.op}};" aria-hidden="true"><rect x="9" y="10" width="6" height="12" rx="1" fill="#f3d9ea"/><path d="M12 2 C14.5 5 14.5 7.5 12 9 C9.5 7.5 9.5 5 12 2 Z" fill="#f472b6"/></svg>
+                </sc-for>
+              </span>
+              <span style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+                <span class="badge" style="background:{{c.shelfBg}}; color:{{c.shelfColor}};">{{c.shelfLabel}}</span>
+                <span class="badge" style="background:{{c.readBg}}; color:{{c.readColor}};">{{c.readLabel}}</span>
+                <sc-if value="{{c.audio}}" hint-placeholder-val="{{false}}">
+                  <span class="badge" style="background:rgba(34,211,238,0.2); color:#a5f3fc; display:inline-flex; align-items:center; gap:4px;">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 14v-3a8 8 0 0116 0v3"/><rect x="2" y="14" width="5" height="7" rx="1.5"/><rect x="17" y="14" width="5" height="7" rx="1.5"/></svg>
+                    Audio
+                  </span>
+                </sc-if>
+              </span>
+            </button>
+          </sc-for>
+        </div>
+        <sc-if value="{{gridHasMore}}" hint-placeholder-val="{{false}}">
+          <div style="text-align:center; margin-top:18px; font-style:italic; font-size:15px; color:#b7b0cf;">+ {{gridMore}} more tomes below — the prototype stops drawing here</div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+
+    <!-- ============ INSCRIBE DIALOG ============ -->
+    <sc-if value="{{inscribeOpen}}" hint-placeholder-val="{{false}}">
+      <div class="scrim"></div>
+      <div class="dialog" role="dialog" aria-modal="true" aria-label="Inscribe a tome">
+        <button type="button" class="whisper-x" aria-label="Close" onClick="{{closeModal}}">×</button>
+        <div class="small-caps" style="font-size:10px; color:#e8c877;">Inscribe a Tome</div>
+        <sc-if value="{{canAdd}}" hint-placeholder-val="{{true}}">
+          <div style="margin-top:14px; font-style:italic; font-size:13.5px; color:#8f88a8;">Stand-in for your book search</div>
+          <div style="margin-top:4px; font-family:'Cinzel',Georgia,serif; font-weight:600; font-size:20px; color:#fff0f8;">{{nextTitle}}</div>
+          <div class="small-caps" style="font-size:9.5px; color:#b7b0cf; margin-top:20px;">Where does it rest?</div>
+          <div class="seg" role="group" aria-label="Reading status" style="margin-top:8px;">
+            <button type="button" class="{{tbrCls}}" aria-pressed="{{addAsUnread}}" onClick="{{pickUnread}}">To be read</button>
+            <button type="button" class="{{doneCls}}" aria-pressed="{{addAsRead}}" onClick="{{pickRead}}">Already read</button>
+          </div>
+          <div style="display:flex; gap:10px; margin-top:24px;">
+            <button type="button" class="cta" onClick="{{confirmInscribe}}">Inscribe</button>
+            <button type="button" class="ghost" onClick="{{closeModal}}">Cancel</button>
+          </div>
+        </sc-if>
+        <sc-if value="{{cannotAdd}}" hint-placeholder-val="{{false}}">
+          <div style="margin-top:14px; font-style:italic; font-size:15px; color:#cfc6e8;">The prototype's list of sample titles is used up. Empty the archive to start again.</div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- ============ TOME DETAIL (stand-in for the detail panel) ============ -->
+    <sc-if value="{{hasDetail}}" hint-placeholder-val="{{false}}">
+      <div class="scrim"></div>
+      <div class="dialog" role="dialog" aria-modal="true" aria-label="{{d.title}}" style="display:flex; gap:22px;">
+        <button type="button" class="whisper-x" aria-label="Close" onClick="{{closeModal}}">×</button>
+        <span class="{{d.tomeCls}}" style="flex-shrink:0; align-self:flex-start;">
+          <span class="tome-cover" style="width:96px; height:144px; background:{{d.coverBg}};">
+            <span class="cover-inner" style="border-color:{{d.foil}};">
+              <span style="color:{{d.foil}}; font-size:10px;">✦</span>
+              <span class="cover-title" style="color:{{d.text}}; font-size:10px;">{{d.title}}</span>
+            </span>
+          </span>
+        </span>
+        <div style="flex:1; min-width:0; padding-right:24px;">
+          <div class="small-caps" style="font-size:9.5px; color:#e8c877;">{{d.shelfLabel}}</div>
+          <div style="margin-top:6px; font-family:'Cinzel',Georgia,serif; font-weight:600; font-size:19px; line-height:1.25; color:#fff0f8;">{{d.title}}</div>
+          <div style="margin-top:6px; font-style:italic; font-size:15px; color:#cfc6e8;">{{d.status}}</div>
+          <div style="display:flex; align-items:center; gap:10px; margin-top:12px;">
+            <span class="small-caps" style="font-size:9px; color:#8f88a8; width:62px;">Verdict</span>
+            <span class="meter" style="margin:0;">
+              <sc-for list="{{d.swords}}" as="s" hint-placeholder-count="5">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="opacity:{{s.op}};" aria-hidden="true"><path d="M12 2 L13.6 13 L12 15 L10.4 13 Z" fill="#dfe3ee"/><line x1="7" y1="15" x2="17" y2="15" stroke="#e8c877" stroke-width="2"/><line x1="12" y1="15" x2="12" y2="21" stroke="#e8c877" stroke-width="2"/></svg>
+              </sc-for>
+            </span>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; margin-top:4px;">
+            <span class="small-caps" style="font-size:9px; color:#8f88a8; width:62px;">Smoulder</span>
+            <span class="meter" style="margin:0;">
+              <sc-for list="{{d.candles}}" as="s" hint-placeholder-count="5">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="opacity:{{s.op}};" aria-hidden="true"><rect x="9" y="10" width="6" height="12" rx="1" fill="#f3d9ea"/><path d="M12 2 C14.5 5 14.5 7.5 12 9 C9.5 7.5 9.5 5 12 2 Z" fill="#f472b6"/></svg>
+              </sc-for>
+            </span>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; margin-top:20px;">
+            <sc-if value="{{d.canMark}}" hint-placeholder-val="{{true}}">
+              <button type="button" class="cta" onClick="{{d.markRead}}">Mark as read</button>
+            </sc-if>
+            <sc-if value="{{d.isRead}}" hint-placeholder-val="{{false}}">
+              <span class="small-caps" style="font-size:11px; color:#e8c877; display:inline-flex; align-items:center; gap:6px;">✦ Finished</span>
+              <button type="button" class="ghost" onClick="{{d.markUnread}}">Mark unread</button>
+            </sc-if>
+            <sc-if value="{{d.wish}}" hint-placeholder-val="{{false}}">
+              <span style="font-style:italic; font-size:14px; color:#a9a2c2;">On your wishlist. Only finished tomes wake the archive.</span>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+
+<script type="text/x-dc" data-dc-script data-props='{"viewer":{"editor":"enum","options":["crystal","partner"],"default":"crystal","section":"Prototype"},"startingTomes":{"editor":"range","min":0,"max":54,"step":1,"default":10,"section":"Prototype"},"startingRead":{"editor":"range","min":0,"max":54,"step":1,"default":2,"section":"Prototype"},"$preview":{"width":1440,"height":1720}}'>
+class Component extends DCLogic {
+  // Thresholds count FINISHED tomes only. They live here and nowhere on screen.
+  milestones() {
+    return [
+      { t: 1,  name: 'Candlelight',          desc: 'Sconces flicker to life along the nave.',            hint: '' },
+      { t: 3,  name: 'Creeping Ivy',         desc: 'Ivy climbs the columns and drapes every arch.',       hint: 'Something green is testing the stone.' },
+      { t: 6,  name: 'Stained Glass Wakes',  desc: 'The rose window floods the archive with color.',      hint: 'Colored light flickers behind the glass, then fades.' },
+      { t: 10, name: 'Night Roses',          desc: 'A silver urn of midnight roses claims a shelf.',      hint: 'The scent of roses drifts through the nave.' },
+      { t: 15, name: 'The Familiar',         desc: 'A small shadow begins patrolling your shelves.',      hint: 'Small footsteps pad somewhere in the dark.' },
+      { t: 21, name: 'Thornwood Sapling',    desc: 'A blossoming thorn tree takes root.',                 hint: 'A root has cracked the floor between the shelves.' },
+      { t: 30, name: "Will-o'-Wisps",        desc: 'Wandering lights drift between the tomes.',           hint: 'A pale light blinked at the edge of your sight.' },
+      { t: 42, name: 'The Hushthorn Blooms', desc: 'The crown of the cathedral flowers in roses.',        hint: 'The thorns above the arch are budding.' }
+    ];
+  }
+
+  // Sample libraries. Titles are the join key, as in the real union model.
+  pool(who) {
+    if (who === 'partner') {
+      return [
+        'A Court of Thorns and Roses', 'Fourth Wing', 'From Blood and Ash', 'Caraval', 'Haunting Adeline',
+        'The Cruel Prince', 'Throne of Glass', 'Iron Flame', 'Powerless', 'Divine Rivals', 'Quicksilver', 'Onyx Storm',
+        'The Night Circus', 'Mexican Gothic', 'Rebecca', 'Ninth House', 'Hell Bent', 'A Deadly Education',
+        'The Invisible Life of Addie LaRue', 'Uprooted', 'Spinning Silver', 'The Bear and the Nightingale',
+        'Shadow and Bone', 'Six of Crows', 'Crooked Kingdom', 'Legendborn', 'Bloodmarked', 'The Atlas Six',
+        'Babel', 'Vicious', 'Vengeful', 'A Darker Shade of Magic', 'Gallant', 'The Starless Sea', 'House of Hollow',
+        'Bunny', 'Plain Bad Heroines', 'Wuthering Heights', 'Jane Eyre', 'Frankenstein'
+      ];
+    }
+    return [
+      'A Court of Mist and Fury', 'A Court of Silver Flames', 'A Court of Thorns and Roses', 'A Court of Wings and Ruin',
+      'A Dawn of Onyx', 'A Kingdom of Flesh and Fire', 'A Little Hatred', 'A Soul to Keep', 'A Touch of Darkness',
+      'Before We Were Villains', 'Blood of Hercules', 'Butcher & Blackbird', 'Butter', 'Caraval', 'Caught Up',
+      'Daughter of the Moon Goddess', 'Den of Vipers', 'Dire Bound', 'Filthy Rich Vampires', 'Foxglove King',
+      'From Blood and Ash', 'Fury Bound', 'God of Malice', 'Gothikana', 'Haunting Adeline', 'Fourth Wing', 'Iron Flame',
+      'Onyx Storm', 'Throne of Glass', 'Crown of Midnight', 'Heir of Fire', 'Queen of Shadows', 'Empire of Storms',
+      'Kingdom of Ash', 'House of Earth and Blood', 'House of Sky and Breath', 'House of Flame and Shadow',
+      'The Cruel Prince', 'The Wicked King', 'The Queen of Nothing', 'Powerless', 'Reckless', 'Serpent & Dove',
+      'Blood & Honey', 'Gods & Monsters', 'Divine Rivals', 'Ruthless Vows', 'The Serpent and the Wings of Night',
+      'The Ashes and the Star-Cursed King', 'Quicksilver', 'Kingdom of the Wicked', 'Kingdom of the Cursed',
+      'Kingdom of the Feared', 'A Fate Inked in Blood'
+    ];
+  }
+
+  hash(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return h;
+  }
+
+  viewer() { return this.props.viewer === 'partner' ? 'partner' : 'crystal'; }
+
+  // Personal state per member. Private: nothing here is ever shown to the other.
+  member(who) {
+    const s = this.state || {};
+    if (s.members && s.members[who]) return s.members[who];
+    const pool = this.pool(who);
+    const count = who === 'partner' ? 30 : Math.max(0, Math.min(pool.length, this.props.startingTomes ?? 10));
+    const want = who === 'partner' ? 16 : Math.max(0, this.props.startingRead ?? 2);
+    const read = {};
+    let n = 0;
+    for (let i = 0; i < count && n < want; i++) {
+      if (this.isWish(pool[i], who)) continue;
+      read[pool[i]] = true; n++;
+    }
+    return { count: count, read: read, peak: n, nudged: {} };
+  }
+
+  isWish(title, who) { return (this.hash(title + who) >> 2) % 11 === 9; }
+  finishedCount(m) { return Object.keys(m.read).length; }
+
+  // Every add and every "mark as read" runs through here.
+  commit(who, next, extra) {
+    const s = this.state || {};
+    const prev = this.member(who);
+    const ms = this.milestones();
+    const peak = Math.max(prev.peak, this.finishedCount(next));
+    const nudged = Object.assign({}, prev.nudged);
+    let toast = null;
+
+    const crossed = ms.filter((m) => m.t > prev.peak && m.t <= peak);
+    if (crossed.length) {
+      crossed.forEach((m) => { nudged[m.t] = true; });
+      toast = { who: who, kind: 'unlock', items: crossed.map((m) => ({ name: m.name, desc: m.desc })) };
+    } else {
+      const nx = ms.find((m) => m.t > peak);
+      if (nx) {
+        const reached = ms.filter((m) => m.t <= peak);
+        const prevT = reached.length ? reached[reached.length - 1].t : 0;
+        const gap = nx.t - prevT;
+        if (gap >= 2 && peak >= prevT + Math.ceil(gap / 2) && !nudged[nx.t]) {
+          nudged[nx.t] = true;
+          toast = { who: who, kind: 'nudge', hint: nx.hint };
+        }
+      }
+    }
+
+    const members = Object.assign({ crystal: this.member('crystal'), partner: this.member('partner') }, s.members || {});
+    members[who] = { count: next.count, read: next.read, peak: peak, nudged: nudged };
+    const patch = Object.assign({ members: members, modal: null }, extra || {});
+    if (toast) patch.toast = toast;
+    this.setState(patch);
+    if (toast) {
+      clearTimeout(this._toastTimer);
+      this._toastTimer = setTimeout(() => this.setState({ toast: null }), toast.kind === 'unlock' ? 7000 : 5500);
+    }
+  }
+
+  componentWillUnmount() { clearTimeout(this._toastTimer); }
+
+  inscribe(asRead) {
+    const who = this.viewer();
+    const m = this.member(who);
+    const pool = this.pool(who);
+    if (m.count >= pool.length) return;
+    const read = Object.assign({}, m.read);
+    if (asRead) read[pool[m.count]] = true;
+    this.commit(who, { count: m.count + 1, read: read });
+  }
+
+  setRead(title, on) {
+    const who = this.viewer();
+    const m = this.member(who);
+    const read = Object.assign({}, m.read);
+    if (on) read[title] = true; else delete read[title];
+    this.commit(who, { count: m.count, read: read });
+  }
+
+  renderVals() {
+    const s = this.state || {};
+    const who = this.viewer();
+    const other = who === 'crystal' ? 'partner' : 'crystal';
+    const me = this.member(who);
+    const them = this.member(other);
+    const view = s.view || 'spines';
+    const isCovers = view === 'covers';
+    const isShared = s.shelf === 'shared';
+    const ms = this.milestones();
+    const has = (t) => me.peak >= t;
+
+    const tones = [
+      { a: '#1f2458', b: '#0b0d26', text: '#e3e8fb' },
+      { a: '#35307a', b: '#15133d', text: '#e6e2fb' },
+      { a: '#5b2a8c', b: '#261043', text: '#efe0fb' },
+      { a: '#702463', b: '#300e2b', text: '#fbe0f1' },
+      { a: '#a4417c', b: '#521a40', text: '#fff0f7' },
+      { a: '#8458b8', b: '#3b2260', text: '#f5ecff' },
+      { a: '#1d1624', b: '#07050b', text: '#f1d58f' },
+      { a: '#2b4f95', b: '#10214a', text: '#e6eeff' },
+      { a: '#c0588f', b: '#6a2350', text: '#fff3f9' }
+    ];
+    const GOLD = 'linear-gradient(90deg, #7a5a22, #f3dc9a, #7a5a22)';
+    const SILVER = 'linear-gradient(90deg, #5d6172, #f2f4fa, #5d6172)';
+
+    // Which books are on this shelf, and who owns each.
+    const mine = this.pool(who).slice(0, me.count);
+    const theirs = this.pool(other).slice(0, them.count);
+    const owners = {};
+    mine.forEach((t) => { owners[t] = (owners[t] || 0) + 1; });
+    if (isShared) theirs.forEach((t) => { owners[t] = (owners[t] || 0) + 1; });
+    const onShelf = Object.keys(owners).sort((a, b) => a.localeCompare(b));
+    const mineSet = {};
+    mine.forEach((t) => { mineSet[t] = true; });
+
+    const meta = onShelf.map((title) => {
+      const h = this.hash(title);
+      const read = !!me.read[title];
+      const wish = !isShared && !read && this.isWish(title, who);
+      const audio = (h >> 7) % 4 === 1;
+      const readPct = !read && !wish && (h >> 8) % 6 === 2 ? 35 + (h % 45) : 0;
+      return {
+        title: title, h: h, read: read, wish: wish, audio: audio, readPct: readPct,
+        audioPct: !read && audio && (h >> 9) % 8 === 5 ? 60 : 0,
+        tone: tones[h % tones.length],
+        silver: (h >> 3) % 3 === 1,
+        rot: (h >> 5) % 9 === 4 ? -2.5 : ((h >> 6) % 13 === 7 ? 2 : 0),
+        overall: read ? [5, 4, 3, 5, 4][h % 5] : 0,
+        smut: read ? (h >> 10) % 6 : 0,
+        owners: owners[title],
+        mineOwned: !!mineSet[title]
+      };
+    });
+
+    const tipOf = (m) => m.title + (m.read ? ' · finished' : '') + (m.wish ? ' · wishlist' : '') + (isShared && m.owners > 1 ? ' · both own a copy' : '') + (m.readPct ? ' · ' + m.readPct + '% read' : '') + (m.audioPct ? ' · ' + m.audioPct + '% listened' : '');
+    const open = (m) => () => this.setState({ modal: { title: m.title } });
+    const coverBgOf = (m) => 'radial-gradient(circle at 50% 28%, rgba(255,255,255,0.14), transparent 60%), linear-gradient(160deg, ' + m.tone.a + ', ' + m.tone.b + ')';
+    const stars = (v) => [1, 2, 3, 4, 5].map((k) => ({ op: k <= v ? 1 : 0.2 }));
+
+    const toSpine = (m) => ({
+      title: m.title,
+      tip: tipOf(m),
+      open: open(m),
+      finished: m.read,
+      union: isShared,
+      solo: !isShared,
+      ownerCount: m.owners,
+      w: 28 + (m.h % 11),
+      h: 176 + ((m.h >> 4) % 51),
+      rot: m.rot ? 'rotate(' + m.rot + 'deg)' : 'none',
+      mx: m.rot ? 4 : 0,
+      bg: 'linear-gradient(90deg, rgba(0,0,0,0.45) 0%, rgba(255,255,255,0.10) 22%, rgba(255,255,255,0.03) 48%, rgba(0,0,0,0.5) 100%), linear-gradient(180deg, ' + m.tone.a + ', ' + m.tone.b + ')',
+      text: m.tone.text,
+      foil: m.silver ? SILVER : GOLD,
+      opacity: m.wish ? 0.6 : 1,
+      border: m.wish ? '1px dashed rgba(240,166,224,0.55)' : 'none',
+      verdictBg: m.overall >= 5 ? 'radial-gradient(circle at 35% 30%, #fff6d8, #e8c877)' : (m.overall > 0 ? 'radial-gradient(circle at 35% 30%, #ffffff, #b9c3f5)' : 'rgba(255,255,255,0.15)'),
+      verdictGlow: m.overall >= 5 ? '0 0 7px rgba(232,200,119,0.95)' : (m.overall > 0 ? '0 0 4px rgba(185,195,245,0.6)' : 'none'),
+      audio: m.audio,
+      hasRead: m.readPct > 0,
+      readH: 'calc(' + m.readPct + '% - 5px)',
+      hasAudioRail: m.audioPct > 0,
+      audioH: 'calc(' + m.audioPct + '% - 5px)',
+      smoulderBg: m.smut > 0 ? 'rgba(244,114,182,' + (0.2 + m.smut * 0.16).toFixed(2) + ')' : 'rgba(255,255,255,0.08)',
+      smoulderGlow: m.smut >= 4 ? '0 0 8px rgba(244,114,182,0.7)' : 'none'
+    });
+
+    const ownerLabel = (m) => m.owners > 1 ? 'Both own' : (m.mineOwned ? 'Yours' : 'Theirs');
+    const toGridCover = (m) => ({
+      title: m.title,
+      tip: tipOf(m),
+      open: open(m),
+      tomeCls: m.wish ? 'tome ghost' : 'tome',
+      coverBg: coverBgOf(m),
+      text: m.tone.text,
+      foil: m.silver ? '#dfe3ee' : '#e8c877',
+      hasRead: m.readPct > 0,
+      readH: m.readPct + '%',
+      hasAudioRail: m.audioPct > 0,
+      audioH: m.audioPct + '%',
+      overall: m.overall,
+      smut: m.smut,
+      swords: stars(m.overall),
+      candles: stars(m.smut),
+      audio: m.audio,
+      shelfLabel: isShared ? ownerLabel(m) : (m.wish ? 'Wishlist' : 'Owned'),
+      shelfBg: isShared ? 'rgba(236,72,153,0.3)' : (m.wish ? 'rgba(236,72,153,0.2)' : 'rgba(99,102,241,0.3)'),
+      shelfColor: isShared ? '#fce7f3' : (m.wish ? '#fbcfe8' : '#c7d2fe'),
+      readLabel: m.read ? 'Read' : 'Unread',
+      readBg: m.read ? 'rgba(168,85,247,0.3)' : 'rgba(59,7,100,0.6)',
+      readColor: m.read ? '#e9d5ff' : '#c084fc'
+    });
+
+    const CAP = 54;
+    const ivy = has(3);
+    const shelves = [0, 1, 2].map((k) => {
+      const slice = meta.slice(k * 18, k * 18 + 18);
+      return {
+        books: isCovers ? [] : slice.map(toSpine),
+        empty: slice.length === 0,
+        ivy: ivy,
+        showCat: k === 0 && has(15),
+        showRoses: k === 1 && has(10),
+        showTree: k === 2 && has(21)
+      };
+    });
+
+    const GRID_MAX = 15;
+    const found = ms.filter((m) => me.peak >= m.t);
+    const toast = s.toast && s.toast.who === who ? s.toast : null;
+    const isUnlock = !!toast && toast.kind === 'unlock';
+    const isNudge = !!toast && toast.kind === 'nudge';
+
+    const dm = s.modal && s.modal.title ? meta.find((m) => m.title === s.modal.title) : null;
+    const d = dm ? {
+      title: dm.title,
+      tomeCls: dm.wish ? 'tome ghost' : 'tome',
+      coverBg: coverBgOf(dm),
+      text: dm.tone.text,
+      foil: dm.silver ? '#dfe3ee' : '#e8c877',
+      shelfLabel: isShared ? (dm.owners > 1 ? 'Shared · you both own a copy' : (dm.mineOwned ? 'Shared · your copy' : 'Shared · their copy')) : (dm.wish ? 'Wishlist' : 'Owned'),
+      status: dm.read ? 'Finished' : (dm.wish ? 'Waiting on your wishlist' : (dm.readPct ? 'Reading · ' + dm.readPct + '%' : 'Unread by you')),
+      swords: stars(dm.overall),
+      candles: stars(dm.smut),
+      canMark: !dm.read && !dm.wish,
+      isRead: dm.read,
+      wish: dm.wish,
+      markRead: () => this.setRead(dm.title, true),
+      markUnread: () => this.setRead(dm.title, false)
+    } : { swords: [], candles: [] };
+
+    const addAsRead = !!s.addAsRead;
+    const myPool = this.pool(who);
+    const canAdd = me.count < myPool.length;
+
+    return {
+      count: onShelf.length,
+      readCount: meta.filter((m) => m.read).length,
+      isCovers: isCovers,
+      isSpines: !isCovers,
+      coversCls: isCovers ? 'on' : '',
+      spinesCls: isCovers ? '' : 'on',
+      showCovers: () => this.setState({ view: 'covers' }),
+      showSpines: () => this.setState({ view: 'spines' }),
+
+      isShared: isShared,
+      shelfName: isShared ? 'The Shared Archive' : 'My Library',
+      toggleShelf: () => this.setState({ shelf: isShared ? 'mine' : 'shared', modal: null, cabinet: false }),
+      plaqueName: isShared ? 'Crystal & [Partner]' : 'Hushthorn',
+
+      litCandles: has(1),
+      ivy: ivy,
+      glassOpacity: has(6) ? 1 : 0.28,
+      glassFilter: has(6) ? 'drop-shadow(0 0 14px rgba(226,103,176,0.6)) drop-shadow(0 0 28px rgba(91,124,230,0.4))' : 'grayscale(0.7) brightness(0.7)',
+      wisps: has(30),
+      bloom: has(42),
+      segments: [{ id: 1 }, { id: 2 }, { id: 3 }],
+      shelves: shelves,
+      hasOverflow: meta.length > CAP,
+      overflow: Math.max(0, meta.length - CAP),
+
+      libraryEmpty: meta.length === 0,
+      coverGrid: meta.slice(0, GRID_MAX).map(toGridCover),
+      gridHasMore: meta.length > GRID_MAX,
+      gridMore: Math.max(0, meta.length - GRID_MAX),
+
+      hasRelics: found.length > 0,
+      foundRelics: found.map((m) => ({ name: m.name, desc: m.desc })),
+      cabinetOpen: !!s.cabinet,
+      toggleCabinet: () => this.setState({ cabinet: !s.cabinet }),
+
+      hasToast: !!toast,
+      whisperCls: isNudge ? 'whisper nudge' : 'whisper',
+      toastIsUnlock: isUnlock,
+      toastIsNudge: isNudge,
+      toastList: isUnlock ? toast.items : [],
+      toastHint: isNudge ? toast.hint : '',
+      toastHeading: isNudge ? 'The archive is close to waking something…' : (isUnlock && toast.items.length > 1 ? 'Several things stir in the archive…' : 'Something stirs in the archive…'),
+      showShimmer: isUnlock && !isCovers,
+      dismissToast: () => { clearTimeout(this._toastTimer); this.setState({ toast: null }); },
+
+      inscribeOpen: s.modal === 'inscribe',
+      openInscribe: () => this.setState({ modal: 'inscribe', addAsRead: false, cabinet: false }),
+      canAdd: canAdd,
+      cannotAdd: !canAdd,
+      nextTitle: canAdd ? myPool[me.count] : '',
+      addAsRead: addAsRead,
+      addAsUnread: !addAsRead,
+      tbrCls: addAsRead ? '' : 'on',
+      doneCls: addAsRead ? 'on' : '',
+      pickUnread: () => this.setState({ addAsRead: false }),
+      pickRead: () => this.setState({ addAsRead: true }),
+      confirmInscribe: () => this.inscribe(addAsRead),
+
+      hasDetail: !!dm,
+      d: d,
+      closeModal: () => this.setState({ modal: null })
+    };
+  }
+}
+</script>
+</body>
+</html>

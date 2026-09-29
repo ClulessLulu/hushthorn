@@ -89,6 +89,16 @@ design was superseded and dropped). Genuinely unshipped:
   virtualization for very large shelves. (The spine shelf itself, cover-sampled
   spine colors, and the `spine_color` column are already shipped.)
 
+- **Cathedral spine shelf** — designed, NOT built yet. Plan:
+  `docs/superpowers/plans/2026-09-29-cathedral-spine-shelf.md` (read it first).
+  Art spec + v1 asset audit (which images are swaps vs overlays):
+  `docs/CATHEDRAL_ART_SPEC.md`. Runtime assets: `public/cathedral/*.webp`
+  (optimized; sources in `output/cathedral-v1/`, never load those at runtime).
+  Behavior reference: `prototype/cathedral/` (design-canvas files — port the
+  logic in their `class Component` script, not the markup). Spines view only;
+  Covers view unchanged; unlock progress is private per reader. Plan Task 8
+  covers the "Spine shelf at scale" item above.
+
 - **The Visage (avatar creation)** — BUILT, shipped **dormant** behind the
   `VISAGE_ENABLED` flag (`src/App.jsx`, currently `false`). Gallery + Atelier +
   seal-to-Storage are implemented and integrated; the flag hides the editor UI

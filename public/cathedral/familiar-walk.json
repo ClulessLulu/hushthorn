@@ -1,0 +1,13 @@
+{
+  "atlas": "familiar-walk.webp",
+  "width": 1024,
+  "height": 96,
+  "frameWidth": 128,
+  "frameHeight": 96,
+  "frames": 8,
+  "fps": 8,
+  "direction": "right",
+  "loop": true,
+  "framesOrder": "left to right",
+  "note": "AI-generated pose sequence; gait and body shape vary slightly between frames. Preview before shipping."
+}
