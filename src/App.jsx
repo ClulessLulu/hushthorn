@@ -1936,6 +1936,12 @@ export default function Hushthorn() {
 
   const [books, setBooks] = useState([]);
   const [dataLoading, setDataLoading] = useState(false);
+  // Cathedral spine-shelf progress (docs/superpowers/plans/2026-09-29-cathedral-spine-shelf.md).
+  // Strictly private: never fetched for a co-member, never joined into
+  // archive_shelf/archive_reveal. `nudged` is every threshold already unlocked
+  // or hinted, so a reload never re-fires either. Defaults to a fresh baseline
+  // until the load effect below resolves the real row (or backfills one).
+  const [cathedralProgress, setCathedralProgress] = useState({ peak: 0, nudged: [], seenIntro: false });
   const [avatar, setAvatar] = useState({
     name: 'Keeper of the Archive',
     gender: 'nonbinary',
@@ -1966,10 +1972,16 @@ export default function Hushthorn() {
       supabase.from('profiles').select('username').eq('user_id', uid).maybeSingle(),
       // Shared archives this user belongs to, with the user's own role.
       supabase.from('libraries').select('id,name,library_members(user_id,role)'),
-    ]).then(([{ data: booksData, error: bErr }, { data: notesData, error: nErr }, { data: avatarData }, { data: profileData }, { data: libsData, error: lErr }]) => {
+      // Cathedral progress: owner-only row, 0 or 1 per reader. On production
+      // (pre-migration) or any query error this rejects nothing — supabase-js
+      // resolves query errors as { data:null, error }, it never throws — so
+      // this can never block books/avatar/profile from loading.
+      supabase.from('cathedral_progress').select('*').eq('user_id', uid).maybeSingle(),
+    ]).then(([{ data: booksData, error: bErr }, { data: notesData, error: nErr }, { data: avatarData }, { data: profileData }, { data: libsData, error: lErr }, { data: cpData, error: cpErr }]) => {
       if (bErr) console.error('books fetch:', bErr.message);
       if (nErr) console.error('notes fetch:', nErr.message);
       if (lErr) console.error('libraries fetch:', lErr.message);
+      if (cpErr) console.error('cathedral_progress fetch:', cpErr.message);
       const notesByBook = {};
       for (const n of (notesData || [])) {
         if (!notesByBook[n.book_id]) notesByBook[n.book_id] = [];
@@ -1978,7 +1990,7 @@ export default function Hushthorn() {
           text: n.text, isVoice: n.is_voice, date: n.date, isTime: n.is_time,
         });
       }
-      setBooks((booksData || []).map(b => ({
+      const mappedBooks = (booksData || []).map(b => ({
         id: b.id, title: b.title, author: b.author, year: b.year,
         coverUrl: b.cover_url, genres: b.genres || [], tropes: b.tropes || [], shelf: b.shelf,
         read: b.read, overall: b.overall, smut: b.smut,
@@ -1987,7 +1999,27 @@ export default function Hushthorn() {
         progress: (b.progress && typeof b.progress === 'object') ? b.progress : {},
         hidden: !!b.hidden_from_archives,
         notes: notesByBook[b.id] || [],
-      })));
+      }));
+      setBooks(mappedBooks);
+      if (cpData) {
+        setCathedralProgress({ peak: cpData.peak_finished, nudged: cpData.nudged || [], seenIntro: !!cpData.seen_intro });
+      } else if (!cpErr) {
+        // Genuine "no row yet" (query succeeded, 0 rows) — decision 7's backfill:
+        // an existing reader's history counts silently instead of replaying
+        // every unlock one at a time. Every threshold at/under their current
+        // peak is marked nudged too, since there's no "getting close" hint left
+        // to show for something already earned. Task 6 owns showing the ONE
+        // intro card and flipping seen_intro true when it does; this only
+        // creates the row so that moment has real data to read.
+        const finished = finishedCountOf(mappedBooks);
+        const backfillNudged = CATHEDRAL_MILESTONES.filter((m) => m.t <= finished).map((m) => m.t);
+        setCathedralProgress({ peak: finished, nudged: backfillNudged, seenIntro: false });
+        supabase.rpc('bump_cathedral_progress', { p_finished: finished, p_nudged: backfillNudged })
+          .then(({ error }) => { if (error) console.error('cathedral backfill:', error.message); });
+      }
+      // cpErr and no cpData: table missing or another query error — keep the
+      // useState default (peak 0, nudged []) and attempt nothing further. This
+      // is the expected state on production before the migration is promoted.
       if (avatarData) setAvatar({
         name: avatarData.name, gender: avatarData.gender,
         hair_color: avatarData.hair_color, skin_tone: avatarData.skin_tone,
@@ -2316,6 +2348,10 @@ export default function Hushthorn() {
     // write failure below we keep the local rows for this session and report
     // failure — re-importing after the fault is safe (dedupe absorbs it).
     setBooks(next);
+    // ONE check for the whole batch, not per book — a bulk import crossing
+    // several thresholds must produce a single unlock event listing all of
+    // them (Task 2 test case 6), never one event per threshold.
+    runCathedralCheck(next);
     if (!additions.length && !updates.length) return true; // idempotent re-import: nothing to write
 
     const uid = session.user.id;
@@ -2443,6 +2479,30 @@ export default function Hushthorn() {
   // `hidden_from_archives` flag that removes a book from the archive union.
   const FIELD_MAP = { title: 'title', author: 'author', coverUrl: 'cover_url', overall: 'overall', smut: 'smut', shelf: 'shelf', read: 'read', genres: 'genres', spineColor: 'spine_color', formats: 'formats', progress: 'progress', hidden: 'hidden_from_archives', tropes: 'tropes' };
 
+  // Recompute cathedral progress from the FULL post-mutation books array and
+  // persist only when something actually changed. Called once after every
+  // add/update/remove and once after a whole import batch (never per-book in
+  // a loop) — a bulk import crossing several thresholds must fire ONE unlock
+  // event listing all of them, not one event per threshold. `event` (the
+  // notification content) is computed but not yet consumed anywhere; Task 6
+  // wires it to the actual notification UI.
+  const runCathedralCheck = async (nextBooks) => {
+    const finished = finishedCountOf(nextBooks);
+    const { peak, nudged, event } = evaluateCathedral(cathedralProgress, finished);
+    // nudged only ever grows (evaluateCathedral seeds its Set from prev.nudged
+    // and only adds), so an unchanged length means unchanged content — a
+    // cheap, correct guard against writing when nothing actually moved.
+    if (peak === cathedralProgress.peak && nudged.length === cathedralProgress.nudged.length) return;
+    const { data, error } = await supabase.rpc('bump_cathedral_progress', { p_finished: peak, p_nudged: nudged });
+    if (error) { console.error('cathedral bump:', error.message); return; }
+    // Trust the server's row over the locally-computed one: it's already
+    // merged monotonically with whatever another open tab may have written
+    // (bump_cathedral_progress's own GREATEST/union logic), so two tabs
+    // converge on the same peak regardless of which one's write lands last.
+    setCathedralProgress({ peak: data.peak_finished, nudged: data.nudged || [], seenIntro: !!data.seen_intro });
+    void event; // TODO(Task 6): surface unlock/nudge notifications from this.
+  };
+
   const updateBook = async (id, patch) => {
     // `tropes` goes through the validator here too, not just in the picker.
     // FIELD_MAP writes patch values straight to the column, so without this a
@@ -2497,7 +2557,9 @@ export default function Hushthorn() {
       // only chance to catch a bad tag, so it must not list books it never wrote.
       if (error) { console.error('updateBook:', error.message); return false; }
     }
-    setBooks(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
+    const nextBooks = books.map(b => b.id === id ? { ...b, ...patch } : b);
+    setBooks(nextBooks);
+    runCathedralCheck(nextBooks);
     // Mirror onto the archive union too: a UnionBook keyed on this row (my copy)
     // gets my marks/notes/hidden patched so an open archive detail stays in sync.
     // NOTE: patches top-level fields but NOT the entry's `owners[]` "me" row — fine
@@ -2524,7 +2586,11 @@ export default function Hushthorn() {
   const removeBook = async (id) => {
     const { error } = await supabase.from('books').delete().eq('id', id);
     if (error) { console.error('removeBook:', error.message); return; }
-    setBooks(prev => prev.filter(b => b.id !== id));
+    const nextBooks = books.filter(b => b.id !== id);
+    setBooks(nextBooks);
+    // peak is monotonic (Math.max), so deleting a finished book can never lower
+    // it — this only matters for consistency/idempotency, never re-locks anything.
+    runCathedralCheck(nextBooks);
     setSharedBooks(prev => prev.filter(b => b.mineBookId !== id));
     setActiveId(null);
   };
@@ -2629,7 +2695,9 @@ export default function Hushthorn() {
       progress: book.progress || {},
     });
     if (error) { console.error('addBook:', error.message); return; }
-    setBooks(prev => [{ ...book, id, tropes: normalizeTropes(book.tropes, TROPE_MAX), progress: book.progress || {}, notes: [] }, ...prev]);
+    const nextBooks = [{ ...book, id, tropes: normalizeTropes(book.tropes, TROPE_MAX), progress: book.progress || {}, notes: [] }, ...books];
+    setBooks(nextBooks);
+    runCathedralCheck(nextBooks);
     setAddOpen(false);
     // In an archive the active shelf is the union (entries resolve by `key`, not
     // `id`), and it doesn't auto-refresh on insert. So after adding from an archive,
