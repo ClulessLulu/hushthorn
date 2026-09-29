@@ -519,6 +519,103 @@ function normalizeTropes(list, max = TROPE_MAX) {
   return out;
 }
 
+/* ── cathedral progress engine ─────────────────────────────────
+   Pure helpers, no I/O. Thresholds count FINISHED tomes only and are never
+   rendered as a number anywhere — only the unlock name/desc or the nudge
+   hint. Ported from `commit()`/`milestones()` in
+   prototype/cathedral/library.dc.html: same crossed-thresholds-first,
+   nudge-only-when-nothing-unlocked logic, same halfway formula. The
+   prototype's version also drives React state and a toast auto-dismiss
+   timer — that wiring is Task 3, not here. */
+const CATHEDRAL_MILESTONES = [
+  { t: 1,  name: "Candlelight",          desc: "Sconces flicker to life along the nave.",          hint: "" },
+  { t: 3,  name: "Creeping Ivy",         desc: "Ivy climbs the columns and drapes every arch.",     hint: "Something green is testing the stone." },
+  { t: 6,  name: "Stained Glass Wakes",  desc: "The rose window floods the archive with color.",   hint: "Colored light flickers behind the glass, then fades." },
+  { t: 10, name: "Night Roses",          desc: "A silver urn of midnight roses claims a shelf.",    hint: "The scent of roses drifts through the nave." },
+  { t: 15, name: "The Familiar",         desc: "A small shadow begins patrolling your shelves.",    hint: "Small footsteps pad somewhere in the dark." },
+  { t: 21, name: "Thornwood Sapling",    desc: "A blossoming thorn tree takes root.",               hint: "A root has cracked the floor between the shelves." },
+  { t: 30, name: "Will-o'-Wisps",        desc: "Wandering lights drift between the tomes.",         hint: "A pale light blinked at the edge of your sight." },
+  { t: 42, name: "The Hushthorn Blooms", desc: "The crown of the cathedral flowers in roses.",      hint: "The thorns above the arch are budding." },
+];
+
+// Own rows only, finished = read and not wishlist, deduped by normalized
+// title (print + ebook rows of the same book count once). Malformed rows
+// (no title, wishlist marked read by a data glitch) never count.
+function finishedCountOf(books) {
+  const seen = new Set();
+  for (const b of books || []) {
+    if (!b || b.read !== true || b.shelf === "wishlist") continue;
+    const key = (b.title || "").trim().toLowerCase();
+    if (!key) continue;
+    seen.add(key);
+  }
+  return seen.size;
+}
+
+// `prev` = { peak, nudged } as last persisted (nudged: number[] of crossed-or-
+// hinted thresholds, matching the `cathedral_progress.nudged` column shape).
+// Returns { peak, nudged, event }. `event` is null, or exactly one of:
+//   { kind: 'unlock', items: [{ name, desc }, ...] } — every threshold newly
+//     crossed since `prev.peak`, in one event (a bulk import can cross
+//     several at once). Marks each crossed threshold nudged too, so it can
+//     never also produce a "getting close" hint for something already won.
+//   { kind: 'nudge', hint } — only when NOTHING unlocked this call. Fires
+//     once, past the halfway point to the next threshold: prevT = the
+//     highest already-reached threshold (0 if none), gap = next.t − prevT,
+//     fires when gap ≥ 2 and peak ≥ prevT + ceil(gap/2) and that threshold
+//     hasn't been nudged yet. A gap of exactly 1 never nudges (there's no
+//     room for a "getting close" hint between two adjacent thresholds).
+// peak is monotonic: Math.max(prev.peak, finished) — marking a book unread
+// can lower `finished` but never lowers `peak`, so nothing ever re-locks.
+//
+// Test cases (verified against the pure function directly — see the plan's
+// Task 2 checklist; also spot-checked in the browser console on staging):
+//   1. prev {peak:0,nudged:[]}, finished 1  -> peak 1, unlock [Candlelight]
+//   2. prev {peak:2,nudged:[1]}, finished 2 (added an unread book, finished
+//      unchanged) -> peak 2, nudge "Something green…" (2 ≥ 1 + ceil(2/2))
+//   3. Same call again (prev now has nudged:[1,3]) -> peak 2, event null
+//      (threshold 3 already nudged)
+//   4. prev {peak:2,nudged:[1,3]}, finished 3 -> peak 3, unlock
+//      [Creeping Ivy], no nudge in the same event
+//   5. prev {peak:5,nudged:[1,3,6]}, finished 4 (marked one book unread) ->
+//      peak STAYS 5 (monotonic), event null. (nudged already has 6 because
+//      the earlier transition that first reached peak 5 satisfied the
+//      halfway check for threshold 6 — 5 ≥ 3 + ceil(3/2) — and nudged it
+//      then; this case is the SUBSEQUENT unread-toggle, not that step.)
+//   6. prev {peak:0,nudged:[]}, finished 22 (bulk import) -> peak 22, ONE
+//      unlock event listing all 6 crossed: Candlelight, Creeping Ivy,
+//      Stained Glass Wakes, Night Roses, The Familiar, Thornwood Sapling;
+//      nudged becomes [1,3,6,10,15,21]
+//   7. finishedCountOf dedupes: two rows titled "Iron Flame" / "iron flame"
+//      (print + ebook), both read:true, shelf:'owned' -> counts as 1
+//   8. finishedCountOf excludes: a wishlist row with read:true (malformed
+//      data) contributes 0
+function evaluateCathedral(prev, finished) {
+  const prevPeak = prev?.peak ?? 0;
+  const nudged = new Set(prev?.nudged ?? []);
+  const peak = Math.max(prevPeak, finished);
+  let event = null;
+
+  const crossed = CATHEDRAL_MILESTONES.filter((m) => m.t > prevPeak && m.t <= peak);
+  if (crossed.length) {
+    crossed.forEach((m) => nudged.add(m.t));
+    event = { kind: "unlock", items: crossed.map((m) => ({ name: m.name, desc: m.desc })) };
+  } else {
+    const next = CATHEDRAL_MILESTONES.find((m) => m.t > peak);
+    if (next) {
+      const reached = CATHEDRAL_MILESTONES.filter((m) => m.t <= peak);
+      const prevT = reached.length ? reached[reached.length - 1].t : 0;
+      const gap = next.t - prevT;
+      if (gap >= 2 && peak >= prevT + Math.ceil(gap / 2) && !nudged.has(next.t)) {
+        nudged.add(next.t);
+        event = { kind: "nudge", hint: next.hint };
+      }
+    }
+  }
+
+  return { peak, nudged: [...nudged].sort((a, b) => a - b), event };
+}
+
 // Guards the bulk backfill across mounts. `AvatarPage` unmounts when the
 // profile modal closes, but an in-flight run keeps writing from its closure —
 // without this, reopening the modal would offer the button again and a second
