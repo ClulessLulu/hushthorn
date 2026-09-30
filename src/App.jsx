@@ -1931,12 +1931,13 @@ const crownFor = (peak, isLast) => (peak >= 42 && isLast ? "bloom-garland" : pea
 // Pillar-less frame crowns (output/cathedral-v1/*-no-pillar.png), measured
 // from each webp (1920x420 source px): colL/colR are the centres of the two
 // ~50px side stiles (they sit on the pilasters), `bottom` the last opaque row,
-// and the cusped window opening (centre + reach). Bloom is the crown plus
-// roses, so it shares crown's frame; ivy's frame is a touch wider.
+// and the cusped window opening (centre + reach). Bloom is the ivy crown with
+// the rose layer mapped onto it (output/cathedral-v1/ivy-bloom-crown-no-pillar.png),
+// so it shares ivy's frame — ivy never disappears once earned.
 const CROWN_GEOM = {
   "crown":         { colL: 367.0, colR: 1555.0, bottom: 395, hx: 969.0, hy: 257.5, hr: 91.0 },
   "ivy-crown":     { colL: 356.0, colR: 1563.0, bottom: 399, hx: 967.5, hy: 260.0, hr: 91.5 },
-  "bloom-garland": { colL: 367.0, colR: 1555.0, bottom: 395, hx: 969.0, hy: 257.5, hr: 91.0 },
+  "bloom-garland": { colL: 356.0, colR: 1563.0, bottom: 399, hx: 967.5, hy: 260.0, hr: 91.5 },
 };
 const CROWN_COL_W = 50;   // side stile width (all three) = pilaster width
 const CROWN_SHAFT_W = 35; // column shaft width (all three)
