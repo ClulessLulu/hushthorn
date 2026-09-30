@@ -443,8 +443,9 @@ const FONT_CSS = `
 @keyframes ht-deco-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes ht-deco-out { from { opacity: 1; } to { opacity: 0; } }
 .ht-sconce { position: absolute; top: 24px; width: 36px; height: 60px; z-index: 5; pointer-events: none; }
-.ht-sconce.left { left: -23px; margin-left: -18px; }
-.ht-sconce.right { right: -23px; margin-right: -18px; }
+/* centered on the pilaster: row edge -> 12px back-panel padding -> half pilaster */
+.ht-sconce.left { left: calc(-12px - var(--pil, 22px) / 2); margin-left: -18px; }
+.ht-sconce.right { right: calc(-12px - var(--pil, 22px) / 2); margin-right: -18px; }
 .ht-sconce img { position: relative; width: 100%; height: 100%; object-fit: contain; }
 .ht-sconce-halo {
   position: absolute; left: 50%; top: 5px; width: 60px; height: 60px;
@@ -459,8 +460,12 @@ const FONT_CSS = `
 }
 @keyframes ht-halo { 0%, 100% { opacity: .8; } 30% { opacity: .62; } 55% { opacity: 1; } }
 .ht-ivy-climb {
-  position: absolute; top: 0; bottom: 0; left: 50%; width: 48px; margin-left: -24px;
+  position: absolute; top: 0; bottom: 0; left: 0; right: 0;
   background-repeat: repeat-y; background-size: 100% auto; pointer-events: none; z-index: 3;
+}
+.ht-plank-ivy::after {
+  content: ""; position: absolute; top: -2px; left: 0; right: 0; height: 22px; z-index: 4; pointer-events: none;
+  background: url('/cathedral/ivy-drape.webp') repeat-x; background-size: auto 22px;
 }
 .ht-ivy-drape {
   position: absolute; top: 0; left: 0; right: 0; height: 28px; z-index: 4; pointer-events: none;
@@ -1872,7 +1877,7 @@ const CATHEDRAL_WISPS = [
 
 function CathedralPilaster({ ivy, fresh }) {
   return (
-    <div className="ht-cathedral-pilaster relative flex-shrink-0" style={{ width: 22 }} aria-hidden="true">
+    <div className="ht-cathedral-pilaster relative flex-shrink-0" style={{ width: "var(--pil, 22px)" }} aria-hidden="true">
       {ivy && (
         <div className={`ht-ivy-climb${fresh ? " ht-deco-in" : ""}`} style={{ backgroundImage: `url(/cathedral/${ivy}.webp)` }} />
       )}
@@ -1894,8 +1899,34 @@ function CathedralSconce({ side, lit, fresh }) {
 // (decision 9, "the apse"); ivy on every bookcase.
 const crownFor = (peak, isLast) => (peak >= 42 && isLast ? "bloom-garland" : peak >= 3 ? "ivy-crown" : "crown");
 
+// Measured from each PNG's alpha channel (1920x420 source px): centers of the
+// two outer column bases, the last opaque row, and the rose-window hole. The
+// variants are NOT geometrically identical, so each is placed by its own
+// numbers — the column bases land flush on the pilasters and the window
+// fills whichever hole is showing.
+const CROWN_GEOM = {
+  "crown":         { colL: 342.3, colR: 1565.8, bottom: 415, hx: 954.0, hy: 271.5, hr: 92.0 },
+  "ivy-crown":     { colL: 374.6, colR: 1547.5, bottom: 395, hx: 963.5, hy: 258.0, hr: 84.5 },
+  "bloom-garland": { colL: 373.5, colR: 1547.8, bottom: 398, hx: 962.0, hy: 260.0, hr: 86.0 },
+};
+const CROWN_COL_W = 96; // painted column base width, same in all three
+// Scale that makes the crown's outer column bases span exactly the bookcase.
+const crownScale = (name, boxWidth) => boxWidth / (CROWN_GEOM[name].colR - CROWN_GEOM[name].colL + CROWN_COL_W);
+
+function CrownImage({ name, boxWidth, className = "" }) {
+  const g = CROWN_GEOM[name];
+  const s = crownScale(name, boxWidth);
+  return (
+    <img
+      src={`/cathedral/${name}.webp`}
+      alt=""
+      className={`absolute max-w-none ${className}`}
+      style={{ width: 1920 * s, height: 420 * s, left: (CROWN_COL_W / 2 - g.colL) * s, bottom: -(419 - g.bottom) * s }}
+    />
+  );
+}
+
 function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] }) {
-  const crownW = boxWidth > 0 ? boxWidth / 0.69 : 0;
   const roseLit = peak >= 6;
   const crownSrc = crownFor(peak, isLast);
   // Crossfade only at the moment of unlock: the previous crown sits beneath
@@ -1906,27 +1937,28 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] 
   const ivyFresh = fresh.includes(3);
   const ivyL = peak >= 3 ? (index % 2 ? "ivy-pilaster-glow" : "ivy-pilaster") : null;
   const ivyR = peak >= 3 ? (index % 2 ? "ivy-pilaster" : "ivy-pilaster-glow") : null;
+  const g = CROWN_GEOM[crownSrc];
+  const s = boxWidth > 0 ? crownScale(crownSrc, boxWidth) : 0;
+  const pil = Math.round(CROWN_COL_W * s) || 22; // pilaster = painted column base width
+  // window disc slightly larger than the hole so the frame overlaps its edge
+  const rose = s && {
+    left: (CROWN_COL_W / 2 - g.colL + g.hx) * s,
+    top: (g.hy - g.bottom - 1) * s,
+    d: g.hr * 2.1 * s,
+  };
   return (
-    <div className="relative mb-8">
-      {crownW > 0 && (
-        // Outer div is a normal-flow, parent-width placeholder that only
-        // reserves the crown's vertical space. The crown art itself is WIDER
-        // than the bookcase (crownW = boxWidth / 0.69), and `margin: auto`
-        // cannot center a box wider than its container — per spec, an
-        // over-constrained auto margin resolves to 0, which pinned the crown
-        // flush left instead of centering it. Absolute + translateX(-50%)
-        // centers correctly regardless of overflow.
-        <div className="relative" style={{ height: crownW * (420 / 1920) }} aria-hidden="true">
-          <div
-            className="absolute top-0"
-            style={{ left: "50%", width: crownW, aspectRatio: "1920 / 420", transform: "translateX(-50%)" }}
-          >
-            {/* dark scrim so the backdrop's own rose window doesn't show through
-                the crown's open arches alongside this one (art spec's audit note) */}
+    <div className="relative mb-8" style={{ "--pil": `${pil}px` }}>
+      {s > 0 && (
+        // Placeholder reserves only the height from the crown's top to its
+        // column-base bottom; images are absolutely placed with their base
+        // rows sitting exactly on the body below (bottom: 0 of this box).
+        <div className="relative" style={{ height: (g.bottom + 1) * s }} aria-hidden="true">
+          <div className="absolute inset-x-0 bottom-0">
+            {/* dark scrim behind the window (art spec's audit note) */}
             <div
               className="absolute rounded-full"
               style={{
-                left: "49.7%", top: "64.8%", width: "12%", aspectRatio: "1 / 1",
+                left: rose.left, top: rose.top, width: rose.d * 1.3, height: rose.d * 1.3,
                 transform: "translate(-50%,-50%)",
                 background: "radial-gradient(circle, rgba(12,7,20,0.92), transparent 72%)",
               }}
@@ -1934,28 +1966,21 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] 
             <img
               src="/cathedral/rose-window-lit.webp"
               alt=""
-              className="absolute transition-[filter,box-shadow] duration-1000"
+              className="absolute max-w-none transition-[filter,box-shadow] duration-1000"
               style={{
-                left: "49.7%", top: "64.8%", width: "10%", aspectRatio: "1 / 1",
+                left: rose.left, top: rose.top, width: rose.d, height: rose.d,
                 transform: "translate(-50%,-50%)", borderRadius: "50%",
                 filter: roseLit ? "none" : "grayscale(.6) brightness(.55)",
                 boxShadow: roseLit ? "0 0 20px rgba(226,103,176,0.55), 0 0 34px rgba(91,124,230,0.3)" : "none",
                 transitionDelay: fresh.includes(6) ? "600ms" : "0ms",
               }}
             />
-            {prevCrown && (
-              <img key={prevCrown} src={`/cathedral/${prevCrown}.webp`} alt="" className="absolute inset-0 w-full h-full ht-deco-out" />
-            )}
-            <img
-              key={crownSrc}
-              src={`/cathedral/${crownSrc}.webp`}
-              alt=""
-              className={`absolute inset-0 w-full h-full${prevCrown ? " ht-deco-in" : ""}`}
-            />
+            {prevCrown && <CrownImage key={prevCrown} name={prevCrown} boxWidth={boxWidth} className="ht-deco-out" />}
+            <CrownImage key={crownSrc} name={crownSrc} boxWidth={boxWidth} className={prevCrown ? "ht-deco-in" : ""} />
           </div>
         </div>
       )}
-      <div className="relative flex items-stretch" style={{ marginTop: crownW > 0 ? -8 : 0 }}>
+      <div className="relative flex items-stretch">
         {peak >= 15 && index === 0 && (
           // ponytail: familiar lives on the first bookcase; Task 8 moves it to
           // whichever bookcase is in view once bookcases are virtualized.
@@ -2134,7 +2159,7 @@ function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimme
           );
         })}
       </div>
-      <div className="ht-cathedral-plank mb-6" aria-hidden="true" />
+      <div className={`ht-cathedral-plank mb-6${peak >= 3 ? " ht-plank-ivy" : ""}`} aria-hidden="true" />
     </div>
   );
 
