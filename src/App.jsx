@@ -442,7 +442,8 @@ const FONT_CSS = `
 .ht-deco-out { animation: ht-deco-out 1.2s ease-out .6s both; }
 @keyframes ht-deco-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes ht-deco-out { from { opacity: 1; } to { opacity: 0; } }
-.ht-sconce { position: absolute; top: 24px; width: 36px; height: 60px; z-index: 5; pointer-events: none; }
+/* vertically centered in the shelf compartment (178px row, 60px sconce) */
+.ht-sconce { position: absolute; top: 59px; width: 36px; height: 60px; z-index: 5; pointer-events: none; }
 /* centered on the pilaster: row edge -> 12px back-panel padding -> half pilaster */
 .ht-sconce.left { left: calc(-12px - var(--pil, 22px) / 2); margin-left: -18px; }
 .ht-sconce.right { right: calc(-12px - var(--pil, 22px) / 2); margin-right: -18px; }
@@ -1875,11 +1876,16 @@ const CATHEDRAL_WISPS = [
   { left: "86%", top: "62%", delay: "-1.5s" },
 ];
 
-function CathedralPilaster({ ivy, fresh }) {
+// Plain ivy on both pillars, mirrored on the right. The glow variant is only a
+// thin glowing strip in its file and rendered as a blurry smear at pillar scale.
+function CathedralPilaster({ ivy, mirror, fresh }) {
   return (
     <div className="ht-cathedral-pilaster relative flex-shrink-0" style={{ width: "var(--pil, 22px)" }} aria-hidden="true">
       {ivy && (
-        <div className={`ht-ivy-climb${fresh ? " ht-deco-in" : ""}`} style={{ backgroundImage: `url(/cathedral/${ivy}.webp)` }} />
+        <div
+          className={`ht-ivy-climb${fresh ? " ht-deco-in" : ""}`}
+          style={{ backgroundImage: "url(/cathedral/ivy-pilaster.webp)", transform: mirror ? "scaleX(-1)" : undefined }}
+        />
       )}
     </div>
   );
@@ -1935,16 +1941,17 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] 
   const crownT = crownSrc === "bloom-garland" ? 42 : crownSrc === "ivy-crown" ? 3 : 0;
   const prevCrown = crownT && fresh.includes(crownT) ? crownFor(crownT === 42 ? 41 : 0, isLast) : null;
   const ivyFresh = fresh.includes(3);
-  const ivyL = peak >= 3 ? (index % 2 ? "ivy-pilaster-glow" : "ivy-pilaster") : null;
-  const ivyR = peak >= 3 ? (index % 2 ? "ivy-pilaster" : "ivy-pilaster-glow") : null;
+  const ivy = peak >= 3;
   const g = CROWN_GEOM[crownSrc];
   const s = boxWidth > 0 ? crownScale(crownSrc, boxWidth) : 0;
   const pil = Math.round(CROWN_COL_W * s) || 22; // pilaster = painted column base width
-  // window disc slightly larger than the hole so the frame overlaps its edge
+  // The glass art carries its own dark rim (petals end at r~200 of its 256px
+  // half-width). Scale so the petals meet the crown's hole edge and that rim
+  // tucks behind the crown frame — otherwise it shows as a second dark ring.
   const rose = s && {
     left: (CROWN_COL_W / 2 - g.colL + g.hx) * s,
     top: (g.hy - g.bottom - 1) * s,
-    d: g.hr * 2.1 * s,
+    d: g.hr * (512 / 200) * s,
   };
   return (
     <div className="relative mb-8" style={{ "--pil": `${pil}px` }}>
@@ -1991,7 +1998,7 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] 
             </div>
           </div>
         )}
-        <CathedralPilaster ivy={ivyL} fresh={ivyFresh} />
+        <CathedralPilaster ivy={ivy} fresh={ivyFresh} />
         <div className="ht-cathedral-back flex-1 px-3 pt-3">
           {peak >= 3 && <div className={`ht-ivy-drape${ivyFresh ? " ht-deco-in" : ""}`} aria-hidden="true" />}
           {peak >= 30 && (
@@ -2008,7 +2015,7 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] 
           )}
           {shelves}
         </div>
-        <CathedralPilaster ivy={ivyR} fresh={ivyFresh} />
+        <CathedralPilaster ivy={ivy} mirror fresh={ivyFresh} />
       </div>
       <div className="ht-cathedral-plinth" aria-hidden="true">
         <span className="ht-display">Ex Libris · Hushthorn</span>
