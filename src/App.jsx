@@ -1971,7 +1971,6 @@ function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimme
 
   return (
     <>
-      <div className="ht-cathedral-backdrop" aria-hidden="true" />
       <div ref={ref} className="max-w-3xl mx-auto relative">
         {shimmer && <div className="ht-shimmer" aria-hidden="true" />}
         {bookcaseRows.map((shelfRows, bi) => (
@@ -3127,6 +3126,7 @@ export default function Hushthorn() {
     <div className="ht-bg ht-body text-purple-100">
       <style>{FONT_CSS}</style>
       <div className="ht-frame" aria-hidden="true" />
+      {view === "library" && <div className="ht-cathedral-backdrop" aria-hidden="true" />}
       <StagingBadge />
 
       {/* header */}
