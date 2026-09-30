@@ -1774,33 +1774,41 @@ function CathedralBookcase({ shelves, boxWidth, roseLit }) {
   return (
     <div className="relative mb-8">
       {crownW > 0 && (
-        <div
-          className="relative mx-auto"
-          style={{ width: crownW, aspectRatio: "1920 / 420" }}
-          aria-hidden="true"
-        >
-          {/* dark scrim so the backdrop's own rose window doesn't show through
-              the crown's open arches alongside this one (art spec's audit note) */}
+        // Outer div is a normal-flow, parent-width placeholder that only
+        // reserves the crown's vertical space. The crown art itself is WIDER
+        // than the bookcase (crownW = boxWidth / 0.69), and `margin: auto`
+        // cannot center a box wider than its container — per spec, an
+        // over-constrained auto margin resolves to 0, which pinned the crown
+        // flush left instead of centering it. Absolute + translateX(-50%)
+        // centers correctly regardless of overflow.
+        <div className="relative" style={{ height: crownW * (420 / 1920) }} aria-hidden="true">
           <div
-            className="absolute rounded-full"
-            style={{
-              left: "49.7%", top: "64.8%", width: "12%", aspectRatio: "1 / 1",
-              transform: "translate(-50%,-50%)",
-              background: "radial-gradient(circle, rgba(12,7,20,0.92), transparent 72%)",
-            }}
-          />
-          <img
-            src="/cathedral/rose-window-lit.webp"
-            alt=""
-            className="absolute transition-[filter,box-shadow] duration-1000"
-            style={{
-              left: "49.7%", top: "64.8%", width: "10%", aspectRatio: "1 / 1",
-              transform: "translate(-50%,-50%)", borderRadius: "50%",
-              filter: roseLit ? "none" : "grayscale(.6) brightness(.55)",
-              boxShadow: roseLit ? "0 0 20px rgba(226,103,176,0.55), 0 0 34px rgba(91,124,230,0.3)" : "none",
-            }}
-          />
-          <img src="/cathedral/crown.webp" alt="" className="absolute inset-0 w-full h-full" />
+            className="absolute top-0"
+            style={{ left: "50%", width: crownW, aspectRatio: "1920 / 420", transform: "translateX(-50%)" }}
+          >
+            {/* dark scrim so the backdrop's own rose window doesn't show through
+                the crown's open arches alongside this one (art spec's audit note) */}
+            <div
+              className="absolute rounded-full"
+              style={{
+                left: "49.7%", top: "64.8%", width: "12%", aspectRatio: "1 / 1",
+                transform: "translate(-50%,-50%)",
+                background: "radial-gradient(circle, rgba(12,7,20,0.92), transparent 72%)",
+              }}
+            />
+            <img
+              src="/cathedral/rose-window-lit.webp"
+              alt=""
+              className="absolute transition-[filter,box-shadow] duration-1000"
+              style={{
+                left: "49.7%", top: "64.8%", width: "10%", aspectRatio: "1 / 1",
+                transform: "translate(-50%,-50%)", borderRadius: "50%",
+                filter: roseLit ? "none" : "grayscale(.6) brightness(.55)",
+                boxShadow: roseLit ? "0 0 20px rgba(226,103,176,0.55), 0 0 34px rgba(91,124,230,0.3)" : "none",
+              }}
+            />
+            <img src="/cathedral/crown.webp" alt="" className="absolute inset-0 w-full h-full" />
+          </div>
         </div>
       )}
       <div className="flex items-stretch" style={{ marginTop: crownW > 0 ? -8 : 0 }}>
