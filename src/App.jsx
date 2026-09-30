@@ -84,6 +84,10 @@ const FONT_CSS = `
     radial-gradient(ellipse 35% 30% at 8% 96%, rgba(236,72,153,0.15), transparent 70%),
     radial-gradient(ellipse 35% 30% at 92% 96%, rgba(168,85,247,0.15), transparent 70%);
   min-height: 100vh;
+  /* Own stacking context, so the cathedral backdrop's z-index:-1 lands above
+     this opaque background but below the header/content — without it, -1
+     escapes to the root context and hides behind this background entirely. */
+  isolation: isolate;
 }
 
 .ht-card {
