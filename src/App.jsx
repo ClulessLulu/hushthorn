@@ -290,8 +290,18 @@ const FONT_CSS = `
   background-size: auto, 320px 320px;
   box-shadow: inset 0 14px 22px rgba(0,0,0,0.55), inset 0 -14px 22px rgba(0,0,0,0.55);
 }
+.ht-crown-wood {
+  background-image: linear-gradient(rgba(12,7,20,0.35), rgba(12,7,20,0.35)), url('/cathedral/back-panel.webp');
+  background-size: auto, 320px 320px;
+  mask-size: 100% 100%; -webkit-mask-size: 100% 100%;
+  mask-repeat: no-repeat; -webkit-mask-repeat: no-repeat;
+  pointer-events: none;
+}
 .ht-cathedral-plank {
   position: relative;
+  /* span the full back panel so the plank ends meet the pilasters (the
+     panel's 12px side padding is for the spines, not the planks) */
+  margin-left: -12px; margin-right: -12px;
   height: 10px;
   border-radius: 2px;
   background: linear-gradient(180deg, #3a2350, #1c1030);
@@ -1923,17 +1933,24 @@ const CROWN_SHAFT_W = 35; // column shaft width (all three)
 // Scale that makes the crown's outer column bases span exactly the bookcase.
 const crownScale = (name, boxWidth) => boxWidth / (CROWN_GEOM[name].colR - CROWN_GEOM[name].colL + CROWN_COL_W);
 
-function CrownImage({ name, boxWidth, className = "" }) {
+const crownBox = (name, boxWidth) => {
   const g = CROWN_GEOM[name];
   const s = crownScale(name, boxWidth);
-  return (
-    <img
-      src={`/cathedral/${name}.webp`}
-      alt=""
-      className={`absolute max-w-none ${className}`}
-      style={{ width: 1920 * s, height: 420 * s, left: (CROWN_COL_W / 2 - g.colL) * s, bottom: -(419 - g.bottom) * s }}
-    />
-  );
+  return { width: 1920 * s, height: 420 * s, left: (CROWN_COL_W / 2 - g.colL) * s, bottom: -(419 - g.bottom) * s };
+};
+
+function CrownImage({ name, boxWidth, className = "" }) {
+  return <img src={`/cathedral/${name}.webp`} alt="" className={`absolute max-w-none ${className}`} style={crownBox(name, boxWidth)} />;
+}
+
+// Bookcase back-panel wood behind the crown, masked to the crown's interior
+// (<name>-openings.webp: its silhouette + arch openings, generated from the
+// crown's alpha by output/cathedral-v1/prepare_crown_masks.py). Opaque crown
+// hides the rest, so wood shows only inside the arches — the bookcase back
+// continues up into the crown instead of the nave showing through.
+function CrownWood({ name, boxWidth }) {
+  const mask = `url(/cathedral/${name}-openings.webp)`;
+  return <div className="ht-crown-wood absolute" style={{ ...crownBox(name, boxWidth), maskImage: mask, WebkitMaskImage: mask }} />;
 }
 
 function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] }) {
@@ -1973,6 +1990,7 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] 
         // rows sitting exactly on the body below (bottom: 0 of this box).
         <div className="relative" style={{ height: (g.bottom + 1) * s }} aria-hidden="true">
           <div className="absolute inset-x-0 bottom-0">
+            <CrownWood name={crownSrc} boxWidth={boxWidth} />
             {/* dark scrim behind the window (art spec's audit note) */}
             <div
               className="absolute rounded-full"
