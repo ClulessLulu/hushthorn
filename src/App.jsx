@@ -233,6 +233,188 @@ const FONT_CSS = `
   .ht-tome-cover { transition: none; }
   .ht-card:hover .ht-tome-lift { transform: none; }
 }
+
+/* ── cathedral spine shelf (Task 4/6) ────────────────────────
+   Painted gothic bookcase wrapping the existing code-drawn spine rows.
+   Assets paint only a sliver of each part (see docs/CATHEDRAL_ART_SPEC.md's
+   v1 asset audit) — every rule here lays that sliver over a code-drawn base
+   rather than trusting the image to be a complete visual on its own. */
+.ht-cathedral-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  /* The backdrop carries its own large rose window; since it's fixed while
+     bookcases scroll past it, a single scrim positioned at one crown can't
+     occlude it (audit note assumed a static composition). Dim the whole
+     backdrop instead so it reads as recessed background, not a second
+     competing window. */
+  background:
+    linear-gradient(rgba(6,4,12,0.62), rgba(6,4,12,0.62)),
+    url('/cathedral/nave-backdrop.webp') center / cover no-repeat;
+  pointer-events: none;
+}
+@media (max-width: 640px) {
+  .ht-cathedral-backdrop { background-image: url('/cathedral/nave-backdrop-mobile.webp'); }
+}
+.ht-cathedral-pilaster {
+  background-image: url('/cathedral/pilaster.webp'),
+    repeating-linear-gradient(90deg, #170d1e 0 3px, #2e1c3a 3px 7px, #1f1228 7px 9px);
+  background-repeat: repeat-y, repeat;
+  background-size: 100% auto, auto;
+  box-shadow: inset 0 0 14px rgba(0,0,0,0.65);
+}
+.ht-cathedral-back {
+  position: relative;
+  background-image: linear-gradient(rgba(12,7,20,0.35), rgba(12,7,20,0.35)), url('/cathedral/back-panel.webp');
+  background-repeat: repeat, repeat;
+  background-size: auto, 320px 320px;
+  box-shadow: inset 0 14px 22px rgba(0,0,0,0.55), inset 0 -14px 22px rgba(0,0,0,0.55);
+}
+.ht-cathedral-plank {
+  position: relative;
+  height: 10px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #3a2350, #1c1030);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.65), inset 0 1px 0 rgba(240,166,224,0.18);
+}
+.ht-cathedral-plank::before {
+  content: "";
+  position: absolute;
+  top: -4px; left: 0; right: 0; height: 6px;
+  background: url('/cathedral/plank.webp') repeat-x;
+  background-size: auto 100%;
+}
+.ht-cathedral-plinth {
+  position: relative;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #241536, #130b1f);
+  box-shadow: 0 14px 26px rgba(0,0,0,0.7), inset 0 1px 0 rgba(232,200,119,0.3);
+}
+.ht-cathedral-plinth::before {
+  content: "";
+  position: absolute;
+  top: -10px; left: 50%; transform: translateX(-50%);
+  width: min(420px, 90%);
+  aspect-ratio: 1920 / 120;
+  background: url('/cathedral/plinth.webp') center / contain no-repeat;
+}
+.ht-cathedral-plinth span {
+  position: relative;
+  z-index: 1;
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(232,200,119,0.75);
+}
+.ht-shimmer {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, rgba(245,154,208,0.16) 45%, rgba(159,178,255,0.12) 52%, transparent 62%);
+  background-size: 300% 100%;
+  animation: ht-shimmer 2.2s ease-out forwards;
+}
+@keyframes ht-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -50% 0; }
+}
+/* whisper — the archive's only notification, never a number or a bar */
+.ht-whisper {
+  position: fixed;
+  top: 128px;
+  left: 50%;
+  z-index: 40;
+  width: min(400px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 18px 44px;
+  text-align: center;
+  border-radius: 2px;
+  border: 1px solid rgba(232,200,119,0.55);
+  border-top: 2px solid #e267b0;
+  background: linear-gradient(180deg, rgba(38,22,64,0.97), rgba(12,8,22,0.97));
+  box-shadow: 0 22px 50px rgba(0,0,0,0.65), 0 0 34px rgba(226,103,176,0.32);
+  animation: ht-whisper-in .9s cubic-bezier(.2,.8,.2,1) both;
+}
+.ht-whisper.ht-whisper-nudge {
+  border-top-color: #9fb2ff;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.6), 0 0 22px rgba(91,124,230,0.28);
+}
+@keyframes ht-whisper-in {
+  from { opacity: 0; transform: translate(-50%, -10px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+.ht-whisper-x {
+  appearance: none;
+  cursor: pointer;
+  position: absolute;
+  top: 2px; right: 2px;
+  width: 44px; height: 44px;
+  border: none;
+  background: transparent;
+  color: #8f88a8;
+  font-size: 16px;
+}
+.ht-whisper-heading { margin: 0; font-style: italic; font-size: 14px; color: #cfc6e8; }
+.ht-whisper-body { margin: 8px 0 0; font-family: 'Cinzel', Georgia, serif; font-weight: 600; font-size: 12.5px; line-height: 1.4; letter-spacing: 0.4px; color: #e6ddf7; }
+.ht-whisper-body strong { color: #f59ad0; }
+.ht-whisper-sub { margin: 8px 0 0; font-style: italic; font-size: 12.5px; color: #8f88a8; }
+.ht-whisper-link {
+  appearance: none;
+  cursor: pointer;
+  margin: 10px auto 0;
+  display: block;
+  min-height: 44px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #f59ad0;
+  font-family: 'Cinzel', Georgia, serif;
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+}
+/* curiosities — a quiet log of what the reader has already found */
+.ht-curio-btn {
+  appearance: none;
+  cursor: pointer;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-radius: 2px;
+  border: 1px solid rgba(232,200,119,0.45);
+  background: rgba(14,10,28,0.7);
+  color: #e8dcb8;
+  font-family: 'Cinzel', Georgia, serif;
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+}
+.ht-curio-pop {
+  position: absolute;
+  top: 42px; right: 0;
+  width: 300px;
+  z-index: 30;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 2px;
+  border: 1px solid rgba(232,200,119,0.5);
+  background: linear-gradient(180deg, rgba(40,24,70,0.97), rgba(12,8,22,0.98));
+  box-shadow: 0 24px 48px rgba(0,0,0,0.7), 0 0 20px rgba(226,103,176,0.2);
+}
+.ht-curio-pop-title { margin: 0 0 10px; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: #e8c877; }
+.ht-curio-pop-item { margin: 0 0 8px; font-size: 11.5px; line-height: 1.5; color: #e6ddf7; }
+.ht-curio-pop-item strong { color: #f59ad0; }
+.ht-curio-pop-footer { margin-top: 4px; font-size: 10.5px; font-style: italic; color: #8f88a8; }
+@media (prefers-reduced-motion: reduce) {
+  .ht-whisper { animation: none; }
+  .ht-shimmer { display: none; }
+}
 `;
 
 /* ── image crop utility ─────────────────────────────────────── */
@@ -1508,7 +1690,9 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
         width: w,
         height: h,
         background: `linear-gradient(90deg, rgba(0,0,0,0.35), transparent 30%, transparent 70%, rgba(0,0,0,0.45)), ${color}`,
-        boxShadow: "1px 0 2px rgba(0,0,0,0.6)",
+        boxShadow: book.read
+          ? "1px 0 2px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(232,200,119,0.55)"
+          : "1px 0 2px rgba(0,0,0,0.6)",
         border: wish ? "1px dashed rgba(240,166,224,0.45)" : "none",
       }}
     >
@@ -1580,9 +1764,116 @@ const MAX_SPINE_W = 29;
 const SPINE_GAP = 5;
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
-function SpineShelf({ books, onOpen, query, onPersist }) {
+// One bookcase = up to 3 shelf rows, framed in painted cathedral art (Task 4).
+// Assets paint only a sliver of each part (v1 asset audit) — every layer here
+// lays that sliver over a code-drawn base rather than standing alone.
+// Crown is rendered at `boxWidth / 0.69` since crown.webp's painted arch only
+// spans 69% of the file's own width (the rest is transparent margin).
+function CathedralBookcase({ shelves, boxWidth, roseLit }) {
+  const crownW = boxWidth > 0 ? boxWidth / 0.69 : 0;
+  return (
+    <div className="relative mb-8">
+      {crownW > 0 && (
+        <div
+          className="relative mx-auto"
+          style={{ width: crownW, aspectRatio: "1920 / 420" }}
+          aria-hidden="true"
+        >
+          {/* dark scrim so the backdrop's own rose window doesn't show through
+              the crown's open arches alongside this one (art spec's audit note) */}
+          <div
+            className="absolute rounded-full"
+            style={{
+              left: "49.7%", top: "64.8%", width: "12%", aspectRatio: "1 / 1",
+              transform: "translate(-50%,-50%)",
+              background: "radial-gradient(circle, rgba(12,7,20,0.92), transparent 72%)",
+            }}
+          />
+          <img
+            src="/cathedral/rose-window-lit.webp"
+            alt=""
+            className="absolute transition-[filter,box-shadow] duration-1000"
+            style={{
+              left: "49.7%", top: "64.8%", width: "10%", aspectRatio: "1 / 1",
+              transform: "translate(-50%,-50%)", borderRadius: "50%",
+              filter: roseLit ? "none" : "grayscale(.6) brightness(.55)",
+              boxShadow: roseLit ? "0 0 20px rgba(226,103,176,0.55), 0 0 34px rgba(91,124,230,0.3)" : "none",
+            }}
+          />
+          <img src="/cathedral/crown.webp" alt="" className="absolute inset-0 w-full h-full" />
+        </div>
+      )}
+      <div className="flex items-stretch" style={{ marginTop: crownW > 0 ? -8 : 0 }}>
+        <div className="ht-cathedral-pilaster flex-shrink-0" style={{ width: 22 }} aria-hidden="true" />
+        <div className="ht-cathedral-back flex-1 px-3 pt-3">
+          {shelves}
+        </div>
+        <div className="ht-cathedral-pilaster flex-shrink-0" style={{ width: 22 }} aria-hidden="true" />
+      </div>
+      <div className="ht-cathedral-plinth" aria-hidden="true">
+        <span className="ht-display">Ex Libris · Hushthorn</span>
+      </div>
+    </div>
+  );
+}
+
+// The whisper — the archive's only signal, never a number or a progress bar.
+// `kind` is "unlock" | "nudge" | "intro" (the one-time backfill summary);
+// intro renders like an unlock (a list of what's already been found) but
+// carries its own heading and skips the Covers-view "see it" link.
+function CathedralWhisper({ kind, heading, hint, items = [], isCovers, onShowSpines, onDismiss }) {
+  const isNudge = kind === "nudge";
+  return (
+    <div className={`ht-whisper${isNudge ? " ht-whisper-nudge" : ""}`} role="status" aria-live="polite">
+      <button type="button" className="ht-whisper-x" aria-label="Dismiss" onClick={onDismiss}>×</button>
+      <p className="ht-whisper-heading">{heading}</p>
+      {isNudge ? (
+        <>
+          <p className="ht-whisper-body">{hint}</p>
+          <p className="ht-whisper-sub">Finish another tome or two.</p>
+        </>
+      ) : (
+        <>
+          {items.map((it) => (
+            <p key={it.name} className="ht-whisper-body"><strong>{it.name}</strong> — {it.desc}</p>
+          ))}
+          {isCovers && (
+            <button type="button" className="ht-whisper-link" onClick={onShowSpines}>
+              See it on your spine shelf
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// Small button that appears once the reader has found anything; the popover
+// lists ONLY what they've personally unlocked — never a threshold or count.
+function CathedralCuriosities({ peak, open, onToggle }) {
+  const found = CATHEDRAL_MILESTONES.filter((m) => m.t <= peak);
+  return (
+    <div className="relative">
+      <button type="button" className="ht-curio-btn" aria-expanded={open} onClick={onToggle}>
+        ✦ Curiosities
+      </button>
+      {open && (
+        <div className="ht-curio-pop">
+          <p className="ht-curio-pop-title">What the archive has shown you</p>
+          {found.map((m) => (
+            <p key={m.t} className="ht-curio-pop-item"><strong>{m.name}</strong> — {m.desc}</p>
+          ))}
+          <p className="ht-curio-pop-footer">Keep filling the shelves. Not everything has woken yet.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimmer }) {
   const ref = useRef(null);
   const [perRow, setPerRow] = useState(10);
+  const [boxWidth, setBoxWidth] = useState(0);
 
   useEffect(() => {
     const el = ref.current;
@@ -1590,6 +1881,7 @@ function SpineShelf({ books, onOpen, query, onPersist }) {
     const measure = (width) => {
       if (!width) return;
       setPerRow(clamp(Math.floor(width / (MAX_SPINE_W + SPINE_GAP)), 6, 14));
+      setBoxWidth(width);
     };
     if (typeof ResizeObserver !== "undefined") {
       const ro = new ResizeObserver((entries) => {
@@ -1619,45 +1911,54 @@ function SpineShelf({ books, onOpen, query, onPersist }) {
 
   const rows = [];
   for (let i = 0; i < books.length; i += perRow) rows.push(books.slice(i, i + perRow));
+  const bookcaseRows = [];
+  for (let i = 0; i < rows.length; i += 3) bookcaseRows.push(rows.slice(i, i + 3));
+
+  const renderRow = (row, ri) => (
+    <div key={ri}>
+      <div className="flex items-end gap-[5px] min-h-[178px]">
+        {row.map((b) => {
+          const isUnion = !!b.owners;
+          const openId = isUnion ? b.key : b.id;
+          return (
+            <Spine
+              key={b.id || b.key}
+              book={b}
+              onOpen={() => onOpen(openId)}
+              dimmed={!!query && !matchesQuery(b, query)}
+              onPersist={(!isUnion && onPersist) ? (c) => onPersist(b.id, c) : undefined}
+            />
+          );
+        })}
+      </div>
+      <div className="ht-cathedral-plank mb-6" aria-hidden="true" />
+    </div>
+  );
 
   return (
-    <div ref={ref} className="max-w-3xl mx-auto">
-      {rows.map((row, ri) => (
-        <div key={ri}>
-          <div className="flex items-end gap-[5px] px-3 min-h-[178px]">
-            {row.map((b) => {
-              const isUnion = !!b.owners;
-              const openId = isUnion ? b.key : b.id;
-              return (
-                <Spine
-                  key={b.id || b.key}
-                  book={b}
-                  onOpen={() => onOpen(openId)}
-                  dimmed={!!query && !matchesQuery(b, query)}
-                  onPersist={(!isUnion && onPersist) ? (c) => onPersist(b.id, c) : undefined}
-                />
-              );
-            })}
-          </div>
-          <div
-            className="h-2.5 rounded-sm mb-6"
-            style={{
-              background: "linear-gradient(180deg, #3a2350, #1c1030)",
-              boxShadow: "0 4px 8px rgba(0,0,0,0.65), inset 0 1px 0 rgba(240,166,224,0.18)",
-            }}
+    <>
+      <div className="ht-cathedral-backdrop" aria-hidden="true" />
+      <div ref={ref} className="max-w-3xl mx-auto relative">
+        {shimmer && <div className="ht-shimmer" aria-hidden="true" />}
+        {bookcaseRows.map((shelfRows, bi) => (
+          <CathedralBookcase
+            key={bi}
+            boxWidth={boxWidth}
+            roseLit={cathedralProgress.peak >= 6}
+            shelves={shelfRows.map((row, ri) => renderRow(row, ri))}
           />
-        </div>
-      ))}
-      <p className="text-center text-sm text-purple-400/60 italic mt-2">
-        Hover a spine to ease it from the shelf — tap to pull it out. Wishlist spines are ghosts in dashed glass.
-      </p>
-    </div>
+        ))}
+        <p className="text-center text-sm text-purple-400/60 italic mt-2">
+          Hover a spine to ease it from the shelf — tap to pull it out. Wishlist spines are ghosts in dashed glass.
+        </p>
+      </div>
+    </>
   );
 }
 
 /* ── controls bar ──────────────────────────────────────────── */
 
-function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery, availableTropes = [], tropeFilter = [], onTropeFilter, tropeMode = "all", onTropeMode }) {
+function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery, availableTropes = [], tropeFilter = [], onTropeFilter, tropeMode = "all", onTropeMode, cathedralPeak = 0, curioOpen, onToggleCurio }) {
   return (
     <div className="max-w-5xl mx-auto px-5 pb-5 flex flex-wrap items-center justify-center gap-2">
       <div className="flex rounded-sm overflow-hidden border border-purple-700/50">
@@ -1693,6 +1994,9 @@ function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery, availa
         className="bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400 w-44"
         aria-label="Search the shelves"
       />
+      {cathedralPeak >= 1 && (
+        <CathedralCuriosities peak={cathedralPeak} open={curioOpen} onToggle={onToggleCurio} />
+      )}
       {(availableTropes.length > 0 || tropeFilter.length > 0) && (
         <div className="w-full flex flex-col items-center gap-1.5">
           <div className="flex items-center gap-2">
@@ -1942,6 +2246,42 @@ export default function Hushthorn() {
   // or hinted, so a reload never re-fires either. Defaults to a fresh baseline
   // until the load effect below resolves the real row (or backfills one).
   const [cathedralProgress, setCathedralProgress] = useState({ peak: 0, nudged: [], seenIntro: false });
+  // Task 6: the whisper (unlock/nudge toast), the Curiosities popover, and the
+  // one-time backfill intro card. All three are app-level (not Spines-only) —
+  // decision 5 shows an unlock card in Covers view too, with a link to Spines.
+  const [cathedralToast, setCathedralToast] = useState(null); // {kind:'unlock'|'nudge', items?, hint?}
+  const [cathedralIntro, setCathedralIntro] = useState(null); // {items} shown once, or null
+  const [curioOpen, setCurioOpen] = useState(false);
+  const cathedralToastTimer = useRef(null);
+  const introShownRef = useRef(false);
+  useEffect(() => () => clearTimeout(cathedralToastTimer.current), []);
+  // Fires once per session, after load, for a reader whose row already had
+  // unlocks (either just backfilled or backfilled earlier by Task 3's testing
+  // before this card existed) that they've never been shown a summary of.
+  useEffect(() => {
+    if (introShownRef.current || dataLoading) return;
+    if (cathedralProgress.peak > 0 && !cathedralProgress.seenIntro) {
+      introShownRef.current = true;
+      setCathedralIntro({
+        items: CATHEDRAL_MILESTONES.filter((m) => m.t <= cathedralProgress.peak).map((m) => ({ name: m.name, desc: m.desc })),
+      });
+    }
+  }, [dataLoading, cathedralProgress.peak, cathedralProgress.seenIntro]);
+  const dismissCathedralIntro = () => {
+    setCathedralIntro(null);
+    setCathedralProgress((p) => ({ ...p, seenIntro: true }));
+    supabase.from('cathedral_progress').update({ seen_intro: true }).eq('user_id', session.user.id)
+      .then(({ error }) => { if (error) console.error('cathedral seen_intro:', error.message); });
+  };
+  const showCathedralToast = (event) => {
+    clearTimeout(cathedralToastTimer.current);
+    setCathedralToast(event);
+    cathedralToastTimer.current = setTimeout(() => setCathedralToast(null), event.kind === 'unlock' ? 7000 : 5500);
+  };
+  const dismissCathedralToast = () => {
+    clearTimeout(cathedralToastTimer.current);
+    setCathedralToast(null);
+  };
   const [avatar, setAvatar] = useState({
     name: 'Keeper of the Archive',
     gender: 'nonbinary',
@@ -2500,7 +2840,11 @@ export default function Hushthorn() {
     // (bump_cathedral_progress's own GREATEST/union logic), so two tabs
     // converge on the same peak regardless of which one's write lands last.
     setCathedralProgress({ peak: data.peak_finished, nudged: data.nudged || [], seenIntro: !!data.seen_intro });
-    void event; // TODO(Task 6): surface unlock/nudge notifications from this.
+    // Only trust the locally-computed event when THIS call is what actually
+    // moved the server to `peak` — if another tab already advanced it further
+    // (data.peak_finished > peak), our event is a false positive computed from
+    // stale local state (see the two-tab test in Task 3's ledger entry).
+    if (event && data.peak_finished === peak) showCathedralToast(event);
   };
 
   const updateBook = async (id, patch) => {
@@ -2783,6 +3127,31 @@ export default function Hushthorn() {
         </div>
       </header>
 
+      {cathedralIntro ? (
+        <CathedralWhisper
+          kind="intro"
+          heading="The archive remembers what you've read…"
+          items={cathedralIntro.items}
+          onDismiss={dismissCathedralIntro}
+        />
+      ) : cathedralToast ? (
+        <CathedralWhisper
+          kind={cathedralToast.kind}
+          heading={
+            cathedralToast.kind === "nudge"
+              ? "The archive is close to waking something…"
+              : cathedralToast.items.length > 1
+              ? "Several things stir in the archive…"
+              : "Something stirs in the archive…"
+          }
+          hint={cathedralToast.hint}
+          items={cathedralToast.items}
+          isCovers={layout !== "spines"}
+          onShowSpines={() => changeLayout("spines")}
+          onDismiss={dismissCathedralToast}
+        />
+      ) : null}
+
       {/* archive switcher — only when the reader belongs to a shared archive */}
       {archives.length > 0 && (
         <ArchiveSwitcher
@@ -2849,6 +3218,9 @@ export default function Hushthorn() {
           onTropeFilter={setTropeFilter}
           tropeMode={tropeMode}
           onTropeMode={setTropeMode}
+          cathedralPeak={cathedralProgress.peak}
+          curioOpen={curioOpen}
+          onToggleCurio={() => setCurioOpen((o) => !o)}
         />
       )}
 
@@ -2873,6 +3245,8 @@ export default function Hushthorn() {
             onOpen={setActiveId}
             query={query}
             onPersist={persistSpineColor}
+            cathedralProgress={cathedralProgress}
+            shimmer={cathedralToast?.kind === "unlock"}
           />
         ) : tropeNarrowed.length === 0 ? (
           <div className="text-center py-20 text-purple-300/60">
