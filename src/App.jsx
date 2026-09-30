@@ -242,7 +242,14 @@ const FONT_CSS = `
 .ht-cathedral-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 0;
+  /* Must be negative: a position:fixed element at z-index:0/auto paints
+     AFTER normal non-positioned flow content (the header, nav, controls bar
+     are all static/non-positioned) regardless of DOM order, so at z-index:0
+     this backdrop covered the header instead of sitting behind it. Negative
+     z-index moves it into the "paints before non-positioned content" bucket,
+     while the bookcase content wrapper (position:relative, its own
+     z-index:auto) still paints after it as intended. */
+  z-index: -1;
   /* The backdrop carries its own large rose window; since it's fixed while
      bookcases scroll past it, a single scrim positioned at one crown can't
      occlude it (audit note assumed a static composition). Dim the whole
@@ -280,9 +287,16 @@ const FONT_CSS = `
 .ht-cathedral-plank::before {
   content: "";
   position: absolute;
-  top: -4px; left: 0; right: 0; height: 6px;
-  background: url('/cathedral/plank.webp') repeat-x;
-  background-size: auto 100%;
+  /* plank.webp's gilded rail only lives in rows 15-30 of its 48px-tall file
+     (v1 asset audit) — scaling the whole file into a short strip (the old
+     auto-100%-height background-size) diluted that band into a barely-visible
+     smear. Crop to it instead: native size + a negative Y offset shows only
+     that 15px band inside a box exactly that tall. */
+  top: -11px; left: 0; right: 0; height: 15px;
+  background-image: url('/cathedral/plank.webp');
+  background-repeat: repeat-x;
+  background-position: 0 -15px;
+  background-size: auto 48px;
 }
 .ht-cathedral-plinth {
   position: relative;
