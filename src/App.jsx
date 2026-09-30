@@ -437,9 +437,77 @@ const FONT_CSS = `
 .ht-curio-pop-item { margin: 0 0 8px; font-size: 11.5px; line-height: 1.5; color: #e6ddf7; }
 .ht-curio-pop-item strong { color: #f59ad0; }
 .ht-curio-pop-footer { margin-top: 4px; font-size: 10.5px; font-style: italic; color: #8f88a8; }
+/* unlock layers (Task 5) — only rendered once owned */
+.ht-deco-in { animation: ht-deco-in 1.2s ease-out .6s both; }
+.ht-deco-out { animation: ht-deco-out 1.2s ease-out .6s both; }
+@keyframes ht-deco-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ht-deco-out { from { opacity: 1; } to { opacity: 0; } }
+.ht-sconce { position: absolute; top: 24px; width: 36px; height: 60px; z-index: 5; pointer-events: none; }
+.ht-sconce.left { left: -23px; margin-left: -18px; }
+.ht-sconce.right { right: -23px; margin-right: -18px; }
+.ht-sconce img { position: relative; width: 100%; height: 100%; object-fit: contain; }
+.ht-sconce-halo {
+  position: absolute; left: 50%; top: 5px; width: 60px; height: 60px;
+  margin: -30px 0 0 -30px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,200,120,0.7), rgba(255,140,60,0.2) 45%, transparent 70%);
+  animation: ht-halo 3.2s ease-in-out infinite;
+}
+.ht-sconce-flame { animation: ht-flicker 2.6s linear infinite; }
+@keyframes ht-flicker {
+  0%, 100% { filter: brightness(1); } 18% { filter: brightness(1.14); }
+  34% { filter: brightness(.9); } 52% { filter: brightness(1.08); } 71% { filter: brightness(.95); }
+}
+@keyframes ht-halo { 0%, 100% { opacity: .8; } 30% { opacity: .62; } 55% { opacity: 1; } }
+.ht-ivy-climb {
+  position: absolute; top: 0; bottom: 0; left: 50%; width: 48px; margin-left: -24px;
+  background-repeat: repeat-y; background-size: 100% auto; pointer-events: none; z-index: 3;
+}
+.ht-ivy-drape {
+  position: absolute; top: 0; left: 0; right: 0; height: 28px; z-index: 4; pointer-events: none;
+  background: url('/cathedral/ivy-drape.webp') repeat-x; background-size: auto 28px;
+}
+.ht-deco-urn { height: 110px; width: 66px; object-fit: contain; flex-shrink: 0; pointer-events: none; }
+.ht-deco-tree { height: 160px; width: 92px; object-fit: contain; flex-shrink: 0; pointer-events: none; margin-left: auto; }
+.ht-familiar-track { position: absolute; left: 32px; right: 32px; top: -46px; height: 48px; z-index: 6; pointer-events: none; }
+.ht-familiar {
+  position: absolute; bottom: 0; left: 0; width: 64px; height: 48px;
+  animation: ht-cat-move 32s linear infinite, ht-cat-face 32s linear infinite;
+}
+.ht-familiar-walk, .ht-familiar-sit { position: absolute; inset: 0; }
+.ht-familiar-walk {
+  background: url('/cathedral/familiar-walk.webp') 0 0 / 512px 48px no-repeat;
+  animation: ht-cat-frames 1s steps(8) infinite, ht-cat-walk-vis 32s linear infinite;
+}
+.ht-familiar-sit {
+  background: url('/cathedral/familiar-sit.webp') center / contain no-repeat;
+  animation: ht-cat-sit-vis 32s linear infinite;
+}
+@keyframes ht-cat-frames { to { background-position: -512px 0; } }
+@keyframes ht-cat-move { 0%, 6% { left: 0; } 44%, 56% { left: calc(100% - 64px); } 94%, 100% { left: 0; } }
+@keyframes ht-cat-face { 0%, 55.9% { transform: scaleX(1); } 56%, 100% { transform: scaleX(-1); } }
+@keyframes ht-cat-walk-vis { 0%, 5.9% { opacity: 0; } 6%, 43.9% { opacity: 1; } 44%, 55.9% { opacity: 0; } 56%, 93.9% { opacity: 1; } 94%, 100% { opacity: 0; } }
+@keyframes ht-cat-sit-vis { 0%, 5.9% { opacity: 1; } 6%, 43.9% { opacity: 0; } 44%, 55.9% { opacity: 1; } 56%, 93.9% { opacity: 0; } 94%, 100% { opacity: 1; } }
+.ht-wisps { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.ht-wisp {
+  position: absolute; width: 14px; height: 14px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(220,230,255,0.9), rgba(159,178,255,0.35) 40%, transparent 70%);
+  filter: blur(1px); animation: ht-wisp 9s ease-in-out infinite;
+}
+@keyframes ht-wisp {
+  0%, 100% { transform: translate(0, 0); opacity: .6; } 25% { transform: translate(18px, -14px); opacity: 1; }
+  50% { transform: translate(-10px, -26px); opacity: .5; } 75% { transform: translate(-20px, -8px); opacity: .9; }
+}
+.ht-sprite { position: absolute; top: 14%; left: 70%; width: 56px; height: 56px; animation: ht-sprite 24s ease-in-out infinite; }
+@keyframes ht-sprite { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(-160px, 24px); } }
 @media (prefers-reduced-motion: reduce) {
   .ht-whisper { animation: none; }
   .ht-shimmer { display: none; }
+  .ht-deco-in, .ht-deco-out { animation: none; }
+  .ht-deco-out { display: none; }
+  .ht-sconce-flame, .ht-sconce-halo, .ht-wisp, .ht-sprite { animation: none; }
+  .ht-familiar { animation: none; }
+  .ht-familiar-walk { display: none; }
+  .ht-familiar-sit { animation: none; opacity: 1; }
 }
 `;
 
@@ -1795,8 +1863,49 @@ const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 // lays that sliver over a code-drawn base rather than standing alone.
 // Crown is rendered at `boxWidth / 0.69` since crown.webp's painted arch only
 // spans 69% of the file's own width (the rest is transparent margin).
-function CathedralBookcase({ shelves, boxWidth, roseLit }) {
+const CATHEDRAL_WISPS = [
+  { left: "12%", top: "22%", delay: "0s" },
+  { left: "38%", top: "55%", delay: "-3s" },
+  { left: "66%", top: "30%", delay: "-6s" },
+  { left: "86%", top: "62%", delay: "-1.5s" },
+];
+
+function CathedralPilaster({ ivy, fresh }) {
+  return (
+    <div className="ht-cathedral-pilaster relative flex-shrink-0" style={{ width: 22 }} aria-hidden="true">
+      {ivy && (
+        <div className={`ht-ivy-climb${fresh ? " ht-deco-in" : ""}`} style={{ backgroundImage: `url(/cathedral/${ivy}.webp)` }} />
+      )}
+    </div>
+  );
+}
+
+function CathedralSconce({ side, lit, fresh }) {
+  return (
+    <div className={`ht-sconce ${side}${fresh ? " ht-deco-in" : ""}`} aria-hidden="true">
+      {lit && <span className="ht-sconce-halo" />}
+      <img src={`/cathedral/sconce-${lit ? "lit" : "unlit"}.webp`} alt="" className={lit ? "ht-sconce-flame" : ""} />
+    </div>
+  );
+}
+
+// Crown states are swaps, not overlays (audit): each file carries the whole
+// arch with slightly different geometry. Bloom lives on the last bookcase only
+// (decision 9, "the apse"); ivy on every bookcase.
+const crownFor = (peak, isLast) => (peak >= 42 && isLast ? "bloom-garland" : peak >= 3 ? "ivy-crown" : "crown");
+
+function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] }) {
   const crownW = boxWidth > 0 ? boxWidth / 0.69 : 0;
+  const roseLit = peak >= 6;
+  const crownSrc = crownFor(peak, isLast);
+  // Crossfade only at the moment of unlock: the previous crown sits beneath
+  // and fades out while the new one fades in (both delayed ~600ms so the
+  // whisper card doesn't hide the reveal). On ordinary loads, no animation.
+  const crownT = crownSrc === "bloom-garland" ? 42 : crownSrc === "ivy-crown" ? 3 : 0;
+  const prevCrown = crownT && fresh.includes(crownT) ? crownFor(crownT === 42 ? 41 : 0, isLast) : null;
+  const ivyFresh = fresh.includes(3);
+  const ivyL = peak >= 3 ? (index % 2 ? "ivy-pilaster-glow" : "ivy-pilaster") : null;
+  const ivyR = peak >= 3 ? (index % 2 ? "ivy-pilaster" : "ivy-pilaster-glow") : null;
   return (
     <div className="relative mb-8">
       {crownW > 0 && (
@@ -1831,18 +1940,50 @@ function CathedralBookcase({ shelves, boxWidth, roseLit }) {
                 transform: "translate(-50%,-50%)", borderRadius: "50%",
                 filter: roseLit ? "none" : "grayscale(.6) brightness(.55)",
                 boxShadow: roseLit ? "0 0 20px rgba(226,103,176,0.55), 0 0 34px rgba(91,124,230,0.3)" : "none",
+                transitionDelay: fresh.includes(6) ? "600ms" : "0ms",
               }}
             />
-            <img src="/cathedral/crown.webp" alt="" className="absolute inset-0 w-full h-full" />
+            {prevCrown && (
+              <img key={prevCrown} src={`/cathedral/${prevCrown}.webp`} alt="" className="absolute inset-0 w-full h-full ht-deco-out" />
+            )}
+            <img
+              key={crownSrc}
+              src={`/cathedral/${crownSrc}.webp`}
+              alt=""
+              className={`absolute inset-0 w-full h-full${prevCrown ? " ht-deco-in" : ""}`}
+            />
           </div>
         </div>
       )}
-      <div className="flex items-stretch" style={{ marginTop: crownW > 0 ? -8 : 0 }}>
-        <div className="ht-cathedral-pilaster flex-shrink-0" style={{ width: 22 }} aria-hidden="true" />
+      <div className="relative flex items-stretch" style={{ marginTop: crownW > 0 ? -8 : 0 }}>
+        {peak >= 15 && index === 0 && (
+          // ponytail: familiar lives on the first bookcase; Task 8 moves it to
+          // whichever bookcase is in view once bookcases are virtualized.
+          <div className={`ht-familiar-track${fresh.includes(15) ? " ht-deco-in" : ""}`} aria-hidden="true">
+            <div className="ht-familiar">
+              <span className="ht-familiar-walk" />
+              <span className="ht-familiar-sit" />
+            </div>
+          </div>
+        )}
+        <CathedralPilaster ivy={ivyL} fresh={ivyFresh} />
         <div className="ht-cathedral-back flex-1 px-3 pt-3">
+          {peak >= 3 && <div className={`ht-ivy-drape${ivyFresh ? " ht-deco-in" : ""}`} aria-hidden="true" />}
+          {peak >= 30 && (
+            <div className={`ht-wisps${fresh.includes(30) ? " ht-deco-in" : ""}`} aria-hidden="true">
+              {CATHEDRAL_WISPS.map((w, i) => (
+                <span key={i} className="ht-wisp" style={{ left: w.left, top: w.top, animationDelay: w.delay }} />
+              ))}
+              <img
+                src={`/cathedral/${index % 2 ? "sprite-winged-elegant" : "sprite-winged"}.webp`}
+                alt=""
+                className="ht-sprite"
+              />
+            </div>
+          )}
           {shelves}
         </div>
-        <div className="ht-cathedral-pilaster flex-shrink-0" style={{ width: 22 }} aria-hidden="true" />
+        <CathedralPilaster ivy={ivyR} fresh={ivyFresh} />
       </div>
       <div className="ht-cathedral-plinth" aria-hidden="true">
         <span className="ht-display">Ex Libris · Hushthorn</span>
@@ -1904,7 +2045,27 @@ function CathedralCuriosities({ peak, open, onToggle }) {
   );
 }
 
-function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimmer }) {
+// Decorations that stand on a shelf occupy spine slots. Rose urn ends shelf 2
+// (or the last shelf when the library has fewer); the thorn tree ends the very
+// last shelf, i.e. the apse of the last bookcase. Weight = spine slots taken.
+const DECO_WEIGHT = { urn: 2, tree: 3 };
+function layoutShelfRows(books, perRow, peak) {
+  const items = [...books];
+  if (peak >= 10) items.splice(Math.min(items.length, 2 * perRow - DECO_WEIGHT.urn), 0, { deco: "urn" });
+  if (peak >= 21) items.push({ deco: "tree" });
+  const rows = [];
+  let row = [], w = 0;
+  for (const it of items) {
+    const iw = DECO_WEIGHT[it.deco] || 1;
+    if (row.length && w + iw > perRow) { rows.push(row); row = []; w = 0; }
+    row.push(it);
+    w += iw;
+  }
+  if (row.length) rows.push(row);
+  return rows;
+}
+
+function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimmer, fresh = [] }) {
   const ref = useRef(null);
   const [perRow, setPerRow] = useState(10);
   const [boxWidth, setBoxWidth] = useState(0);
@@ -1943,15 +2104,23 @@ function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimme
     );
   }
 
-  const rows = [];
-  for (let i = 0; i < books.length; i += perRow) rows.push(books.slice(i, i + perRow));
+  const peak = cathedralProgress.peak;
+  const rows = layoutShelfRows(books, perRow, peak);
   const bookcaseRows = [];
   for (let i = 0; i < rows.length; i += 3) bookcaseRows.push(rows.slice(i, i + 3));
 
   const renderRow = (row, ri) => (
-    <div key={ri}>
+    <div key={ri} className="relative">
+      <CathedralSconce side="left" lit={peak >= 1} fresh={fresh.includes(1)} />
+      <CathedralSconce side="right" lit={peak >= 1} fresh={fresh.includes(1)} />
       <div className="flex items-end gap-[5px] min-h-[178px]">
         {row.map((b) => {
+          if (b.deco === "urn") {
+            return <img key="urn" src="/cathedral/rose-urn.webp" alt="" aria-hidden="true" className={`ht-deco-urn${fresh.includes(10) ? " ht-deco-in" : ""}`} />;
+          }
+          if (b.deco === "tree") {
+            return <img key="tree" src="/cathedral/thornwood-tree.webp" alt="" aria-hidden="true" className={`ht-deco-tree${fresh.includes(21) ? " ht-deco-in" : ""}`} />;
+          }
           const isUnion = !!b.owners;
           const openId = isUnion ? b.key : b.id;
           return (
@@ -1977,7 +2146,10 @@ function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimme
           <CathedralBookcase
             key={bi}
             boxWidth={boxWidth}
-            roseLit={cathedralProgress.peak >= 6}
+            peak={peak}
+            index={bi}
+            isLast={bi === bookcaseRows.length - 1}
+            fresh={fresh}
             shelves={shelfRows.map((row, ri) => renderRow(row, ri))}
           />
         ))}
@@ -3281,6 +3453,11 @@ export default function Hushthorn() {
             onPersist={persistSpineColor}
             cathedralProgress={cathedralProgress}
             shimmer={cathedralToast?.kind === "unlock"}
+            fresh={
+              cathedralToast?.kind === "unlock"
+                ? CATHEDRAL_MILESTONES.filter((m) => cathedralToast.items.some((i) => i.name === m.name)).map((m) => m.t)
+                : []
+            }
           />
         ) : tropeNarrowed.length === 0 ? (
           <div className="text-center py-20 text-purple-300/60">
