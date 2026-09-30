@@ -290,13 +290,6 @@ const FONT_CSS = `
   background-size: auto, 320px 320px;
   box-shadow: inset 0 14px 22px rgba(0,0,0,0.55), inset 0 -14px 22px rgba(0,0,0,0.55);
 }
-.ht-crown-wood {
-  background-image: linear-gradient(rgba(12,7,20,0.35), rgba(12,7,20,0.35)), url('/cathedral/back-panel.webp');
-  background-size: auto, 320px 320px;
-  mask-size: 100% 100%; -webkit-mask-size: 100% 100%;
-  mask-repeat: no-repeat; -webkit-mask-repeat: no-repeat;
-  pointer-events: none;
-}
 .ht-cathedral-plank {
   position: relative;
   /* span the full back panel so the plank ends meet the pilasters (the
@@ -338,7 +331,14 @@ const FONT_CSS = `
   aspect-ratio: 1920 / 120;
   background: url('/cathedral/plinth.webp') center / contain no-repeat;
 }
+/* shared archive: interlocked-rings ribbon hanging just under the crown */
+.ht-shared-emblem {
+  position: absolute; top: -10px; left: 50%; width: 64px; height: 32px; margin-left: -32px;
+  object-fit: contain; z-index: 6; pointer-events: none;
+  filter: drop-shadow(0 3px 4px rgba(0,0,0,0.6));
+}
 .ht-cathedral-plinth span {
+  max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   position: relative;
   z-index: 1;
   font-size: 8px;
@@ -1916,18 +1916,17 @@ function CathedralSconce({ side, lit, fresh }) {
 // (decision 9, "the apse"); ivy on every bookcase.
 const crownFor = (peak, isLast) => (peak >= 42 && isLast ? "bloom-garland" : peak >= 3 ? "ivy-crown" : "crown");
 
-// Measured from each webp (1920x420 source px): colL/colR are the centres of
-// the two outer column SHAFTS (measured where the shaft stands clear of the
-// arch foot — lower down the two merge into one blob), `bottom` the last
-// opaque row, and the rose-window hole. Variants differ, so each is placed by
-// its own numbers: plinths sit flush on the pilasters, shafts continue into
-// the pilasters' painted shafts, the window fills whichever hole is showing.
+// Pillar-less frame crowns (output/cathedral-v1/*-no-pillar.png), measured
+// from each webp (1920x420 source px): colL/colR are the centres of the two
+// ~50px side stiles (they sit on the pilasters), `bottom` the last opaque row,
+// and the cusped window opening (centre + reach). Bloom is the crown plus
+// roses, so it shares crown's frame; ivy's frame is a touch wider.
 const CROWN_GEOM = {
-  "crown":         { colL: 323.0, colR: 1586.0, bottom: 415, hx: 954.0, hy: 271.5, hr: 92.0 },
-  "ivy-crown":     { colL: 355.0, colR: 1568.0, bottom: 395, hx: 963.5, hy: 258.0, hr: 84.5 },
-  "bloom-garland": { colL: 354.5, colR: 1566.5, bottom: 398, hx: 962.0, hy: 260.0, hr: 86.0 },
+  "crown":         { colL: 367.0, colR: 1555.0, bottom: 395, hx: 969.0, hy: 257.5, hr: 91.0 },
+  "ivy-crown":     { colL: 356.0, colR: 1563.0, bottom: 399, hx: 967.5, hy: 260.0, hr: 91.5 },
+  "bloom-garland": { colL: 367.0, colR: 1555.0, bottom: 395, hx: 969.0, hy: 257.5, hr: 91.0 },
 };
-const CROWN_COL_W = 60;   // column plinth width (all three) = pilaster width
+const CROWN_COL_W = 50;   // side stile width (all three) = pilaster width
 const CROWN_SHAFT_W = 35; // column shaft width (all three)
 // pilaster.webp paints its shaft at x 24-64 (40px wide, centre 44) of 96
 // Scale that makes the crown's outer column bases span exactly the bookcase.
@@ -1943,17 +1942,12 @@ function CrownImage({ name, boxWidth, className = "" }) {
   return <img src={`/cathedral/${name}.webp`} alt="" className={`absolute max-w-none ${className}`} style={crownBox(name, boxWidth)} />;
 }
 
-// Bookcase back-panel wood behind the crown, masked to the crown's interior
-// (<name>-openings.webp: its silhouette + arch openings, generated from the
-// crown's alpha by output/cathedral-v1/prepare_crown_masks.py). Opaque crown
-// hides the rest, so wood shows only inside the arches — the bookcase back
-// continues up into the crown instead of the nave showing through.
-function CrownWood({ name, boxWidth }) {
-  const mask = `url(/cathedral/${name}-openings.webp)`;
-  return <div className="ht-crown-wood absolute" style={{ ...crownBox(name, boxWidth), maskImage: mask, WebkitMaskImage: mask }} />;
-}
+// "alpha & beta" / "alpha, beta & gamma" for the shared-archive plaque.
+const joinNames = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`);
 
-function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] }) {
+// members: usernames when viewing a shared archive, [] on a personal shelf.
+// Decorations still come only from the VIEWER's own `peak` (decision 8).
+function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [], members = [] }) {
   const roseLit = peak >= 6;
   const crownSrc = crownFor(peak, isLast);
   // Crossfade only at the moment of unlock: the previous crown sits beneath
@@ -1990,7 +1984,6 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] 
         // rows sitting exactly on the body below (bottom: 0 of this box).
         <div className="relative" style={{ height: (g.bottom + 1) * s }} aria-hidden="true">
           <div className="absolute inset-x-0 bottom-0">
-            <CrownWood name={crownSrc} boxWidth={boxWidth} />
             {/* dark scrim behind the window (art spec's audit note) */}
             <div
               className="absolute rounded-full"
@@ -2030,6 +2023,7 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] 
         )}
         <CathedralPilaster ivy={ivy} fresh={ivyFresh} />
         <div className="ht-cathedral-back flex-1 px-3 pt-3">
+          {members.length > 0 && <img src="/cathedral/shared-emblem.webp" alt="" aria-hidden="true" className="ht-shared-emblem" />}
           {peak >= 3 && <div className={`ht-ivy-drape${ivyFresh ? " ht-deco-in" : ""}`} aria-hidden="true" />}
           {peak >= 30 && (
             <div className={`ht-wisps${fresh.includes(30) ? " ht-deco-in" : ""}`} aria-hidden="true">
@@ -2048,7 +2042,7 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] 
         <CathedralPilaster ivy={ivy} mirror fresh={ivyFresh} />
       </div>
       <div className="ht-cathedral-plinth" aria-hidden="true">
-        <span className="ht-display">Ex Libris · Hushthorn</span>
+        <span className="ht-display">Ex Libris · {members.length ? joinNames(members) : "Hushthorn"}</span>
       </div>
     </div>
   );
@@ -2127,7 +2121,7 @@ function layoutShelfRows(books, perRow, peak) {
   return rows;
 }
 
-function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimmer, fresh = [] }) {
+function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimmer, fresh = [], members = [] }) {
   const ref = useRef(null);
   const [perRow, setPerRow] = useState(10);
   const [boxWidth, setBoxWidth] = useState(0);
@@ -2212,6 +2206,7 @@ function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimme
             index={bi}
             isLast={bi === bookcaseRows.length - 1}
             fresh={fresh}
+            members={members}
             shelves={shelfRows.map((row, ri) => renderRow(row, ri))}
           />
         ))}
@@ -2487,6 +2482,7 @@ export default function Hushthorn() {
   const [membershipVersion, setMembershipVersion] = useState(0);
   // Books loaded for the active shared archive (empty while personal).
   const [sharedBooks, setSharedBooks] = useState([]);
+  const [archiveMembers, setArchiveMembers] = useState([]); // usernames, for the cathedral plaque
   // Identity. `profile` is the user's claimed username row (or null until claimed).
   // `profileReady` gates the UsernameGate so the app never flashes before we know.
   const [profile, setProfile] = useState(null);
@@ -2690,7 +2686,7 @@ export default function Hushthorn() {
     `${(title || '').trim().toLowerCase()}|${(author || '').trim().toLowerCase()}`;
 
   const loadArchiveUnion = async (uid, libraryId) => {
-    if (!uid || !libraryId) return [];
+    if (!uid || !libraryId) return { books: [], memberNames: [] };
     const keyOf = unionKeyOf;
 
     // Fetch my books, the two co-member views, my notes, and the roster in parallel.
@@ -2863,29 +2859,37 @@ export default function Hushthorn() {
 
     // Newest-first, so "Recently inscribed" (which preserves incoming order)
     // surfaces the most recently added titles at the top of the archive union.
-    return [...map.values()].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    // memberNames (me first) feeds the cathedral's plinth plaque — usernames
+    // only, from the same profiles read above; never anyone's progress.
+    return {
+      books: [...map.values()].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')),
+      memberNames: memberIds.map((id) => profBy[id]?.username).filter(Boolean),
+    };
   };
 
   // Reload the active archive's union on demand. Extracted from the switch effect
   // so a post-mutation flow (e.g. "Add to my library" from an archive) can refresh
   // the merged shelf immediately instead of waiting for the next archive switch.
   const refreshArchiveUnion = async () => {
-    if (currentLibraryId == null || !session) { setSharedBooks([]); return; }
+    if (currentLibraryId == null || !session) { setSharedBooks([]); setArchiveMembers([]); return; }
     try {
-      setSharedBooks(await loadArchiveUnion(session.user.id, currentLibraryId));
+      const { books: union, memberNames } = await loadArchiveUnion(session.user.id, currentLibraryId);
+      setSharedBooks(union);
+      setArchiveMembers(memberNames);
     } catch (err) {
       console.error('loadArchiveUnion:', err);
       setSharedBooks([]);
+      setArchiveMembers([]);
     }
   };
 
   // Load the active archive's union when switched; clear when personal (null).
   useEffect(() => {
-    if (currentLibraryId == null || !session) { setSharedBooks([]); return; }
+    if (currentLibraryId == null || !session) { setSharedBooks([]); setArchiveMembers([]); return; }
     let cancelled = false;
     loadArchiveUnion(session.user.id, currentLibraryId)
-      .then(union => { if (!cancelled) setSharedBooks(union); })
-      .catch(err => { console.error('loadArchiveUnion:', err); if (!cancelled) setSharedBooks([]); });
+      .then(({ books: union, memberNames }) => { if (!cancelled) { setSharedBooks(union); setArchiveMembers(memberNames); } })
+      .catch(err => { console.error('loadArchiveUnion:', err); if (!cancelled) { setSharedBooks([]); setArchiveMembers([]); } });
     return () => { cancelled = true; };
   }, [currentLibraryId, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -3514,6 +3518,7 @@ export default function Hushthorn() {
             query={query}
             onPersist={persistSpineColor}
             cathedralProgress={cathedralProgress}
+            members={currentLibraryId != null ? archiveMembers : []}
             shimmer={cathedralToast?.kind === "unlock"}
             fresh={
               cathedralToast?.kind === "unlock"
