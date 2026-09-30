@@ -259,13 +259,21 @@ const FONT_CSS = `
      occlude it (audit note assumed a static composition). Dim the whole
      backdrop instead so it reads as recessed background, not a second
      competing window. */
+  /* first layer: top fade keeps the header/nav/controls readable over the
+     backdrop's bright rose window, clearing by mid-screen for the bookcase */
   background:
+    linear-gradient(180deg, rgba(12,7,20,0.96) 0%, rgba(12,7,20,0.88) 35%, rgba(12,7,20,0) 70%),
     linear-gradient(rgba(6,4,12,0.62), rgba(6,4,12,0.62)),
     url('/cathedral/nave-backdrop.webp') center / cover no-repeat;
   pointer-events: none;
 }
 @media (max-width: 640px) {
-  .ht-cathedral-backdrop { background-image: url('/cathedral/nave-backdrop-mobile.webp'); }
+  .ht-cathedral-backdrop {
+    background-image:
+      linear-gradient(180deg, rgba(12,7,20,0.96) 0%, rgba(12,7,20,0.88) 35%, rgba(12,7,20,0) 70%),
+      linear-gradient(rgba(6,4,12,0.62), rgba(6,4,12,0.62)),
+      url('/cathedral/nave-backdrop-mobile.webp');
+  }
 }
 .ht-cathedral-pilaster {
   background-image: url('/cathedral/pilaster.webp'),
