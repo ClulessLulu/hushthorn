@@ -3126,7 +3126,7 @@ export default function Hushthorn() {
     <div className="ht-bg ht-body text-purple-100">
       <style>{FONT_CSS}</style>
       <div className="ht-frame" aria-hidden="true" />
-      {view === "library" && <div className="ht-cathedral-backdrop" aria-hidden="true" />}
+      <div className="ht-cathedral-backdrop" aria-hidden="true" />
       <StagingBadge />
 
       {/* header */}
