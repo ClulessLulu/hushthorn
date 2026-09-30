@@ -88,6 +88,9 @@ const FONT_CSS = `
      this opaque background but below the header/content — without it, -1
      escapes to the root context and hides behind this background entirely. */
   isolation: isolate;
+  /* the cathedral crown's transparent side margins extend past narrow screens;
+     clip (not hidden) so no sideways scroll and sticky/fixed still work */
+  overflow-x: clip;
 }
 
 .ht-card {
@@ -343,6 +346,11 @@ const FONT_CSS = `
 }
 .ht-az-rail button:hover:not(:disabled), .ht-az-rail button:focus-visible { background: rgba(226,103,176,0.3); outline: none; }
 .ht-az-rail button:disabled { opacity: .25; cursor: default; }
+@media (max-width: 640px) {
+  /* hug the edge so the rail clears the rightmost spines on phones */
+  .ht-az-rail { right: 2px; padding: 4px 1px; }
+  .ht-az-rail button { width: 16px; height: 16px; line-height: 16px; font-size: 8.5px; }
+}
 /* shared archive: interlocked-rings ribbon hanging just under the crown */
 .ht-shared-emblem {
   position: absolute; top: -10px; left: 50%; width: 64px; height: 32px; margin-left: -32px;
@@ -375,9 +383,13 @@ const FONT_CSS = `
 .ht-whisper {
   position: fixed;
   top: 128px;
-  left: 50%;
+  /* 16px gutters measured against the real viewport (100vw includes a
+     desktop scrollbar, which left ~8px gutters at 390px) */
+  left: 16px;
+  right: 16px;
+  margin: 0 auto;
+  max-width: 400px;
   z-index: 40;
-  width: min(400px, calc(100vw - 32px));
   box-sizing: border-box;
   padding: 18px 44px;
   text-align: center;
@@ -393,8 +405,8 @@ const FONT_CSS = `
   box-shadow: 0 18px 40px rgba(0,0,0,0.6), 0 0 22px rgba(91,124,230,0.28);
 }
 @keyframes ht-whisper-in {
-  from { opacity: 0; transform: translate(-50%, -10px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: none; }
 }
 .ht-whisper-x {
   appearance: none;
@@ -2146,7 +2158,7 @@ const SHELF_ROW_H = 212; // 178px row + 10px plank + 24px gap (keep in sync with
 // a placeholder holds the last measured height (or an estimate before first
 // paint) so the page never jumps. Also reports when it crosses mid-screen, so
 // the familiar can live on the bookcase in view.
-function BookcaseSlot({ index, estimate, onCentre, children }) {
+function BookcaseSlot({ index, estimate, onCentre, label, children }) {
   const ref = useRef(null);
   const height = useRef(0);
   const [near, setNear] = useState(index < 2);
@@ -2164,7 +2176,7 @@ function BookcaseSlot({ index, estimate, onCentre, children }) {
   return (
     // flow-root keeps the bookcase's bottom margin inside this box, so the
     // measured height equals the space it occupies (no drift on unmount)
-    <div ref={ref} id={`bookcase-${index}`} style={{ display: "flow-root", ...(near ? {} : { height: height.current || estimate }) }}>
+    <div ref={ref} id={`bookcase-${index}`} role="group" aria-label={label} style={{ display: "flow-root", ...(near ? {} : { height: height.current || estimate }) }}>
       {near ? children : null}
     </div>
   );
@@ -2278,8 +2290,9 @@ function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimme
         {shimmer && <div className="ht-shimmer" aria-hidden="true" />}
         {bookcaseRows.map((shelfRows, bi) => {
           const bks = shelfRows.flat().filter((b) => !b.deco);
+          const label = `Bookcase ${toRoman(bi + 1)} · ${titlePrefix(bks[0])} – ${titlePrefix(bks[bks.length - 1])}`;
           return (
-            <BookcaseSlot key={bi} index={bi} estimate={estimateFor(shelfRows.length)} onCentre={setViewIndex}>
+            <BookcaseSlot key={bi} index={bi} label={label} estimate={estimateFor(shelfRows.length)} onCentre={setViewIndex}>
               <CathedralBookcase
                 boxWidth={boxWidth}
                 peak={peak}
@@ -2288,7 +2301,7 @@ function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimme
                 fresh={fresh}
                 members={members}
                 showFamiliar={bi === Math.min(viewIndex, bookcaseRows.length - 1)}
-                label={`Bookcase ${toRoman(bi + 1)} · ${titlePrefix(bks[0])} – ${titlePrefix(bks[bks.length - 1])}`}
+                label={label}
                 shelves={shelfRows.map((row, ri) => renderRow(row, ri))}
               />
             </BookcaseSlot>
