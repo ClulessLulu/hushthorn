@@ -279,7 +279,8 @@ const FONT_CSS = `
   background-image: url('/cathedral/pilaster.webp'),
     repeating-linear-gradient(90deg, #170d1e 0 3px, #2e1c3a 3px 7px, #1f1228 7px 9px);
   background-repeat: repeat-y, repeat;
-  background-size: 100% auto, auto;
+  background-size: var(--pil-shaft-size, 100% auto), auto;
+  background-position: var(--pil-shaft-x, 0px) 0, 0 0;
   box-shadow: inset 0 0 14px rgba(0,0,0,0.65);
 }
 .ht-cathedral-back {
@@ -1905,17 +1906,20 @@ function CathedralSconce({ side, lit, fresh }) {
 // (decision 9, "the apse"); ivy on every bookcase.
 const crownFor = (peak, isLast) => (peak >= 42 && isLast ? "bloom-garland" : peak >= 3 ? "ivy-crown" : "crown");
 
-// Measured from each PNG's alpha channel (1920x420 source px): centers of the
-// two outer column bases, the last opaque row, and the rose-window hole. The
-// variants are NOT geometrically identical, so each is placed by its own
-// numbers — the column bases land flush on the pilasters and the window
-// fills whichever hole is showing.
+// Measured from each webp (1920x420 source px): colL/colR are the centres of
+// the two outer column SHAFTS (measured where the shaft stands clear of the
+// arch foot — lower down the two merge into one blob), `bottom` the last
+// opaque row, and the rose-window hole. Variants differ, so each is placed by
+// its own numbers: plinths sit flush on the pilasters, shafts continue into
+// the pilasters' painted shafts, the window fills whichever hole is showing.
 const CROWN_GEOM = {
-  "crown":         { colL: 342.3, colR: 1565.8, bottom: 415, hx: 954.0, hy: 271.5, hr: 92.0 },
-  "ivy-crown":     { colL: 374.6, colR: 1547.5, bottom: 395, hx: 963.5, hy: 258.0, hr: 84.5 },
-  "bloom-garland": { colL: 373.5, colR: 1547.8, bottom: 398, hx: 962.0, hy: 260.0, hr: 86.0 },
+  "crown":         { colL: 323.0, colR: 1586.0, bottom: 415, hx: 954.0, hy: 271.5, hr: 92.0 },
+  "ivy-crown":     { colL: 355.0, colR: 1568.0, bottom: 395, hx: 963.5, hy: 258.0, hr: 84.5 },
+  "bloom-garland": { colL: 354.5, colR: 1566.5, bottom: 398, hx: 962.0, hy: 260.0, hr: 86.0 },
 };
-const CROWN_COL_W = 96; // painted column base width, same in all three
+const CROWN_COL_W = 60;   // column plinth width (all three) = pilaster width
+const CROWN_SHAFT_W = 35; // column shaft width (all three)
+// pilaster.webp paints its shaft at x 24-64 (40px wide, centre 44) of 96
 // Scale that makes the crown's outer column bases span exactly the bookcase.
 const crownScale = (name, boxWidth) => boxWidth / (CROWN_GEOM[name].colR - CROWN_GEOM[name].colL + CROWN_COL_W);
 
@@ -1944,7 +1948,9 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] 
   const ivy = peak >= 3;
   const g = CROWN_GEOM[crownSrc];
   const s = boxWidth > 0 ? crownScale(crownSrc, boxWidth) : 0;
-  const pil = Math.round(CROWN_COL_W * s) || 22; // pilaster = painted column base width
+  const pil = Math.round(CROWN_COL_W * s) || 22; // pilaster = crown's plinth width
+  // scale pilaster.webp so its 40px shaft = the crown's shaft width, centred
+  const k = s ? (CROWN_SHAFT_W * s) / 40 : 0;
   // The glass art carries its own dark rim (petals end at r~200 of its 256px
   // half-width). Scale so the petals meet the crown's hole edge and that rim
   // tucks behind the crown frame — otherwise it shows as a second dark ring.
@@ -1954,7 +1960,13 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [] 
     d: g.hr * (512 / 200) * s,
   };
   return (
-    <div className="relative mb-8" style={{ "--pil": `${pil}px` }}>
+    <div
+      className="relative mb-8"
+      style={{
+        "--pil": `${pil}px`,
+        ...(k ? { "--pil-shaft-size": `${96 * k}px auto`, "--pil-shaft-x": `${pil / 2 - 44 * k}px` } : {}),
+      }}
+    >
       {s > 0 && (
         // Placeholder reserves only the height from the crown's top to its
         // column-base bottom; images are absolutely placed with their base
