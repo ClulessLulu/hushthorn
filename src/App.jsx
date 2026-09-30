@@ -331,6 +331,18 @@ const FONT_CSS = `
   aspect-ratio: 1920 / 120;
   background: url('/cathedral/plinth.webp') center / contain no-repeat;
 }
+/* A-Z jump rail (100+ books, Spines view) */
+.ht-az-rail {
+  position: fixed; right: 18px; top: 50%; transform: translateY(-50%); z-index: 30;
+  display: flex; flex-direction: column; gap: 1px; padding: 6px 3px;
+  background: rgba(12,7,20,0.7); border: 1px solid rgba(232,200,119,0.3); border-radius: 2px;
+}
+.ht-az-rail button {
+  width: 24px; height: 18px; font-family: 'Cinzel', Georgia, serif; font-size: 10px; line-height: 18px;
+  color: #f0c6e4; background: none; border: none; cursor: pointer; border-radius: 2px;
+}
+.ht-az-rail button:hover:not(:disabled), .ht-az-rail button:focus-visible { background: rgba(226,103,176,0.3); outline: none; }
+.ht-az-rail button:disabled { opacity: .25; cursor: default; }
 /* shared archive: interlocked-rings ribbon hanging just under the crown */
 .ht-shared-emblem {
   position: absolute; top: -10px; left: 50%; width: 64px; height: 32px; margin-left: -32px;
@@ -1947,7 +1959,7 @@ const joinNames = (names) => (names.length < 2 ? names.join("") : `${names.slice
 
 // members: usernames when viewing a shared archive, [] on a personal shelf.
 // Decorations still come only from the VIEWER's own `peak` (decision 8).
-function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [], members = [] }) {
+function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [], members = [], label = "", showFamiliar = false }) {
   const roseLit = peak >= 6;
   const crownSrc = crownFor(peak, isLast);
   // Crossfade only at the moment of unlock: the previous crown sits beneath
@@ -2011,9 +2023,8 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [],
         </div>
       )}
       <div className="relative flex items-stretch">
-        {peak >= 15 && index === 0 && (
-          // ponytail: familiar lives on the first bookcase; Task 8 moves it to
-          // whichever bookcase is in view once bookcases are virtualized.
+        {peak >= 15 && showFamiliar && (
+          // the familiar lives on whichever bookcase is mid-screen (decision 9)
           <div className={`ht-familiar-track${fresh.includes(15) ? " ht-deco-in" : ""}`} aria-hidden="true">
             <div className="ht-familiar">
               <span className="ht-familiar-walk" />
@@ -2042,7 +2053,7 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [],
         <CathedralPilaster ivy={ivy} mirror fresh={ivyFresh} />
       </div>
       <div className="ht-cathedral-plinth" aria-hidden="true">
-        <span className="ht-display">Ex Libris · {members.length ? joinNames(members) : "Hushthorn"}</span>
+        <span className="ht-display">{label}</span>
       </div>
     </div>
   );
@@ -2121,7 +2132,45 @@ function layoutShelfRows(books, perRow, peak) {
   return rows;
 }
 
-function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimmer, fresh = [], members = [] }) {
+const ROMAN = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
+const toRoman = (n) => ROMAN.reduce((s, [v, r]) => { while (n >= v) { s += r; n -= v; } return s; }, "");
+const titlePrefix = (b) => {
+  const t = (b?.title || "").trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1, 2).toLowerCase() : "";
+};
+const AZ = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const SHELF_ROW_H = 212; // 178px row + 10px plank + 24px gap (keep in sync with renderRow)
+
+// Mounts its bookcase only while within one viewport of the screen; otherwise
+// a placeholder holds the last measured height (or an estimate before first
+// paint) so the page never jumps. Also reports when it crosses mid-screen, so
+// the familiar can live on the bookcase in view.
+function BookcaseSlot({ index, estimate, onCentre, children }) {
+  const ref = useRef(null);
+  const height = useRef(0);
+  const [near, setNear] = useState(index < 2);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") { setNear(true); return; }
+    const nearObs = new IntersectionObserver(([e]) => setNear(e.isIntersecting), { rootMargin: "50% 0px" });
+    const midObs = new IntersectionObserver(([e]) => { if (e.isIntersecting) onCentre(index); }, { rootMargin: "-45% 0px -45% 0px" });
+    nearObs.observe(el);
+    midObs.observe(el);
+    return () => { nearObs.disconnect(); midObs.disconnect(); };
+  }, [index, onCentre]);
+  useEffect(() => { if (near && ref.current) height.current = ref.current.offsetHeight; });
+  return (
+    // flow-root keeps the bookcase's bottom margin inside this box, so the
+    // measured height equals the space it occupies (no drift on unmount)
+    <div ref={ref} id={`bookcase-${index}`} style={{ display: "flow-root", ...(near ? {} : { height: height.current || estimate }) }}>
+      {near ? children : null}
+    </div>
+  );
+}
+
+function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimmer, fresh = [], members = [], sortKey = "recent" }) {
+  const [viewIndex, setViewIndex] = useState(0);
   const ref = useRef(null);
   const [perRow, setPerRow] = useState(10);
   const [boxWidth, setBoxWidth] = useState(0);
@@ -2194,22 +2243,59 @@ function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimme
     </div>
   );
 
+  // Placeholder height before a bookcase has ever painted: crown + rows + plinth.
+  const crownName = crownFor(peak, false);
+  const crownH = boxWidth ? Math.round((CROWN_GEOM[crownName].bottom + 1) * crownScale(crownName, boxWidth)) : 0;
+  const estimateFor = (nRows) => crownH + 12 + nRows * SHELF_ROW_H + 30 + 32;
+
+  // A–Z rail (100+ books): letter -> first bookcase holding it. Author initials
+  // when sorted by author, title initials otherwise.
+  const letterOf = (b) => ((sortKey === "author" ? b.author : b.title) || "").trim().charAt(0).toUpperCase();
+  const letterCase = {};
+  bookcaseRows.forEach((shelfRows, bi) => shelfRows.flat().forEach((b) => {
+    if (b.deco) return;
+    const l = letterOf(b);
+    if (l && !(l in letterCase)) letterCase[l] = bi;
+  }));
+  const jumpTo = (bi) => {
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    document.getElementById(`bookcase-${bi}`)?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  };
+
   return (
     <>
+      {books.length >= 100 && (
+        <nav className="ht-az-rail" aria-label="Jump to letter">
+          {AZ.map((l) => (
+            <button key={l} type="button" disabled={!(l in letterCase)} onClick={() => jumpTo(letterCase[l])} aria-label={`Jump to ${l}`}>
+              {l}
+            </button>
+          ))}
+        </nav>
+      )}
       <div ref={ref} className="max-w-3xl mx-auto relative">
         {shimmer && <div className="ht-shimmer" aria-hidden="true" />}
-        {bookcaseRows.map((shelfRows, bi) => (
-          <CathedralBookcase
-            key={bi}
-            boxWidth={boxWidth}
-            peak={peak}
-            index={bi}
-            isLast={bi === bookcaseRows.length - 1}
-            fresh={fresh}
-            members={members}
-            shelves={shelfRows.map((row, ri) => renderRow(row, ri))}
-          />
-        ))}
+        {bookcaseRows.map((shelfRows, bi) => {
+          const bks = shelfRows.flat().filter((b) => !b.deco);
+          return (
+            <BookcaseSlot key={bi} index={bi} estimate={estimateFor(shelfRows.length)} onCentre={setViewIndex}>
+              <CathedralBookcase
+                boxWidth={boxWidth}
+                peak={peak}
+                index={bi}
+                isLast={bi === bookcaseRows.length - 1}
+                fresh={fresh}
+                members={members}
+                showFamiliar={bi === Math.min(viewIndex, bookcaseRows.length - 1)}
+                label={`Bookcase ${toRoman(bi + 1)} · ${titlePrefix(bks[0])} – ${titlePrefix(bks[bks.length - 1])}`}
+                shelves={shelfRows.map((row, ri) => renderRow(row, ri))}
+              />
+            </BookcaseSlot>
+          );
+        })}
+        <p className="ht-display text-center text-[10px] uppercase tracking-[0.18em] text-[rgba(232,200,119,0.75)] mt-1">
+          Ex Libris · {members.length ? joinNames(members) : "Hushthorn"}
+        </p>
         <p className="text-center text-sm text-purple-400/60 italic mt-2">
           Hover a spine to ease it from the shelf — tap to pull it out. Wishlist spines are ghosts in dashed glass.
         </p>
@@ -3518,6 +3604,7 @@ export default function Hushthorn() {
             query={query}
             onPersist={persistSpineColor}
             cathedralProgress={cathedralProgress}
+            sortKey={sortKey}
             members={currentLibraryId != null ? archiveMembers : []}
             shimmer={cathedralToast?.kind === "unlock"}
             fresh={
