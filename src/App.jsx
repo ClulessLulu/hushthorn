@@ -3588,8 +3588,8 @@ export default function Hushthorn() {
             {t.label}
           </button>
         ))}
-        <NavTab active={view === "oracle"} icon="🔮" onClick={() => setView("oracle")}>Oracle</NavTab>
-        <NavTab active={view === "pair"} icon="📖" onClick={() => setView("pair")}>Codex</NavTab>
+        <NavTab active={view === "oracle"} onClick={() => setView("oracle")}>Oracle</NavTab>
+        <NavTab active={view === "pair"} onClick={() => setView("pair")}>Codex</NavTab>
         <EnamelButton onClick={() => setAddOpen(true)} className="ml-2">+ Inscribe</EnamelButton>
       </nav>
 
