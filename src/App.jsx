@@ -300,22 +300,26 @@ const FONT_CSS = `
      panel's 12px side padding is for the spines, not the planks) */
   margin-left: -12px; margin-right: -12px;
   height: 24px;
-  /* one solid board: the bookcase's own wood grain under the plank art, so
-     nothing (and no colour from behind) can show through the board */
-  background-image: linear-gradient(rgba(10,6,18,0.45), rgba(10,6,18,0.45)), url('/cathedral/back-panel.webp');
-  background-size: auto, 320px 320px;
-  box-shadow: 0 6px 10px rgba(0,0,0,0.7);
+  /* The board's front face is drawn in code from the bookcase's own wood
+     grain (shaded top to bottom); only the gold edge uses the plank art. */
+  background-image:
+    linear-gradient(180deg, rgba(0,0,0,0) 0, rgba(8,4,14,0.55) 100%),
+    linear-gradient(rgba(110,82,56,0.22), rgba(110,82,56,0.22)),
+    url('/cathedral/back-panel.webp');
+  background-size: auto, auto, 256px 256px;
+  box-shadow: 0 6px 10px rgba(0,0,0,0.7), inset 0 -1px 0 rgba(0,0,0,0.6);
 }
 .ht-cathedral-plank::before {
   content: "";
   position: absolute;
-  inset: 0;
-  /* plank.webp paints a 14px board (rows 16-30 of its 48px file: gold edge
-     over dark wood). Scale 1.7x so that board is the full 24px thickness. */
+  top: 0; left: 0; right: 0; height: 7px;
+  /* plank.webp is 2x art: its 14px board (rows 16-30 of 48) is 7 CSS px at
+     the intended size. Showing it at exactly 0.5x keeps it sharp; stretching
+     it larger is what made the shelf blurry. */
   background-image: url('/cathedral/plank.webp');
   background-repeat: repeat-x;
-  background-size: auto 81.6px;
-  background-position: 0 -27.2px;
+  background-size: auto 24px;
+  background-position: 0 -8px;
 }
 .ht-cathedral-plinth {
   position: relative;
@@ -510,8 +514,10 @@ const FONT_CSS = `
   background-repeat: repeat-y; background-size: 100% auto; pointer-events: none; z-index: 3;
 }
 .ht-plank-ivy::after {
-  content: ""; position: absolute; top: calc(100% - 4px); left: 0; right: 0; height: 22px; z-index: 4; pointer-events: none;
-  background: url('/cathedral/ivy-drape.webp') repeat-x; background-size: auto 22px;
+  /* ivy grows up out of the board's top edge: the hanging-ivy strip, flipped */
+  content: ""; position: absolute; bottom: calc(100% - 5px); left: 0; right: 0; height: 18px; z-index: 4; pointer-events: none;
+  background: url('/cathedral/ivy-drape.webp') repeat-x; background-size: auto 18px;
+  transform: scaleY(-1);
 }
 .ht-ivy-drape {
   position: absolute; top: 0; left: 0; right: 0; height: 28px; z-index: 4; pointer-events: none;
