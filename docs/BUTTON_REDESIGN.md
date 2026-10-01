@@ -99,3 +99,9 @@ Implemented: `src/components/EnamelButton.jsx` and its CSS provide primary, seco
 All six sheet designs and the single metal design are exported separately. Each has nine physical WebP slices; the component uses CSS border-image with equivalent 48-source-pixel slices rendered at 14 CSS px. Dimensions and byte sizes are in `public/brand/buttons/manifest.json`. Image generation performed the background removal, so the cutouts may differ slightly from the original reference.
 
 Review page: run `npm run dev` and open `/button-preview.html`. Browser preview confirmed rendering, activation, disabled loading state and keyboard navigation. Build passed; full authenticated app regression and device-specific mobile QA remain pending.
+
+## QA pass (2026-10-01)
+
+Fixed: fallback gradient showed as a lighter rectangle behind every button (it filled the corners the art cuts away) — now clipped inside the frame on `::before`; label backing removed on primary/secondary/quiet (13.5:1 or better measured over the raw art, 4.5:1 target) and kept on metal (1.6:1 worst case). Verified on staging: image-failure fallback, 2px focus ring, stable width while loading, 50px height, no horizontal overflow at 390px, modal opens from + Inscribe. Screenshots: `output/button-redesign-qa/`.
+
+Still open: 320/375/768 px and 200% zoom, keyboard activation inside the Inscribe and cover-editor modals, long-label check, rollout to navigation / icon actions / destructive actions, header wordmark (separate change). Weight note: `public/brand/buttons` is 2.3 MB because source PNGs and slice folders ship with it; the app loads four WebPs (~100 KB). Move the sources out of `public/` before this goes to production if deploy size matters.
