@@ -105,3 +105,29 @@ Review page: run `npm run dev` and open `/button-preview.html`. Browser preview 
 Fixed: fallback gradient showed as a lighter rectangle behind every button (it filled the corners the art cuts away) — now clipped inside the frame on `::before`; label backing removed on primary/secondary/quiet (13.5:1 or better measured over the raw art, 4.5:1 target) and kept on metal (1.6:1 worst case). Verified on staging: image-failure fallback, 2px focus ring, stable width while loading, 50px height, no horizontal overflow at 390px, modal opens from + Inscribe. Screenshots: `output/button-redesign-qa/`.
 
 Still open: 320/375/768 px and 200% zoom, keyboard activation inside the Inscribe and cover-editor modals, long-label check, rollout to navigation / icon actions / destructive actions, header wordmark (separate change). Weight note: `public/brand/buttons` is 2.3 MB because source PNGs and slice folders ship with it; the app loads four WebPs (~100 KB). Move the sources out of `public/` before this goes to production if deploy size matters.
+
+## Navigation tab art (Oracle, Codex) — Midjourney brief
+
+Scope this round: **Oracle and Codex only** (they switch screens). The shelf filters (All, Owned, Wishlist, Read, Unread, Audio), Covers/Spines, sort and trope chips are a later, separate design. Tabs are rendered today as notched ribbons (`.ht-ribbon`, clip-path) at ~100-130 x 48 CSS px.
+
+**What to generate** (one sheet each, same seed/style so they match; use the existing button sheet `docs/assets/button-redesign/tracery-button-reference.png` as `--sref` and the Hushthorn wordmark for colour):
+
+1. **Unselected tab** — dark violet-black enamel, thin rose-silver tracery frame, no glow.
+2. **Selected tab** — same silhouette and size, sapphire/violet enamel lit from the top with a pink highlight, brighter frame, a small engraved marker (diamond or pointed finial) at top centre so selection is not colour alone.
+
+**Silhouette:** a wide, shallow tab with a gently pointed gothic arch (or pointed lancet top) and a flat bottom edge; symmetrical; corners with small thorn/tracery flourishes like the button sheet. It must still stretch: ornament only in the four corners and the top-centre finial; the straight left/right/bottom edges plain and repeatable so it can be nine-sliced.
+
+**Prompt (copy, then add `--sref <button sheet> --ar 4:1 --style raw --v 7`):**
+
+> Single gothic navigation tab, wide shallow pointed-arch top, flat bottom, enchanted sapphire and violet enamel with a thin rose-silver cathedral tracery frame, small thorn corner flourishes, engraved diamond finial at top centre, polished glass-like enamel, front-facing orthographic, perfectly symmetrical, centered with generous empty margin, uniform flat pure black background, no text, no letters, no icon, no shadow, no reflection, game UI asset
+
+For the **selected** version append: `lit from above, glowing pink-magenta highlight along the top inner edge, brighter metal frame`. For **unselected** append: `deep near-black violet enamel, unlit, matte, subdued silver-rose frame`.
+
+**Specs for the files you send back:**
+- PNG, 2x density: about **520 x 190 px** artwork each (renders at ~130 x 48 CSS px). Larger is fine if the proportions match; do not make them square.
+- Same canvas size, same silhouette position and scale for both states, so swapping them never shifts layout.
+- Background removed to real alpha (or a flat black I can key out). Keep the dark enamel interior opaque.
+- Save as `output/cathedral-v1/../` is **not** used for these; put them in `docs/assets/button-redesign/` as `tab-unselected.png` and `tab-selected.png`.
+- If you want a hover/pressed look, do not generate it; I derive it with brightness filters from the same art.
+
+**What I build once they arrive:** extend `EnamelButton` with a `tab` variant (nine-slice, live Cinzel label, `aria-current="page"` on the active one, 44px minimum touch height, focus ring, reduced-motion safe, CSS fallback frame if the art fails) and replace the Oracle and Codex ribbons. Navigation stays navigation: no tab roles.
