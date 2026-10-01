@@ -319,20 +319,39 @@ const FONT_CSS = `
 }
 .ht-cathedral-plinth {
   position: relative;
-  height: 30px;
+  height: 74px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
-  background: linear-gradient(180deg, #241536, #130b1f);
-  box-shadow: 0 14px 26px rgba(0,0,0,0.7), inset 0 1px 0 rgba(232,200,119,0.3);
+  padding-bottom: 9px;
+  box-sizing: border-box;
+  background:
+    linear-gradient(180deg, rgba(232,200,119,0.16) 0, rgba(232,200,119,0) 3px),
+    linear-gradient(180deg, #2c1b42 0%, #1b102d 45%, #0f0818 100%);
+  border-top: 1px solid rgba(232,200,119,0.55);
+  box-shadow: 0 14px 26px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,236,190,0.18), inset 0 -2px 0 rgba(0,0,0,0.5);
 }
+/* The art paints only a 587x120 drawer inside its 1920-wide file (x 666-1253),
+   so the box is sized to that drawer and the file is shown at auto-100% height
+   with the drawer centred (666 / (1920 - 587) = 50%). */
 .ht-cathedral-plinth::before {
   content: "";
   position: absolute;
   top: -10px; left: 50%; transform: translateX(-50%);
-  width: min(420px, 90%);
-  aspect-ratio: 1920 / 120;
-  background: url('/cathedral/plinth.webp') center / contain no-repeat;
+  width: min(290px, 70%);
+  aspect-ratio: 587 / 120;
+  background: url('/cathedral/plinth.webp') 50% 0 / auto 100% no-repeat;
+}
+.ht-cathedral-plinth span {
+  max-width: 92%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  position: relative;
+  z-index: 1;
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(232,200,119,0.9);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
 }
 /* A-Z jump rail (100+ books, Spines view) */
 .ht-az-rail {
@@ -356,15 +375,6 @@ const FONT_CSS = `
   position: absolute; top: -10px; left: 50%; width: 64px; height: 32px; margin-left: -32px;
   object-fit: contain; z-index: 6; pointer-events: none;
   filter: drop-shadow(0 3px 4px rgba(0,0,0,0.6));
-}
-.ht-cathedral-plinth span {
-  max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  position: relative;
-  z-index: 1;
-  font-size: 8px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: rgba(232,200,119,0.75);
 }
 .ht-shimmer {
   position: absolute;
@@ -2259,7 +2269,7 @@ function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimme
   // Placeholder height before a bookcase has ever painted: crown + rows + plinth.
   const crownName = crownFor(peak, false);
   const crownH = boxWidth ? Math.round((CROWN_GEOM[crownName].bottom + 1) * crownScale(crownName, boxWidth)) : 0;
-  const estimateFor = (nRows) => crownH + 12 + nRows * SHELF_ROW_H + 30 + 32;
+  const estimateFor = (nRows) => crownH + 12 + nRows * SHELF_ROW_H + 74 + 32;
 
   // A–Z rail (100+ books): letter -> first bookcase holding it. Author initials
   // when sorted by author, title initials otherwise.
