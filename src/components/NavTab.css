@@ -17,9 +17,9 @@
 .ht-navtab--on { --tab-art: url('/brand/buttons/tab-selected.webp'); filter: none; }
 .ht-navtab__label {
   position: absolute;
-  /* dead centre of the image: the art is 192x188 with its centre column at 95.5
-     (49.7%); at half height the arch is ~79px (css) wide, room for the words alone */
-  left: 49.7%; top: 50%;
+  /* a quarter of the way up from the bottom edge (75% down), centred on the art's
+     centre column (95.5 of 192 = 49.7%); the arch is ~93px (css) wide there */
+  left: 49.7%; top: 75%;
   transform: translate(-50%, -50%);
   display: inline-flex; align-items: center; gap: 4px;
   white-space: nowrap;
