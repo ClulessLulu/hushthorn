@@ -1,0 +1,38 @@
+.ht-navtab {
+  --tab-art: url('/brand/buttons/tab-unselected.webp');
+  position: relative;
+  flex: none;
+  width: 104px;
+  height: 103px; /* art is ~190x188 at 2x; kept at its own proportions, never stretched */
+  padding: 0;
+  border: 0;
+  background: var(--tab-art) center / 100% 100% no-repeat;
+  color: #fff5fc;
+  font-family: 'Cinzel', serif;
+  cursor: pointer;
+  filter: saturate(.9) brightness(.92);
+  transition: filter 140ms ease, transform 140ms ease;
+}
+.ht-navtab--on { --tab-art: url('/brand/buttons/tab-selected.webp'); filter: none; }
+.ht-navtab__label {
+  position: absolute;
+  left: 50%; bottom: 17%;
+  transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 4px;
+  white-space: nowrap;
+  padding: 2px 7px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  background: rgba(14, 8, 30, .82);
+  border-radius: 2px;
+}
+.ht-navtab--on .ht-navtab__label { color: #fff; background: rgba(8, 6, 40, .86); box-shadow: 0 0 0 1px rgba(255, 170, 224, .55); }
+/* touch target: keep the whole arch clickable and at least 44px each way */
+@media (hover: hover) { .ht-navtab:hover:not(.ht-navtab--on) { filter: brightness(1.15) saturate(1.1); } }
+.ht-navtab:active { filter: brightness(.82); }
+.ht-navtab:focus-visible { outline: 2px solid #ffd5ee; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .ht-navtab { transition: none; } }
+@media (forced-colors: active) {
+  .ht-navtab { background: none; border: 1px solid ButtonText; }
+  .ht-navtab--on { border-width: 3px; }
+  .ht-navtab__label { background: ButtonFace; color: ButtonText; }
+}

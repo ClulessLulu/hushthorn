@@ -1,4 +1,5 @@
 import EnamelButton from './components/EnamelButton';
+import NavTab from './components/NavTab';
 import { useState, useRef, useEffect, Fragment } from "react";
 import Papa from "papaparse";
 import { supabase } from './lib/supabase';
@@ -3573,7 +3574,7 @@ export default function Hushthorn() {
       )}
 
       {/* shelf banners */}
-      <nav className="max-w-5xl mx-auto px-5 flex flex-wrap justify-center gap-2 pb-6" aria-label="Shelves">
+      <nav className="max-w-5xl mx-auto px-5 flex flex-wrap items-center justify-center gap-2 pb-6" aria-label="Shelves">
         {shelfTabs.map((t) => (
           <button
             key={t.key}
@@ -3587,26 +3588,8 @@ export default function Hushthorn() {
             {t.label}
           </button>
         ))}
-        <button
-          onClick={() => setView("oracle")}
-          className={`ht-ribbon ht-display px-5 pt-2 pb-4 text-xs font-semibold uppercase transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${
-            view === "oracle"
-              ? "bg-gradient-to-b from-indigo-500/80 to-purple-600/80 text-white"
-              : "bg-purple-900/40 text-indigo-300 hover:bg-purple-800/50"
-          }`}
-        >
-          🔮 Oracle
-        </button>
-        <button
-          onClick={() => setView("pair")}
-          className={`ht-ribbon ht-display px-5 pt-2 pb-4 text-xs font-semibold uppercase transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${
-            view === "pair"
-              ? "bg-gradient-to-b from-indigo-500/80 to-purple-600/80 text-white"
-              : "bg-purple-900/40 text-indigo-300 hover:bg-purple-800/50"
-          }`}
-        >
-          📖 Codex
-        </button>
+        <NavTab active={view === "oracle"} icon="🔮" onClick={() => setView("oracle")}>Oracle</NavTab>
+        <NavTab active={view === "pair"} icon="📖" onClick={() => setView("pair")}>Codex</NavTab>
         <EnamelButton onClick={() => setAddOpen(true)} className="ml-2">+ Inscribe</EnamelButton>
       </nav>
 
