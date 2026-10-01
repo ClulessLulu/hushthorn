@@ -16,7 +16,8 @@
 .ht-navtab--on { --tab-art: url('/brand/buttons/tab-selected.webp'); filter: none; }
 .ht-navtab__label {
   position: absolute;
-  left: 50%; top: 56%;
+  /* centre of the glass in the 256x105 art: rows 49-104 (73%), centre column 127 (49.6%) */
+  left: 49.6%; top: 73%;
   transform: translate(-50%, -50%);
   display: inline-flex; align-items: center; gap: 4px;
   white-space: nowrap;
