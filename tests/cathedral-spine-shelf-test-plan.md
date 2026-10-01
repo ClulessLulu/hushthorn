@@ -133,3 +133,8 @@ alpha (30) and beta (0) as members of "QA Shared Archive".
 - qa.beta: 4 books titled `QA Import …` (read) and a progress row at 4.
 - qa.beta: member of "QA Shared Archive".
 - qa.alpha: progress restored to her real 30.
+
+## Update 2026-10-01 — shelf fills by width; pillar art fills the pillar
+
+- Rows are now packed by real spine width instead of a fixed 6–14 books per row (which stopped desktop shelves about halfway). Runnable check extracted from `src/App.jsx` (`shelf-layout-check.mjs`, run from the repo root): no row exceeds the shelf width and no book is lost across 5 shelf widths × peaks 0/10/21/42 × 0/1/7/44/300 books; full rows use ≥ 96% of a 672px shelf; 25 books per desktop row (was 14), 12 per 335px row; urn ends shelf 2 (or the only shelf), tree is last. Live on staging: desktop 960px rows 96% / 94% full, phone 390px rows 92–99% full, no overflow, no sideways scroll.
+- Pillar art is scaled so its fluted shaft fills the whole pilaster; the purple flute-gradient base no longer shows either side of the shaft.

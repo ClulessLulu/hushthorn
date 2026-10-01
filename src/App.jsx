@@ -1793,10 +1793,16 @@ const SPINE_GLOW = {
   audio: "rgba(34,211,238,0.95)",
 };
 
+// Rendered width of a spine, 17-28px, from its title+author hash. The shelf
+// layout packs rows with this same number, so rows fill the shelf exactly.
+function spineWidthOf(book) {
+  return 17 + (hashStr((book.author || "") + (book.title || "")) % 12);
+}
+
 function Spine({ book, onOpen, dimmed, onPersist }) {
   const color = useSpineColor(book, onPersist);
   const h = 122 + (hashStr(book.title || "") % 48);
-  const w = 17 + (hashStr((book.author || "") + (book.title || "")) % 12);
+  const w = spineWidthOf(book);
   const wish = book.shelf === "wishlist";
   const hasAudio = (book.formats || []).includes("audio");
   // UnionBook detection — personal books have `id`; archive entries have `owners`.
@@ -1905,7 +1911,6 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
   );
 }
 
-const MAX_SPINE_W = 29;
 const SPINE_GAP = 5;
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
@@ -1962,7 +1967,6 @@ const CROWN_GEOM = {
   "bloom-garland": { colL: 356.0, colR: 1563.0, bottom: 399, hx: 967.5, hy: 260.0, hr: 91.5 },
 };
 const CROWN_COL_W = 50;   // side stile width (all three) = pilaster width
-const CROWN_SHAFT_W = 35; // column shaft width (all three)
 // pilaster.webp paints its shaft at x 24-64 (40px wide, centre 44) of 96
 // Scale that makes the crown's outer column bases span exactly the bookcase.
 const crownScale = (name, boxWidth) => boxWidth / (CROWN_GEOM[name].colR - CROWN_GEOM[name].colL + CROWN_COL_W);
@@ -1996,7 +2000,10 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [],
   const s = boxWidth > 0 ? crownScale(crownSrc, boxWidth) : 0;
   const pil = Math.round(CROWN_COL_W * s) || 22; // pilaster = crown's plinth width
   // scale pilaster.webp so its 40px shaft = the crown's shaft width, centred
-  const k = s ? (CROWN_SHAFT_W * s) / 40 : 0;
+  // pilaster.webp paints a 40px shaft (x 24-64 of 96); scale so that shaft is
+  // the pilaster's full width, otherwise the flute-gradient base shows as a
+  // purple band on either side. The no-pillar crowns' stiles are the same width.
+  const k = s ? pil / 40 : 0;
   // The glass art carries its own dark rim (petals end at r~200 of its 256px
   // half-width). Scale so the petals meet the crown's hole edge and that rim
   // tucks behind the crown frame — otherwise it shows as a second dark ring.
@@ -2010,7 +2017,7 @@ function CathedralBookcase({ shelves, boxWidth, peak, index, isLast, fresh = [],
       className="relative mb-8"
       style={{
         "--pil": `${pil}px`,
-        ...(k ? { "--pil-shaft-size": `${96 * k}px auto`, "--pil-shaft-x": `${pil / 2 - 44 * k}px` } : {}),
+        ...(k ? { "--pil-shaft-size": `${96 * k}px auto`, "--pil-shaft-x": `${-24 * k}px` } : {}),
       }}
     >
       {s > 0 && (
@@ -2135,23 +2142,39 @@ function CathedralCuriosities({ peak, open, onToggle }) {
   );
 }
 
-// Decorations that stand on a shelf occupy spine slots. Rose urn ends shelf 2
-// (or the last shelf when the library has fewer); the thorn tree ends the very
-// last shelf, i.e. the apse of the last bookcase. Weight = spine slots taken.
-const DECO_WEIGHT = { urn: 2, tree: 3 };
-function layoutShelfRows(books, perRow, peak) {
-  const items = [...books];
-  if (peak >= 10) items.splice(Math.min(items.length, 2 * perRow - DECO_WEIGHT.urn), 0, { deco: "urn" });
-  if (peak >= 21) items.push({ deco: "tree" });
+// Rows are packed by real width, so a shelf fills edge to edge at any screen
+// size. Decorations take their own width: the rose urn ends shelf 2 (or the
+// last shelf when the library is shorter) and the thorn tree ends the very
+// last shelf, i.e. the apse of the last bookcase.
+const URN_W = 66, TREE_W = 92; // match .ht-deco-urn / .ht-deco-tree
+function layoutShelfRows(books, innerW, peak, widthOf = spineWidthOf) {
+  const W = Math.max(innerW, 120);
+  const wOf = (it) => (it.deco === "urn" ? URN_W : it.deco === "tree" ? TREE_W : widthOf(it));
+  const used = (row) => row.reduce((n, it, i) => n + wOf(it) + (i ? SPINE_GAP : 0), 0);
+  const withUrn = peak >= 10;
   const rows = [];
-  let row = [], w = 0;
-  for (const it of items) {
-    const iw = DECO_WEIGHT[it.deco] || 1;
-    if (row.length && w + iw > perRow) { rows.push(row); row = []; w = 0; }
-    row.push(it);
-    w += iw;
+  let row = [], urnPlaced = false;
+  const flush = () => {
+    if (withUrn && !urnPlaced && rows.length === 1) { row.push({ deco: "urn" }); urnPlaced = true; }
+    rows.push(row);
+    row = [];
+  };
+  for (const b of books) {
+    const reserve = withUrn && !urnPlaced && rows.length === 1 ? URN_W + SPINE_GAP : 0;
+    if (row.length && used(row) + SPINE_GAP + wOf(b) > W - reserve) flush();
+    row.push(b);
   }
-  if (row.length) rows.push(row);
+  if (row.length) flush();
+  if (!rows.length) rows.push([]);
+  const last = () => rows[rows.length - 1];
+  if (withUrn && !urnPlaced) {
+    if (last().length && used(last()) + SPINE_GAP + URN_W > W) rows.push([]);
+    last().push({ deco: "urn" });
+  }
+  if (peak >= 21) {
+    if (last().length && used(last()) + SPINE_GAP + TREE_W > W) rows.push([]);
+    last().push({ deco: "tree" });
+  }
   return rows;
 }
 
@@ -2195,7 +2218,6 @@ function BookcaseSlot({ index, estimate, onCentre, label, children }) {
 function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimmer, fresh = [], members = [], sortKey = "recent" }) {
   const [viewIndex, setViewIndex] = useState(0);
   const ref = useRef(null);
-  const [perRow, setPerRow] = useState(10);
   const [boxWidth, setBoxWidth] = useState(0);
 
   useEffect(() => {
@@ -2203,7 +2225,6 @@ function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimme
     if (!el) return;
     const measure = (width) => {
       if (!width) return;
-      setPerRow(clamp(Math.floor(width / (MAX_SPINE_W + SPINE_GAP)), 6, 14));
       setBoxWidth(width);
     };
     if (typeof ResizeObserver !== "undefined") {
@@ -2233,7 +2254,9 @@ function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimme
   }
 
   const peak = cathedralProgress.peak;
-  const rows = layoutShelfRows(books, perRow, peak);
+  // inner width of a shelf row = bookcase minus both pillars and the back panel's 12px side padding
+  const pilW = Math.round(CROWN_COL_W * crownScale(crownFor(peak, false), boxWidth || 1));
+  const rows = layoutShelfRows(books, boxWidth ? boxWidth - 2 * pilW - 24 : 300, peak);
   const bookcaseRows = [];
   for (let i = 0; i < rows.length; i += 3) bookcaseRows.push(rows.slice(i, i + 3));
 
