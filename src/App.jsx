@@ -1,3 +1,4 @@
+import EnamelButton from './components/EnamelButton';
 import { useState, useRef, useEffect, Fragment } from "react";
 import Papa from "papaparse";
 import { supabase } from './lib/supabase';
@@ -3574,12 +3575,7 @@ export default function Hushthorn() {
         >
           📖 Codex
         </button>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="ht-display ml-2 px-5 py-2 rounded-sm border border-pink-300/40 bg-gradient-to-b from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-white text-xs font-semibold uppercase transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-300"
-        >
-          + Inscribe
-        </button>
+        <EnamelButton onClick={() => setAddOpen(true)} className="ml-2">+ Inscribe</EnamelButton>
       </nav>
 
       {/* library controls — only in the library view */}
@@ -6606,13 +6602,9 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
               onChange={(next) => setManual((m) => ({ ...m, tropes: next }))}
             />
           </div>
-          <div className="flex gap-2">
-            <button onClick={() => addManual("owned")} disabled={!manual.title.trim()} className="ht-display flex-1 py-2 rounded-sm bg-indigo-500/70 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold uppercase">
-              Inscribe to Owned
-            </button>
-            <button onClick={() => addManual("wishlist")} disabled={!manual.title.trim()} className="ht-display flex-1 py-2 rounded-sm bg-pink-500/70 hover:bg-pink-500 disabled:opacity-40 text-white text-xs font-semibold uppercase">
-              Inscribe to Wishlist
-            </button>
+          <div className="ht-enamel-actions">
+            <EnamelButton variant="primary" onClick={() => addManual("owned") } disabled={!manual.title.trim()}>Inscribe to Owned</EnamelButton>
+            <EnamelButton variant="secondary" onClick={() => addManual("wishlist") } disabled={!manual.title.trim()}>Inscribe to Wishlist</EnamelButton>
           </div>
         </div>
       ) : (
@@ -7139,15 +7131,9 @@ function CoverEditor({ book, onUpdate, session }) {
       )}
 
       {/* Save / Cancel */}
-      <div className="flex gap-2">
-        <button onClick={save} disabled={saving}
-          className="ht-display flex-1 py-2 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest">
-          {saving ? "Saving…" : "✦ Save cover"}
-        </button>
-        <button onClick={cancel}
-          className="ht-display px-3 py-2 rounded-sm border border-purple-700/40 hover:border-purple-500/60 text-purple-400 text-xs uppercase">
-          Cancel
-        </button>
+      <div className="ht-enamel-actions">
+        <EnamelButton onClick={save} loading={saving}>✦ Save cover</EnamelButton>
+        <EnamelButton variant="quiet" onClick={cancel}>Cancel</EnamelButton>
       </div>
     </div>
   );

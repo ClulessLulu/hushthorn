@@ -1,0 +1,69 @@
+.ht-enamel {
+  --button-art: url('/brand/buttons/enamel-primary.webp');
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 48px;
+  min-width: 100px;
+  padding: 15px 26px;
+  border: 0;
+  border-radius: 2px;
+  background: none; /* fallback fill lives on ::before, clipped inside the frame */
+  color: #fff5fc;
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+  text-align: center;
+  cursor: pointer;
+  transition: box-shadow 140ms ease;
+}
+.ht-enamel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* If the artwork fails to load, border-image is dropped and this plain
+     border + padding-box gradient is what shows. When it loads, the artwork
+     replaces the border and covers the centre, so no fallback colour peeks out
+     past the frame's cut corners. */
+  border: 14px solid #3b2d78;
+  background: linear-gradient(180deg,#26114b,#10244d) padding-box;
+  border-image: var(--button-art) 48 fill / 14px / 0 stretch;
+  transition: filter 140ms ease;
+}
+.ht-enamel--secondary { --button-art: url('/brand/buttons/enamel-secondary.webp'); }
+.ht-enamel--quiet { --button-art: url('/brand/buttons/tracery-quiet.webp'); }
+.ht-enamel--metal { --button-art: url('/brand/buttons/enamel-metal.webp'); }
+.ht-enamel__label {
+  padding: 1px 5px;
+  border-radius: 2px;
+  /* primary/secondary/quiet art measures >= 13.5:1 against this text; the
+     soft shadow only covers the brightest highlight pixels */
+  text-shadow: 0 1px 2px rgba(10,5,25,.85);
+}
+/* the metal art has a bright face (1.6:1 at worst), so it keeps a quiet backing */
+.ht-enamel--metal .ht-enamel__label { background: #140c29; text-shadow: none; }
+@media (hover:hover) {
+  .ht-enamel:hover:not(:disabled)::before { filter: brightness(1.15); }
+}
+.ht-enamel:active:not(:disabled)::before { filter: brightness(.8); }
+.ht-enamel:focus-visible { outline: 2px solid #ffd5ee; outline-offset: 4px; }
+.ht-enamel:disabled { cursor: not-allowed; color: #d9cde3; }
+.ht-enamel:disabled::before { filter: saturate(.25) brightness(.65); }
+.ht-enamel[aria-busy=true] { cursor: progress; }
+.ht-enamel-actions { display:flex; gap:8px; }
+.ht-enamel-actions > .ht-enamel { flex:1; }
+@media(max-width:480px) { .ht-enamel-actions { flex-direction:column; } }
+@media(prefers-reduced-motion:reduce) { .ht-enamel,.ht-enamel::before { transition:none; } }
+@media(forced-colors:active) {
+  .ht-enamel { border:1px solid ButtonText; }
+  .ht-enamel::before { display:none; }
+  .ht-enamel__label { background:ButtonFace; color:ButtonText; }
+}

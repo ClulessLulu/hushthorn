@@ -1,0 +1,63 @@
+{
+  "tracery-1-1": {
+    "size": [
+      443,
+      160
+    ],
+    "slice": 48,
+    "webpBytes": 74414
+  },
+  "tracery-1-2": {
+    "size": [
+      442,
+      160
+    ],
+    "slice": 48,
+    "webpBytes": 75412
+  },
+  "tracery-2-1": {
+    "size": [
+      475,
+      160
+    ],
+    "slice": 48,
+    "webpBytes": 70444
+  },
+  "tracery-2-2": {
+    "size": [
+      474,
+      160
+    ],
+    "slice": 48,
+    "webpBytes": 72994
+  },
+  "tracery-3-1": {
+    "size": [
+      475,
+      160
+    ],
+    "slice": 48,
+    "webpBytes": 62666
+  },
+  "tracery-3-2": {
+    "size": [
+      474,
+      160
+    ],
+    "slice": 48,
+    "webpBytes": 62630
+  },
+  "enamel-metal": {
+    "size": [
+      494,
+      160
+    ],
+    "slice": 48,
+    "webpBytes": 56810
+  },
+  "roles": {
+    "primary": "tracery-1-1",
+    "secondary": "tracery-2-2",
+    "quiet": "tracery-3-1"
+  }
+}
