@@ -124,7 +124,7 @@ alpha (30) and beta (0) as members of "QA Shared Archive".
 ## Open items
 
 - ⚠️ F8, L4, N2, N4 above — logic in place, not observed live.
-- **Production is not ready to ship this:** the `cathedral_progress` migration exists only on staging. Promote it (with owner sign-off) before merging, otherwise production renders the bare cathedral and never progresses.
+- ✅ **Production database promoted (owner sign-off, 2026-09-30):** migrations `cathedral_progress_table` + `cathedral_progress_pin_search_path` applied to production `ujxsrcxbhcbihhdluzyl`. Verified read-only: same 5 columns, RLS on, the 3 owner-only policies, `bump_cathedral_progress` SECURITY INVOKER with `search_path=""`, 0 rows, no archive view references it, the owner's 82 books untouched. The one new advisor warning (mutable search_path) was fixed on both environments; the pinned function was exercised on staging (lower bump kept alpha at 30). Code is still only on the branch — production gets the cathedral UI when the branch is merged to `master`.
 - Pre-existing, unrelated: React `validateDOMNesting` warning — `Meter`'s buttons nested inside a Covers-view card button.
 
 ## Staging fixtures left in place
