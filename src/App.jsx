@@ -2149,7 +2149,7 @@ const ROMAN = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [9
 const toRoman = (n) => ROMAN.reduce((s, [v, r]) => { while (n >= v) { s += r; n -= v; } return s; }, "");
 const titlePrefix = (b) => {
   const t = (b?.title || "").trim();
-  return t ? t.charAt(0).toUpperCase() + t.slice(1, 2).toLowerCase() : "";
+  return t ? (t.charAt(0).toUpperCase() + t.slice(1, 2).toLowerCase()).trim() : ""; // "A Court…" -> "A"
 };
 const AZ = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const SHELF_ROW_H = 212; // 178px row + 10px plank + 24px gap (keep in sync with renderRow)
@@ -2616,20 +2616,7 @@ export default function Hushthorn() {
   const [cathedralIntro, setCathedralIntro] = useState(null); // {items} shown once, or null
   const [curioOpen, setCurioOpen] = useState(false);
   const cathedralToastTimer = useRef(null);
-  const introShownRef = useRef(false);
   useEffect(() => () => clearTimeout(cathedralToastTimer.current), []);
-  // Fires once per session, after load, for a reader whose row already had
-  // unlocks (either just backfilled or backfilled earlier by Task 3's testing
-  // before this card existed) that they've never been shown a summary of.
-  useEffect(() => {
-    if (introShownRef.current || dataLoading) return;
-    if (cathedralProgress.peak > 0 && !cathedralProgress.seenIntro) {
-      introShownRef.current = true;
-      setCathedralIntro({
-        items: CATHEDRAL_MILESTONES.filter((m) => m.t <= cathedralProgress.peak).map((m) => ({ name: m.name, desc: m.desc })),
-      });
-    }
-  }, [dataLoading, cathedralProgress.peak, cathedralProgress.seenIntro]);
   const dismissCathedralIntro = () => {
     setCathedralIntro(null);
     setCathedralProgress((p) => ({ ...p, seenIntro: true }));
@@ -2704,21 +2691,40 @@ export default function Hushthorn() {
         notes: notesByBook[b.id] || [],
       }));
       setBooks(mappedBooks);
+      // The intro card (decision 7) summarises history that existed BEFORE this
+      // load, so it's decided here, once, from the loaded/backfilled peak —
+      // never from progress earned live this session (that gets the regular
+      // unlock card). A reader with nothing to remember is marked as having
+      // seen it, so a later live unlock can't masquerade as the intro.
+      const decideIntro = (peak, seen) => {
+        if (seen) return;
+        if (peak > 0) {
+          setCathedralIntro({
+            items: CATHEDRAL_MILESTONES.filter((m) => m.t <= peak).map((m) => ({ name: m.name, desc: m.desc })),
+          });
+        } else {
+          setCathedralProgress((p) => ({ ...p, seenIntro: true }));
+          supabase.from('cathedral_progress').update({ seen_intro: true }).eq('user_id', uid)
+            .then(({ error }) => { if (error) console.error('cathedral seen_intro:', error.message); });
+        }
+      };
       if (cpData) {
         setCathedralProgress({ peak: cpData.peak_finished, nudged: cpData.nudged || [], seenIntro: !!cpData.seen_intro });
+        decideIntro(cpData.peak_finished, !!cpData.seen_intro);
       } else if (!cpErr) {
         // Genuine "no row yet" (query succeeded, 0 rows) — decision 7's backfill:
         // an existing reader's history counts silently instead of replaying
         // every unlock one at a time. Every threshold at/under their current
         // peak is marked nudged too, since there's no "getting close" hint left
-        // to show for something already earned. Task 6 owns showing the ONE
-        // intro card and flipping seen_intro true when it does; this only
-        // creates the row so that moment has real data to read.
+        // to show for something already earned.
         const finished = finishedCountOf(mappedBooks);
         const backfillNudged = CATHEDRAL_MILESTONES.filter((m) => m.t <= finished).map((m) => m.t);
         setCathedralProgress({ peak: finished, nudged: backfillNudged, seenIntro: false });
         supabase.rpc('bump_cathedral_progress', { p_finished: finished, p_nudged: backfillNudged })
-          .then(({ error }) => { if (error) console.error('cathedral backfill:', error.message); });
+          .then(({ error }) => {
+            if (error) { console.error('cathedral backfill:', error.message); return; }
+            decideIntro(finished, false); // row exists now, so seen_intro can be written
+          });
       }
       // cpErr and no cpData: table missing or another query error — keep the
       // useState default (peak 0, nudged []) and attempt nothing further. This
