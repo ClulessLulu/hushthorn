@@ -299,24 +299,23 @@ const FONT_CSS = `
   /* span the full back panel so the plank ends meet the pilasters (the
      panel's 12px side padding is for the spines, not the planks) */
   margin-left: -12px; margin-right: -12px;
-  height: 10px;
-  border-radius: 2px;
-  background: linear-gradient(180deg, #3a2350, #1c1030);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.65), inset 0 1px 0 rgba(240,166,224,0.18);
+  height: 24px;
+  /* one solid board: the bookcase's own wood grain under the plank art, so
+     nothing (and no colour from behind) can show through the board */
+  background-image: linear-gradient(rgba(10,6,18,0.45), rgba(10,6,18,0.45)), url('/cathedral/back-panel.webp');
+  background-size: auto, 320px 320px;
+  box-shadow: 0 6px 10px rgba(0,0,0,0.7);
 }
 .ht-cathedral-plank::before {
   content: "";
   position: absolute;
-  /* plank.webp's gilded rail only lives in rows 15-30 of its 48px-tall file
-     (v1 asset audit) — scaling the whole file into a short strip (the old
-     auto-100%-height background-size) diluted that band into a barely-visible
-     smear. Crop to it instead: native size + a negative Y offset shows only
-     that 15px band inside a box exactly that tall. */
-  top: -11px; left: 0; right: 0; height: 15px;
+  inset: 0;
+  /* plank.webp paints a 14px board (rows 16-30 of its 48px file: gold edge
+     over dark wood). Scale 1.7x so that board is the full 24px thickness. */
   background-image: url('/cathedral/plank.webp');
   background-repeat: repeat-x;
-  background-position: 0 -15px;
-  background-size: auto 48px;
+  background-size: auto 81.6px;
+  background-position: 0 -27.2px;
 }
 .ht-cathedral-plinth {
   position: relative;
@@ -511,7 +510,7 @@ const FONT_CSS = `
   background-repeat: repeat-y; background-size: 100% auto; pointer-events: none; z-index: 3;
 }
 .ht-plank-ivy::after {
-  content: ""; position: absolute; top: -2px; left: 0; right: 0; height: 22px; z-index: 4; pointer-events: none;
+  content: ""; position: absolute; top: calc(100% - 4px); left: 0; right: 0; height: 22px; z-index: 4; pointer-events: none;
   background: url('/cathedral/ivy-drape.webp') repeat-x; background-size: auto 22px;
 }
 .ht-ivy-drape {
@@ -2163,7 +2162,7 @@ const titlePrefix = (b) => {
   return t ? (t.charAt(0).toUpperCase() + t.slice(1, 2).toLowerCase()).trim() : ""; // "A Court…" -> "A"
 };
 const AZ = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
-const SHELF_ROW_H = 212; // 178px row + 10px plank + 24px gap (keep in sync with renderRow)
+const SHELF_ROW_H = 212; // 178px row + 24px plank + 10px gap (keep in sync with renderRow)
 
 // Mounts its bookcase only while within one viewport of the screen; otherwise
 // a placeholder holds the last measured height (or an estimate before first
@@ -2263,7 +2262,7 @@ function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimme
           );
         })}
       </div>
-      <div className={`ht-cathedral-plank mb-6${peak >= 3 ? " ht-plank-ivy" : ""}`} aria-hidden="true" />
+      <div className={`ht-cathedral-plank mb-2.5${peak >= 3 ? " ht-plank-ivy" : ""}`} aria-hidden="true" />
     </div>
   );
 
