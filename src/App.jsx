@@ -320,20 +320,39 @@ const FONT_CSS = `
 }
 .ht-cathedral-plinth {
   position: relative;
-  height: 30px;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(180deg, #241536, #130b1f);
-  box-shadow: 0 14px 26px rgba(0,0,0,0.7), inset 0 1px 0 rgba(232,200,119,0.3);
+  padding-bottom: 5px;
+  box-sizing: border-box;
+  /* The plinth art is a carved drawer 587px wide inside a 1920px file, so it
+     is rebuilt full-width from three pieces cut from it: the two end blocks
+     (feathered inner edges) and a mirror-tiled middle panel, which tiles
+     seamlessly because each tile is followed by its own reflection. The art
+     is 2x, so 120px of source = 60px here. */
+  background:
+    url('/cathedral/plinth-cap-left.webp') left bottom / auto 60px no-repeat,
+    url('/cathedral/plinth-cap-right.webp') right bottom / auto 60px no-repeat,
+    url('/cathedral/plinth-mid.webp') left bottom / auto 60px repeat-x;
+  filter: drop-shadow(0 12px 14px rgba(0,0,0,0.65));
 }
-.ht-cathedral-plinth::before {
-  content: "";
-  position: absolute;
-  top: -10px; left: 50%; transform: translateX(-50%);
-  width: min(420px, 90%);
-  aspect-ratio: 1920 / 120;
-  background: url('/cathedral/plinth.webp') center / contain no-repeat;
+/* brass plate set into the recessed panel; the words are engraved on it */
+.ht-cathedral-plinth span {
+  position: relative;
+  max-width: 78%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 3px 16px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #2b1c07;
+  text-shadow: 0 1px 0 rgba(255,236,186,0.55);
+  background: linear-gradient(180deg, #e2c887 0%, #c3a059 38%, #9a7633 100%);
+  border: 1px solid #5b4219;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 0 rgba(255,246,214,0.7), inset 0 -1px 0 rgba(70,46,12,0.55), 0 1px 3px rgba(0,0,0,0.7);
 }
 /* A-Z jump rail (100+ books, Spines view) */
 .ht-az-rail {
@@ -357,15 +376,6 @@ const FONT_CSS = `
   position: absolute; top: -10px; left: 50%; width: 64px; height: 32px; margin-left: -32px;
   object-fit: contain; z-index: 6; pointer-events: none;
   filter: drop-shadow(0 3px 4px rgba(0,0,0,0.6));
-}
-.ht-cathedral-plinth span {
-  max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  position: relative;
-  z-index: 1;
-  font-size: 8px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: rgba(232,200,119,0.75);
 }
 .ht-shimmer {
   position: absolute;
@@ -2260,7 +2270,7 @@ function SpineShelf({ books, onOpen, query, onPersist, cathedralProgress, shimme
   // Placeholder height before a bookcase has ever painted: crown + rows + plinth.
   const crownName = crownFor(peak, false);
   const crownH = boxWidth ? Math.round((CROWN_GEOM[crownName].bottom + 1) * crownScale(crownName, boxWidth)) : 0;
-  const estimateFor = (nRows) => crownH + 12 + nRows * SHELF_ROW_H + 30 + 32;
+  const estimateFor = (nRows) => crownH + 12 + nRows * SHELF_ROW_H + 60 + 32;
 
   // A–Z rail (100+ books): letter -> first bookcase holding it. Author initials
   // when sorted by author, title initials otherwise.
