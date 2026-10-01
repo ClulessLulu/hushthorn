@@ -5623,7 +5623,15 @@ function AuthPage() {
         const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
         if (authError) throw authError;
       } else {
-        const { data, error: authError } = await supabase.auth.signUp({ email, password });
+        // Send the confirmation link back to the site the user signed up on.
+        // Without this Supabase falls back to the project's dashboard "Site
+        // URL", which is often still localhost. The origin must also be in
+        // Authentication > URL Configuration > Redirect URLs.
+        const { data, error: authError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: window.location.origin },
+        });
         if (authError) throw authError;
         // Supabase obfuscates duplicate signups to block email enumeration: when
         // confirmations are ON, re-using a registered email returns no error and a
