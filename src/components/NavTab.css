@@ -20,16 +20,15 @@
   transform: translate(-50%, -50%);
   display: inline-flex; align-items: center; gap: 4px;
   white-space: nowrap;
-  padding: 1px 6px;
-  font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
-  /* 74% plate: tracery bars on the glass reach 1.2:1 against the label colour
-     bare; this keeps >= 4.5:1 at the 95th percentile of the label zone while
-     the glass still shows through */
-  background: rgba(10, 5, 26, .74);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .9);
-  border-radius: 2px;
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  /* no plate: the words sit directly on the glass. Bare, the bright tracery
+     bars reach only 1.2:1 against this colour, so each letter carries a tight
+     dark outline plus a soft halo instead of a box behind the whole label. */
+  background: none;
+  text-shadow:
+    -1px -1px 0 #0a051c, 1px -1px 0 #0a051c, -1px 1px 0 #0a051c, 1px 1px 0 #0a051c,
+    0 0 3px #0a051c, 0 0 6px rgba(10, 5, 28, .9), 0 2px 4px rgba(0, 0, 0, .9);
 }
-.ht-navtab--on .ht-navtab__label { color: #fff; background: rgba(6, 5, 36, .78); box-shadow: 0 0 0 1px rgba(255, 170, 224, .55); }
 /* the whole arch is clickable; 53px tall clears the 44px touch minimum */
 @media (hover: hover) { .ht-navtab:hover:not(.ht-navtab--on) { filter: brightness(1.15) saturate(1.1); } }
 .ht-navtab:active { filter: brightness(.82); }
