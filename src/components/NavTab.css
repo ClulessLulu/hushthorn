@@ -17,9 +17,11 @@
 .ht-navtab--on { --tab-art: url('/brand/buttons/tab-selected.webp'); filter: none; }
 .ht-navtab__label {
   position: absolute;
-  /* a quarter of the way up from the bottom edge (75% down), centred on the art's
-     centre column (95.5 of 192 = 49.7%); the arch is ~93px (css) wide there */
-  left: 49.7%; top: 75%;
+  /* the words share a line with + INSCRIBE: that button is 50px tall with its text
+     centred, so its text centre is 25px above the bottom edge; the row is
+     bottom-aligned, so the label centre sits 25px above this tab's bottom.
+     Horizontally on the art's centre column (95.5 of 192 = 49.7%). */
+  left: 49.7%; top: calc(100% - 24.9px);
   transform: translate(-50%, -50%);
   display: inline-flex; align-items: center; gap: 4px;
   white-space: nowrap;
