@@ -104,6 +104,7 @@ const FONT_CSS = `
 .ht-card { transition: border-color .25s ease, transform .25s ease, box-shadow .25s ease; }
 
 .ht-ribbon {
+  align-self: center; /* the nav row is bottom-aligned (arch tabs + Inscribe); filters stay centred */
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%);
 }
 
@@ -3574,7 +3575,7 @@ export default function Hushthorn() {
       )}
 
       {/* shelf banners */}
-      <nav className="max-w-5xl mx-auto px-5 flex flex-wrap items-center justify-center gap-2 pb-6" aria-label="Shelves">
+      <nav className="max-w-5xl mx-auto px-5 flex flex-wrap items-end justify-center gap-2 pb-6" aria-label="Shelves">
         {shelfTabs.map((t) => (
           <button
             key={t.key}
