@@ -74,6 +74,10 @@ const FONT_CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Rozha+One&family=Cinzel:wght@500;600;700&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap');
 
 .ht-blackletter { font-family: 'Rozha One', serif; letter-spacing: 0.01em; }
+/* Hushthorn wordmark image (output/cathedral-v1/hushthorn-wordmark-blue.png, trimmed) */
+.ht-wordmark-h { margin: 0; line-height: 0; }
+.ht-wordmark { display: block; margin: 0 auto; width: min(340px, 78vw); height: auto; filter: drop-shadow(0 0 14px rgba(226,103,176,0.35)); }
+.ht-wordmark--card { width: min(250px, 70vw); }
 .ht-display { font-family: 'Cinzel', serif; letter-spacing: 0.06em; }
 .ht-body { font-family: 'EB Garamond', serif; }
 
@@ -3511,8 +3515,8 @@ export default function Hushthorn() {
       {/* header */}
       <header className="max-w-5xl mx-auto px-5 pt-6 pb-3 text-center">
         <Crown />
-        <h1 className="ht-blackletter ht-glow text-4xl sm:text-5xl text-transparent bg-clip-text bg-gradient-to-b from-pink-200 via-fuchsia-300 to-fuchsia-500">
-          Hushthorn
+        <h1 className="ht-wordmark-h">
+          <img src="/brand/hushthorn-wordmark.webp" alt="Hushthorn" className="ht-wordmark" width="1040" height="252" />
         </h1>
         <p className="mt-2 text-[15px] text-pink-200/65 italic">
           a candlelit archive for the books you shouldn't read in public
@@ -5674,8 +5678,8 @@ function AuthPage() {
       <StagingBadge />
       <div className="ht-card rounded-xl p-8 w-full max-w-sm text-center" style={{ transform: 'none' }}>
         <Crown size={52} />
-        <h1 className="ht-blackletter ht-glow text-5xl text-transparent bg-clip-text bg-gradient-to-b from-pink-200 via-fuchsia-300 to-fuchsia-500 mt-1 mb-1">
-          Hushthorn
+        <h1 className="ht-wordmark-h mt-1 mb-1">
+          <img src="/brand/hushthorn-wordmark.webp" alt="Hushthorn" className="ht-wordmark ht-wordmark--card" width="1040" height="252" />
         </h1>
         <p className="text-[13px] italic mb-6" style={{ color: '#c084fc' }}>
           a candlelit archive for the books you shouldn't read in public
