@@ -5618,6 +5618,9 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
 const AUTH_INPUT ="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2.5 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400 text-purple-100";
 const AUTH_LBL = "block ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1.5";
 
+const PASSWORD_RULE_MSG =
+  'Password needs a lowercase letter, an uppercase letter, a number and a symbol (like !@#$). Add what is missing and try again.';
+
 function AuthPage() {
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
@@ -5669,8 +5672,15 @@ function AuthPage() {
         setError('That email is already registered. Sign in instead, or use a different one.');
       } else if (/invalid login credentials|invalid credentials/i.test(err.message || '')) {
         setError('That email or password is incorrect. Try again.');
-      } else {
+      } else if (/password/i.test(err.message || '') || err.code === 'weak_password') {
+        // Prod enforces lower + upper + digit + symbol (Supabase auth policy).
+        setError(PASSWORD_RULE_MSG);
+      } else if (/rate limit|too many/i.test(err.message || '') || err.status === 429) {
+        setError('Too many attempts. Wait a few minutes, then try again.');
+      } else if (err.name === 'AuthRetryableFetchError' || /failed to fetch|network|load failed/i.test(err.message || '')) {
         setError('The archive could not be reached. Check your connection and try again.');
+      } else {
+        setError('The archive refused that request. Check your email and password, then try again.');
       }
     } finally {
       setLoading(false);
@@ -5720,6 +5730,11 @@ function AuthPage() {
             <label htmlFor="auth-password" className={AUTH_LBL}>Password</label>
             <input id="auth-password" type="password" value={password} onChange={e => setPassword(e.target.value)}
               required placeholder="••••••••••••" className={AUTH_INPUT} />
+            {mode === 'signup' && (
+              <p className="text-[11px] italic mt-1" style={{ color: '#c084fc' }}>
+                Use upper and lower case letters, a number and a symbol.
+              </p>
+            )}
           </div>
           {mode === 'signup' && (
             <div>
