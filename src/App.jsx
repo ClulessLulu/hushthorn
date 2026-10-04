@@ -669,10 +669,10 @@ function Candle({ filled, size = 20 }) {
   );
 }
 
-// The crown that sits on top of the wordmark (art: output/cathedral-v1/logo-crown.png, chrome crown with dagger,
+// The crown that sits on top of the wordmark (art: output/cathedral-v1/logo-crown.png, chrome crown with roses,
 // trimmed). Decorative; the wordmark below carries the name.
 function BrandCrown({ className = "" }) {
-  return <img src="/brand/hushthorn-crown.webp" alt="" aria-hidden="true" width="298" height="300" className={`ht-brand-crown ${className}`} />;
+  return <img src="/brand/hushthorn-crown.webp" alt="" aria-hidden="true" width="600" height="463" className={`ht-brand-crown ${className}`} />;
 }
 
 function Crown({ size = 52 }) {
