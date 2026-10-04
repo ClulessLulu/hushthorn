@@ -41,6 +41,13 @@
 .ht-enamel--secondary { --button-art: url('/brand/buttons/enamel-secondary.webp'); }
 .ht-enamel--quiet { --button-art: url('/brand/buttons/tracery-quiet.webp'); }
 .ht-enamel--metal { --button-art: url('/brand/buttons/enamel-metal.webp'); }
+.ht-enamel--rose { --button-art: url('/brand/buttons/tracery-3-2.webp'); }
+.ht-enamel--rose:not(:disabled):is(:active, :focus-visible, [data-selected=true]) { --button-art: url('/brand/buttons/tracery-3-2-selected.webp'); }
+@media (hover:hover) {
+  .ht-enamel--rose:hover:not(:disabled) { --button-art: url('/brand/buttons/tracery-3-2-selected.webp'); }
+}
+.ht-scan-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ht-scan-actions > .ht-enamel { flex: 1 1 130px; padding: 15px 18px; font-size: 10px; }
 .ht-enamel__label {
   padding: 1px 5px;
   border-radius: 2px;
@@ -60,6 +67,9 @@
 .ht-enamel[aria-busy=true] { cursor: progress; }
 .ht-enamel-actions { display:flex; gap:8px; }
 .ht-enamel-actions > .ht-enamel { flex:1; }
+.ht-inscribe-modes { display: flex; flex-wrap: wrap; gap: 8px; }
+.ht-inscribe-modes > .ht-enamel { flex: 1 1 160px; font-size: 10px; padding: 15px 20px; }
+.ht-inscribe-modes > .ht-enamel[aria-pressed=true] { --button-art: url('/brand/buttons/enamel-secondary-selected.webp'); color: #fff; }
 @media(max-width:480px) { .ht-enamel-actions { flex-direction:column; } }
 @media(prefers-reduced-motion:reduce) { .ht-enamel,.ht-enamel::before { transition:none; } }
 @media(forced-colors:active) {

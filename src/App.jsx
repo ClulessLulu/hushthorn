@@ -80,6 +80,7 @@ const FONT_CSS = `
 .ht-wordmark--card { width: min(250px, 70vw); }
 .ht-brand-crown { display: block; margin: 0 auto -10px; width: 92px; height: auto; position: relative; z-index: 1; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.55)); }
 .ht-brand-crown--card { width: 72px; }
+.ht-brand-crown:not(.ht-brand-crown--card) { transform: scaleX(1.25); transform-origin: center; }
 .ht-display { font-family: 'Cinzel', serif; letter-spacing: 0.06em; }
 .ht-body { font-family: 'EB Garamond', serif; }
 
@@ -110,9 +111,15 @@ const FONT_CSS = `
 .ht-card { transition: border-color .25s ease, transform .25s ease, box-shadow .25s ease; }
 
 .ht-ribbon {
-  align-self: center; /* the nav row is bottom-aligned (arch tabs + Inscribe); filters stay centred */
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%);
+  align-self: center;
+  width: 128px; min-height: 48px; padding: 12px 20px 7px;
+  border: 0; background: url('/brand/buttons/shelf-banner-unselected.webp') center / 100% 100% no-repeat;
+  color: #f5e7fa; font-size: 10px; text-shadow: 0 1px 3px #0c0714;
+  cursor: pointer;
 }
+.ht-ribbon[aria-pressed=true] { background-image: url('/brand/buttons/shelf-banner-selected.webp'); color: #fff; }
+.ht-ribbon:focus-visible { outline: 2px solid #ffd5ee; outline-offset: 3px; }
+@media (hover:hover) { .ht-ribbon:hover { filter: brightness(1.15); } }
 
 .ht-quote {
   font-family: 'EB Garamond', serif;
@@ -3592,11 +3599,8 @@ export default function Hushthorn() {
           <button
             key={t.key}
             onClick={() => { setShelfFilter(t.key); setView("library"); }}
-            className={`ht-ribbon ht-display px-5 pt-2 pb-4 text-xs font-semibold uppercase transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${
-              view === "library" && shelfFilter === t.key
-                ? "bg-gradient-to-b from-fuchsia-500/90 to-purple-700/90 text-white"
-                : "bg-purple-950/50 text-purple-300 hover:bg-purple-900/60"
-            }`}
+            aria-pressed={view === "library" && shelfFilter === t.key}
+            className="ht-ribbon ht-display font-semibold uppercase"
           >
             {t.label}
           </button>
@@ -6410,9 +6414,9 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
         <button onClick={onClose} className="text-purple-300 hover:text-pink-300 text-xl px-2" aria-label="Close">✕</button>
       </div>
 
-      <div className="flex gap-2 mb-4 flex-wrap">
-        <ModeTab active={mode === "search"} onClick={() => setMode("search")}>Scour the grimoire</ModeTab>
-        <ModeTab active={mode === "scan"} onClick={() => setMode("scan")}>Scan or upload</ModeTab>
+      <div className="ht-inscribe-modes mb-4" role="group" aria-label="Inscription method">
+        <EnamelButton variant="secondary" aria-pressed={mode === "search"} onClick={() => setMode("search")}>Scour the grimoire</EnamelButton>
+        <EnamelButton variant="secondary" aria-pressed={mode === "scan"} onClick={() => setMode("scan")}>Scan or upload</EnamelButton>
       </div>
 
       {mode === "search" ? (
@@ -6664,24 +6668,24 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
             <span className="text-xs text-purple-400/60 italic">— queue barcodes, add them all at once</span>
           </label>
 
-          <div className="flex gap-2 flex-wrap">
+          <div className="ht-scan-actions">
             {!liveActive ? (
-              <button onClick={startCamera} className="ht-display flex-1 py-2 rounded-sm bg-indigo-500/70 hover:bg-indigo-500 text-white text-xs font-semibold uppercase">
+              <EnamelButton variant="rose" onClick={startCamera}>
                 Open the camera
-              </button>
+              </EnamelButton>
             ) : (
-              <button onClick={stopCamera} className="ht-display px-4 py-2 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100 text-xs font-semibold uppercase">
+              <EnamelButton variant="rose" data-selected="true" onClick={stopCamera}>
                 Stop camera
-              </button>
+              </EnamelButton>
             )}
             {!scanMultiple && (
               <>
-                <button onClick={captureCover} disabled={!liveActive} className="ht-display flex-1 py-2 rounded-sm bg-pink-500/80 hover:bg-pink-400 disabled:opacity-40 text-white text-xs font-semibold uppercase">
+                <EnamelButton variant="rose" onClick={captureCover} disabled={!liveActive}>
                   📸 Capture cover
-                </button>
-                <button onClick={() => fileRef.current?.click()} className="ht-display flex-1 py-2 rounded-sm bg-purple-700/60 hover:bg-purple-600 text-white text-xs font-semibold uppercase">
+                </EnamelButton>
+                <EnamelButton variant="rose" onClick={() => fileRef.current?.click()}>
                   ⬆ Upload a photo
-                </button>
+                </EnamelButton>
               </>
             )}
           </div>
