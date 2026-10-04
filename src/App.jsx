@@ -78,8 +78,8 @@ const FONT_CSS = `
 .ht-wordmark-h { margin: 0; line-height: 0; }
 .ht-wordmark { display: block; margin: 0 auto; width: min(340px, 78vw); height: auto; filter: drop-shadow(0 0 14px rgba(226,103,176,0.35)); }
 .ht-wordmark--card { width: min(250px, 70vw); }
-.ht-brand-crown { display: block; margin: 0 auto -8px; width: 112px; height: auto; position: relative; z-index: 1; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.55)); }
-.ht-brand-crown--card { width: 88px; }
+.ht-brand-crown { display: block; margin: 0 auto -10px; width: 92px; height: auto; position: relative; z-index: 1; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.55)); }
+.ht-brand-crown--card { width: 72px; }
 .ht-display { font-family: 'Cinzel', serif; letter-spacing: 0.06em; }
 .ht-body { font-family: 'EB Garamond', serif; }
 
@@ -662,10 +662,10 @@ function Candle({ filled, size = 20 }) {
   );
 }
 
-// The crown that sits on top of the wordmark (art: output/cathedral-v1/logo-crown.png,
+// The crown that sits on top of the wordmark (art: output/cathedral-v1/logo-crown.png, chrome crown with dagger,
 // trimmed). Decorative; the wordmark below carries the name.
 function BrandCrown({ className = "" }) {
-  return <img src="/brand/hushthorn-crown.webp" alt="" aria-hidden="true" width="340" height="266" className={`ht-brand-crown ${className}`} />;
+  return <img src="/brand/hushthorn-crown.webp" alt="" aria-hidden="true" width="298" height="300" className={`ht-brand-crown ${className}`} />;
 }
 
 function Crown({ size = 52 }) {
