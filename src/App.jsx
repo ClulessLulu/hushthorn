@@ -2624,6 +2624,10 @@ function ArchiveLoading() {
 export default function Hushthorn() {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
+  // True from the moment someone arrives from a password-reset email until they
+  // choose a new password (Supabase signs them in with a temporary recovery
+  // session, so without this gate they would land straight in the app).
+  const [recovering, setRecovering] = useState(false);
   // Shared-library archive switcher (Phase 2). `currentLibraryId` null = the
   // personal library (unchanged behaviour). `archives` is the list of shared
   // archives the user belongs to, each with the user's own membership role.
@@ -2649,7 +2653,9 @@ export default function Hushthorn() {
         setAuthReady(true);
       })
       .catch(() => setAuthReady(true));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true);
+      if (event === 'SIGNED_OUT') setRecovering(false);
       setSession(session);
     });
     return () => subscription.unsubscribe();
@@ -3511,6 +3517,7 @@ export default function Hushthorn() {
 
   if (!authReady) return <ArchiveLoading />;
   if (!session) return <AuthPage />;
+  if (recovering) return <ResetPasswordPage onDone={() => setRecovering(false)} />;
   if (!profileReady) return <ArchiveLoading />;
   if (!profile?.username) return (
     <UsernameGate
@@ -5621,9 +5628,10 @@ const AUTH_LBL = "block ht-display text-[9px] uppercase tracking-widest text-pur
 const PASSWORD_RULE_MSG =
   'Password needs a lowercase letter, an uppercase letter, a number and a symbol (like !@#$). Add what is missing and try again.';
 
-function AuthPage() {
-  const [mode, setMode] = useState('login');
-  const [email, setEmail] = useState('');
+// Shown after someone follows a password-reset email: Supabase has already signed
+// them in with a short-lived recovery session, and updateUser() sets the new
+// password on it. Same card, wordmark and password rules as sign-up.
+function ResetPasswordPage({ onDone }) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -5632,6 +5640,103 @@ function AuthPage() {
   const submit = async (e) => {
     e.preventDefault();
     setError('');
+    if (password !== confirm) { setError('Passwords do not match.'); return; }
+    setLoading(true);
+    try {
+      const { error: authError } = await supabase.auth.updateUser({ password });
+      if (authError) throw authError;
+      onDone();
+    } catch (err) {
+      if (/different from the old|same as the old/i.test(err.message || '')) {
+        setError('Choose a password you have not used before, then try again.');
+      } else if (/password/i.test(err.message || '') || err.code === 'weak_password') {
+        setError(PASSWORD_RULE_MSG);
+      } else if (/session|expired|jwt|not authenticated/i.test(err.message || '') || err.status === 401) {
+        setError('That reset link has expired. Go back and request a new one.');
+      } else if (err.name === 'AuthRetryableFetchError' || /failed to fetch|network|load failed/i.test(err.message || '')) {
+        setError('The archive could not be reached. Check your connection and try again.');
+      } else {
+        setError('The archive refused that password. Try a different one.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="ht-bg ht-body fixed inset-0 overflow-y-auto flex items-center justify-center p-4">
+      <style>{FONT_CSS}</style>
+      <div className="ht-frame" aria-hidden="true" />
+      <StagingBadge />
+      <div className="ht-card rounded-xl p-8 w-full max-w-sm text-center" style={{ transform: 'none' }}>
+        <BrandCrown className="ht-brand-crown--card" />
+        <h1 className="ht-wordmark-h mt-1 mb-1">
+          <img src="/brand/hushthorn-wordmark.webp" alt="Hushthorn" className="ht-wordmark ht-wordmark--card" width="1040" height="252" />
+        </h1>
+        <h2 className="ht-display text-xs uppercase tracking-widest text-pink-200 mt-4 mb-1">Choose a new password</h2>
+        <p className="text-[13px] italic mb-5" style={{ color: '#c084fc' }}>
+          Pick something you will keep. Use upper and lower case letters, a number and a symbol.
+        </p>
+        <form onSubmit={submit} className="space-y-3 text-left">
+          <div>
+            <label htmlFor="reset-password" className={AUTH_LBL}>New password</label>
+            <input id="reset-password" type="password" autoComplete="new-password" value={password}
+              onChange={e => setPassword(e.target.value)} required placeholder="••••••••••••" className={AUTH_INPUT} />
+          </div>
+          <div>
+            <label htmlFor="reset-confirm" className={AUTH_LBL}>Confirm new password</label>
+            <input id="reset-confirm" type="password" autoComplete="new-password" value={confirm}
+              onChange={e => setConfirm(e.target.value)} required placeholder="••••••••••••" className={AUTH_INPUT} />
+          </div>
+          {error && <p className="text-sm text-pink-300 text-center py-1">{error}</p>}
+          <div className="ht-rule my-1" aria-hidden="true" />
+          <button type="submit" disabled={loading}
+            className="ht-display w-full min-h-[44px] py-3 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest">
+            {loading ? 'Saving…' : 'Save new password'}
+          </button>
+          <button type="button" onClick={() => supabase.auth.signOut()}
+            className="ht-display block mx-auto text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300 underline underline-offset-4 min-h-[44px] sm:min-h-0">
+            Cancel
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AuthPage() {
+  const [mode, setMode] = useState('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (mode === 'forgot') {
+      setLoading(true);
+      try {
+        const { error: authError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+        if (authError) throw authError;
+        // Same answer whether or not the email has an account, so this cannot be
+        // used to find out who is registered.
+        setNotice('If that email has an account, a reset link is on its way. Check your inbox (and spam), then follow the link.');
+      } catch (err) {
+        if (/rate limit|too many/i.test(err.message || '') || err.status === 429) {
+          setError('Too many attempts. Wait a few minutes, then try again.');
+        } else if (err.name === 'AuthRetryableFetchError' || /failed to fetch|network|load failed/i.test(err.message || '')) {
+          setError('The archive could not be reached. Check your connection and try again.');
+        } else {
+          setError('The archive could not send that link. Check the email address and try again.');
+        }
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     if (mode === 'signup' && password !== confirm) {
       setError('Passwords do not match.');
       return;
@@ -5707,9 +5812,17 @@ function AuthPage() {
           a candlelit archive for the books you shouldn't read in public
         </p>
 
+        {mode === 'forgot' ? (
+          <>
+            <h2 className="ht-display text-xs uppercase tracking-widest text-pink-200 mb-1">Forgotten password</h2>
+            <p className="text-[13px] italic mb-5" style={{ color: '#c084fc' }}>
+              Enter the email you signed up with and we will send a link to choose a new password.
+            </p>
+          </>
+        ) : (
         <div className="flex mb-6 rounded-sm overflow-hidden border border-purple-700/40">
           {['login', 'signup'].map(m => (
-            <button key={m} onClick={() => { setMode(m); setError(''); }}
+            <button key={m} onClick={() => { setMode(m); setError(''); setNotice(''); }}
               className={`flex-1 py-2 ht-display text-[10px] uppercase tracking-widest transition-colors ${
                 mode === m
                   ? 'bg-gradient-to-r from-purple-600/60 to-pink-600/50 text-pink-200'
@@ -5719,6 +5832,7 @@ function AuthPage() {
             </button>
           ))}
         </div>
+        )}
 
         <form onSubmit={submit} className="space-y-3 text-left">
           <div>
@@ -5726,6 +5840,7 @@ function AuthPage() {
             <input id="auth-email" type="email" value={email} onChange={e => setEmail(e.target.value)}
               required placeholder="your@grimoire.com" className={AUTH_INPUT} />
           </div>
+          {mode !== 'forgot' && (
           <div>
             <label htmlFor="auth-password" className={AUTH_LBL}>Password</label>
             <input id="auth-password" type="password" value={password} onChange={e => setPassword(e.target.value)}
@@ -5735,7 +5850,14 @@ function AuthPage() {
                 Use upper and lower case letters, a number and a symbol.
               </p>
             )}
+            {mode === 'login' && (
+              <button type="button" onClick={() => { setMode('forgot'); setError(''); setNotice(''); }}
+                className="ht-display text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300 underline underline-offset-4 mt-2 min-h-[44px] sm:min-h-0">
+                Forgot your password?
+              </button>
+            )}
           </div>
+          )}
           {mode === 'signup' && (
             <div>
               <label htmlFor="auth-confirm" className={AUTH_LBL}>Confirm password</label>
@@ -5745,17 +5867,25 @@ function AuthPage() {
           )}
 
           {error && <p className="text-sm text-pink-300 text-center py-1">{error}</p>}
+          {notice && <p role="status" className="text-sm text-purple-200 text-center py-1">{notice}</p>}
 
           <div className="ht-rule my-1" aria-hidden="true" />
 
-          <button type="submit" disabled={loading}
-            className="ht-display w-full py-3 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest">
+          <button type="submit" disabled={loading || (mode === 'forgot' && !!notice)}
+            className="ht-display w-full min-h-[44px] py-3 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest">
             {loading
-              ? 'Opening the archive…'
-              : mode === 'login' ? 'Enter the Archive' : '✦ Open the Archive ✦'}
+              ? (mode === 'forgot' ? 'Sending…' : 'Opening the archive…')
+              : mode === 'forgot' ? 'Send reset link' : mode === 'login' ? 'Enter the Archive' : '✦ Open the Archive ✦'}
           </button>
+          {mode === 'forgot' && (
+            <button type="button" onClick={() => { setMode('login'); setError(''); setNotice(''); }}
+              className="ht-display block mx-auto text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300 underline underline-offset-4 min-h-[44px] sm:min-h-0">
+              Back to sign in
+            </button>
+          )}
         </form>
 
+        {mode !== 'forgot' && (<>
         <div className="flex items-center gap-3 my-4">
           <span className="ht-rule flex-1 inline-block" />
           <span className="text-purple-400/60 text-xs italic">or</span>
@@ -5772,6 +5902,7 @@ function AuthPage() {
           </svg>
           Continue with Google
         </button>
+        </>)}
       </div>
     </div>
   );
