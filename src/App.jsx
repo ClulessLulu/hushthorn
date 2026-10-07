@@ -5618,6 +5618,13 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
 const AUTH_INPUT ="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2.5 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400 text-purple-100";
 const AUTH_LBL = "block ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1.5";
 
+// Feature flag: Google sign-in stays hidden until the Google provider is
+// enabled in that environment's Supabase project (Authentication > Providers).
+// Opt-in: set VITE_ENABLE_GOOGLE_AUTH=true in the Vercel env for the target
+// environment and redeploy. Vite inlines VITE_* at build time, so flipping the
+// value has no effect on an existing deployment.
+const GOOGLE_AUTH_ENABLED = import.meta.env.VITE_ENABLE_GOOGLE_AUTH === 'true';
+
 const PASSWORD_RULE_MSG =
   'Password needs a lowercase letter, an uppercase letter, a number and a symbol (like !@#$). Add what is missing and try again.';
 
@@ -5756,6 +5763,7 @@ function AuthPage() {
           </button>
         </form>
 
+        {GOOGLE_AUTH_ENABLED && (<>
         <div className="flex items-center gap-3 my-4">
           <span className="ht-rule flex-1 inline-block" />
           <span className="text-purple-400/60 text-xs italic">or</span>
@@ -5772,6 +5780,7 @@ function AuthPage() {
           </svg>
           Continue with Google
         </button>
+        </>)}
       </div>
     </div>
   );
