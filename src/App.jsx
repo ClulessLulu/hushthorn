@@ -3,6 +3,7 @@ import NavTab from './components/NavTab';
 import { useState, useRef, useEffect, Fragment } from "react";
 import Papa from "papaparse";
 import { supabase } from './lib/supabase';
+import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySimpleSnap, posInt } from './lib/progressSnap';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 
@@ -1439,11 +1440,19 @@ function maxPercent(book) {
 // Format-specific prompts. We always know `fmt`, so each is precise and
 // demands ONLY a JSON object in the native progress shape for that format.
 const PROGRESS_SHOT_PROMPTS = {
+  // A printed page never shows the total page count, and chapter-opening
+  // pages usually have no printed number, so print reads page + chapter only.
   print:
-    'This is a photo of a printed book page or an e-reader showing a print-style page count. ' +
-    'Read the current page number and the total page count. Respond with ONLY a valid JSON ' +
-    'object, nothing else: {"page": number or null, "pages": number or null}. ' +
-    '"page" is the current page; "pages" is the total. Use null for anything you cannot read confidently.',
+    'This is a photo of one or two pages of a printed book. Respond with ONLY a valid JSON ' +
+    'object, nothing else: {"page": number or null, "chapter": number or null}. ' +
+    '"page": the printed page number of the page being read. Page numbers usually sit in the ' +
+    'running header or footer (e.g. "4 · AUTHOR NAME"). If two facing pages are visible, report ' +
+    'the RIGHT-hand page: its own number if printed, otherwise the left-hand page number plus 1. ' +
+    'Chapter-opening pages often have no printed number; then use null unless the facing-page rule ' +
+    'gives it. Never use a chapter number, a date, or a number from the story text as the page. ' +
+    '"chapter": if a chapter heading begins on the page you reported (e.g. "THREE", "Chapter 12", ' +
+    '"XII"), its number as an integer (convert words and roman numerals); otherwise null. Ignore ' +
+    '"Part" headings and running headers. Use null for anything you cannot read confidently.',
   ebook:
     'This is a screenshot of an e-reader (e.g. Kindle, Libby, Kobo) showing reading progress. ' +
     'Read the percent complete. Respond with ONLY a valid JSON object, nothing else: ' +
@@ -1456,32 +1465,7 @@ const PROGRESS_SHOT_PROMPTS = {
     '(convert hours and minutes, e.g. 2h15m is 2.25, 45m is 0.75). Use null for anything you cannot read confidently.',
 };
 
-// Coerce a vision value to a finite number, or null. Unlike the display-side
-// `num()` (which floors to 0), an unreadable field stays null here so the
-// confirm strip can show "couldn't read this one" rather than a false 0.
-function coerceShotNum(v) {
-  if (typeof v === "number") return Number.isFinite(v) ? v : null;
-  if (typeof v === "string") {
-    const n = parseFloat(v);
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
-// Reduce a parsed object to only the fields the format expects, coerced.
-function shapeProgressShot(parsed, fmt) {
-  if (!parsed || typeof parsed !== "object") return null;
-  if (fmt === "print") {
-    return { page: coerceShotNum(parsed.page), pages: coerceShotNum(parsed.pages) };
-  }
-  if (fmt === "ebook") {
-    return { percent: coerceShotNum(parsed.percent) };
-  }
-  if (fmt === "audio") {
-    return { listened: coerceShotNum(parsed.listened), hours: coerceShotNum(parsed.hours) };
-  }
-  return null;
-}
+// coerceShotNum / shapeProgressShot live in src/lib/progressSnap.js (unit-tested).
 
 async function readProgressShot(dataUrl, fmt) {
   const prompt = PROGRESS_SHOT_PROMPTS[fmt];
@@ -1544,6 +1528,10 @@ function ProgressEditor({ book, onUpdate }) {
   const snapRefs = useRef({});                 // { [fmt]: <input> }
   const [snapState, setSnapState] = useState({}); // { [fmt]: 'loading' }
   const [snapResult, setSnapResult] = useState({}); // { [fmt]: parsed | null }
+  // Print confirm strip is editable: the page (required when the photo had no
+  // printed number) and the total (only when the page runs past it).
+  const [snapPage, setSnapPage] = useState("");
+  const [snapTotal, setSnapTotal] = useState("");
 
   const openSnap = (fmt) => { snapRefs.current[fmt]?.click(); };
 
@@ -1560,6 +1548,12 @@ function ProgressEditor({ book, onUpdate }) {
         // Unreadable / network / garbage AI → manual fallback, no write.
         setSnapState((s) => ({ ...s, [fmt]: "error" }));
         setSnapResult((r) => ({ ...r, [fmt]: null }));
+      } else if (fmt === "print") {
+        const plan = planPrintSnap(parsed, prog.print);
+        setSnapPage(plan.page ? String(plan.page) : "");
+        setSnapTotal(plan.page && isPastTotal(plan.page, plan.pages) ? String(plan.page) : "");
+        setSnapState((s) => ({ ...s, [fmt]: "confirm" }));
+        setSnapResult((r) => ({ ...r, [fmt]: plan }));
       } else {
         setSnapState((s) => ({ ...s, [fmt]: "confirm" }));
         setSnapResult((r) => ({ ...r, [fmt]: parsed }));
@@ -1570,10 +1564,30 @@ function ProgressEditor({ book, onUpdate }) {
 
   // Apply the confirmed snap into progress[fmt] (idempotent: same parsed →
   // same write). Routes through onUpdate so auto-Read at 100% still fires.
+  // Merges only the numbers that were read/confirmed — never blanks over a
+  // stored value (see src/lib/progressSnap.js).
   const applySnap = (fmt) => {
     const parsed = snapResult[fmt];
-    if (parsed) onUpdate({ progress: { ...prog, [fmt]: parsed } });
+    if (!parsed) return clearSnap(fmt);
+    if (fmt === "print") {
+      if (!printSnapReady(parsed)) return;
+      const page = posInt(snapPage);
+      const pages = isPastTotal(page, parsed.pages) ? posInt(snapTotal) : null;
+      onUpdate({ progress: { ...prog, print: applyPrintSnap(prog.print, { page, chapter: parsed.chapter, pages }) } });
+    } else {
+      onUpdate({ progress: { ...prog, [fmt]: applySimpleSnap(prog[fmt], parsed) } });
+    }
     clearSnap(fmt);
+  };
+
+  // Apply is allowed once there's a valid page, and — if it's past this
+  // edition's total — a corrected total that covers it.
+  const printSnapReady = (plan) => {
+    const page = posInt(snapPage);
+    if (page === null) return false;
+    if (!isPastTotal(page, plan.pages)) return true;
+    const total = posInt(snapTotal);
+    return total !== null && total >= page;
   };
 
   const clearSnap = (fmt) => {
@@ -1586,8 +1600,8 @@ function ProgressEditor({ book, onUpdate }) {
   const snapSummary = (fmt, p) => {
     if (!p) return "";
     if (fmt === "print") {
-      const pct = formatPercent({ progress: { print: p } }, "print");
-      return `${fmtSnapField(p.page)} / ${fmtSnapField(p.pages)} (${pct}%)`;
+      // Print renders its own editable strip (printSnapStrip); this is unused for it.
+      return "";
     }
     if (fmt === "ebook") return `${fmtSnapField(p.percent)}%`;
     return `${fmtSnapField(p.listened)}h / ${fmtSnapField(p.hours)}h`;
@@ -1645,7 +1659,9 @@ function ProgressEditor({ book, onUpdate }) {
               {/* Unreadable → clear next step, no write; manual fields stay below. */}
               {snapState[fmt] === "error" && (
                 <p className="text-[11px] text-pink-300/90">
-                  Couldn't read that screen — enter it by hand below.
+                  {fmt === "print"
+                    ? "Couldn't find a page number or chapter heading. Snap a page that shows one, or enter it by hand below."
+                    : "Couldn't read that screen — enter it by hand below."}
                 </p>
               )}
 
@@ -1653,13 +1669,57 @@ function ProgressEditor({ book, onUpdate }) {
               {snapState[fmt] === "confirm" && (
                 <div className="flex items-center gap-2 flex-wrap rounded-sm border border-purple-700/50 bg-purple-950/60 px-2.5 py-2">
                   <span className="ht-display text-[10px] uppercase tracking-wide text-purple-300/70">Snapped</span>
-                  <span className={`ht-display text-[12px] tabular-nums ${meta.text}`}>
-                    {snapSummary(fmt, snapResult[fmt])}
-                  </span>
+                  {fmt === "print" ? (() => {
+                    const plan = snapResult.print || {};
+                    const page = posInt(snapPage);
+                    const past = isPastTotal(page, plan.pages);
+                    const pct = page && plan.pages && !past ? Math.round((page / plan.pages) * 100) : null;
+                    const inputCls = `w-16 bg-purple-950/60 border border-purple-700/50 rounded-sm px-1.5 py-0.5 text-[12px] tabular-nums focus:outline-none ${meta.ring}`;
+                    return (
+                      <div className={`w-full space-y-1.5 text-[12px] ${meta.text}`}>
+                        {plan.chapter && plan.needsPage && (
+                          <p className="text-[11px] text-purple-200/90">
+                            Chapter {plan.chapter} has no page number printed.
+                            {plan.page ? " Our guess is below. Fix it if it's off." : " Which page does it start on?"}
+                          </p>
+                        )}
+                        <label className="flex items-center gap-1.5 flex-wrap">
+                          {plan.chapter && <span className="ht-display text-[11px]">Chapter {plan.chapter} ·</span>}
+                          <span className="ht-display text-[11px]">Page</span>
+                          <input
+                            type="number" min="1" step="1" inputMode="numeric"
+                            value={snapPage}
+                            onChange={(e) => setSnapPage(e.target.value)}
+                            className={inputCls}
+                            aria-label="Snapped page"
+                          />
+                          {plan.pages && !past && <span className="tabular-nums">/ {plan.pages}{pct !== null ? ` (${pct}%)` : ""}</span>}
+                          {!plan.pages && <span className="text-[11px] italic text-purple-300/70">total pages unknown — add it below to see your %</span>}
+                        </label>
+                        {past && (
+                          <label className="flex items-center gap-1.5 flex-wrap text-[11px] text-pink-200/90">
+                            Page {page} is past this edition's {plan.pages} pages. Total pages:
+                            <input
+                              type="number" min={page} step="1" inputMode="numeric"
+                              value={snapTotal}
+                              onChange={(e) => setSnapTotal(e.target.value)}
+                              className={inputCls}
+                              aria-label="Corrected total pages"
+                            />
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })() : (
+                    <span className={`ht-display text-[12px] tabular-nums ${meta.text}`}>
+                      {snapSummary(fmt, snapResult[fmt])}
+                    </span>
+                  )}
                   <div className="flex gap-1.5 ml-auto">
                     <button
                       onClick={() => applySnap(fmt)}
-                      className="ht-display text-[10px] uppercase px-2.5 py-1 rounded-sm bg-pink-600/80 hover:bg-pink-500/90 text-pink-50"
+                      disabled={fmt === "print" && !printSnapReady(snapResult.print || {})}
+                      className="ht-display text-[10px] uppercase px-2.5 py-1 rounded-sm bg-pink-600/80 hover:bg-pink-500/90 text-pink-50 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       Apply
                     </button>
