@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   shapeProgressShot, guessChapterPage, planPrintSnap, isPastTotal,
   applyPrintSnap, applySimpleSnap, knownChapters,
+  planAudioSnap, checkAudioSnap, fitWithin,
 } from "../src/lib/progressSnap.js";
 
 let passed = 0;
@@ -114,6 +115,80 @@ t("reported photos end to end", () => {
   assert.deepEqual(print, { page: 5, chapters: { 1: 1, 2: 3, 3: 5 } });
   // Later: snapping chapter THREE again fills itself.
   assert.deepEqual(planPrintSnap({ page: null, chapter: 3 }, print).needsPage, false);
+});
+
+// ── Audiobook: "time left" screens and implausible reads ──
+t("audio shape keeps listened/remaining/hours, drops negatives", () => {
+  assert.deepEqual(shapeProgressShot({ listened: 2.25, remaining: 6.25, hours: 8.5 }, "audio"), { listened: 2.25, remaining: 6.25, hours: 8.5 });
+  assert.deepEqual(shapeProgressShot({ listened: -1, remaining: 3.2, hours: null }, "audio"), { listened: null, remaining: 3.2, hours: null });
+  assert.equal(shapeProgressShot({ listened: null, remaining: null, hours: null }, "audio"), null);
+});
+t("time left + stored total → listened derived (G-2)", () => {
+  const plan = planAudioSnap({ listened: null, remaining: 3.2, hours: null }, { hours: 10 });
+  assert.deepEqual(plan, { listened: 6.8, hours: 10, derived: true, reason: null });
+});
+t("time left + total read from the screen → derived", () =>
+  assert.deepEqual(planAudioSnap({ listened: null, remaining: 1, hours: 8 }, {}), { listened: 7, hours: 8, derived: true, reason: null }));
+t("time left, no total anywhere → needs-total, never recorded as listened", () => {
+  const plan = planAudioSnap({ listened: null, remaining: 1.08, hours: null }, {});
+  assert.deepEqual(plan, { listened: null, hours: null, derived: false, reason: "needs-total" });
+});
+t("time left longer than the total → inconsistent, nothing derived", () =>
+  assert.deepEqual(planAudioSnap({ listened: null, remaining: 12, hours: null }, { hours: 9.5 }), { listened: null, hours: 9.5, derived: false, reason: "inconsistent" }));
+t("listened read directly wins; stored total fills in", () =>
+  assert.deepEqual(planAudioSnap({ listened: 2.25, remaining: null, hours: null }, { hours: 8.5 }), { listened: 2.25, hours: 8.5, derived: false, reason: null }));
+t("total read from the screen overrides a stale stored total", () =>
+  assert.equal(planAudioSnap({ listened: 2, remaining: null, hours: 9 }, { hours: 8 }).hours, 9));
+t("finished: 0 left → listened equals total", () =>
+  assert.equal(planAudioSnap({ listened: null, remaining: 0, hours: 8 }, {}).listened, 8));
+t("garbage stored audio doesn't throw", () => {
+  assert.equal(planAudioSnap({ listened: 1, remaining: null, hours: null }, "junk").hours, null);
+  assert.equal(planAudioSnap(null, null).listened, null);
+});
+
+t("implausible read cannot pass the check: 12h on a 9.5h book (G-4)", () => {
+  const c = checkAudioSnap("12", "9.5");
+  assert.equal(c.ok, false);
+  assert.equal(c.problem, "past-total");
+});
+t("check: valid pair, equal pair (finished), zero listened", () => {
+  assert.equal(checkAudioSnap("2.25", "8.5").ok, true);
+  assert.equal(checkAudioSnap("8.5", "8.5").ok, true);
+  assert.equal(checkAudioSnap("0", "8.5").ok, true);
+});
+t("check: listened only, total only, both blank/garbage/negative", () => {
+  assert.equal(checkAudioSnap("2", "").ok, true);
+  assert.equal(checkAudioSnap("", "8.5").ok, true);
+  assert.equal(checkAudioSnap("", "").problem, "nothing");
+  assert.equal(checkAudioSnap("abc", "-3").problem, "nothing");
+});
+t("a past-total pair is the ONLY way listened could reach 100% by mistake: confirmed blocked end to end", () => {
+  // the exact scenario from the audit: a misread would have been stored and auto-marked Read
+  const shot = shapeProgressShot({ listened: 12, hours: null }, "audio");
+  const plan = planAudioSnap(shot, { hours: 9.5 });
+  assert.equal(checkAudioSnap(String(plan.listened), String(plan.hours)).ok, false);
+});
+t("writing only the confirmed audio fields keeps the rest", () => {
+  const c = checkAudioSnap("3", "");
+  assert.deepEqual(applySimpleSnap({ listened: 1, hours: 9.5 }, { listened: c.listened, hours: c.hours }), { listened: 3, hours: 9.5 });
+});
+t("explicit 0 listened is written (a restart), blank is not", () => {
+  assert.deepEqual(applySimpleSnap({ listened: 4, hours: 9 }, { listened: checkAudioSnap("0", "").listened, hours: null }), { listened: 0, hours: 9 });
+});
+
+// ── Photo size (G-5) ──
+t("fitWithin: landscape and portrait scale to the longest edge", () => {
+  assert.deepEqual(fitWithin(4032, 3024, 1568), { width: 1568, height: 1176 });
+  assert.deepEqual(fitWithin(3024, 4032, 1568), { width: 1176, height: 1568 });
+});
+t("fitWithin: never upscales; exact fit is unchanged", () => {
+  assert.deepEqual(fitWithin(800, 600, 1568), { width: 800, height: 600 });
+  assert.deepEqual(fitWithin(1568, 900, 1568), { width: 1568, height: 900 });
+});
+t("fitWithin: extreme aspect keeps at least 1px; bad input → null", () => {
+  assert.deepEqual(fitWithin(20000, 3, 1568), { width: 1568, height: 1 });
+  for (const bad of [[0, 10, 100], [10, -1, 100], [NaN, 10, 100], [10, 10, 0], ["10", 10, 100], [Infinity, 10, 100]])
+    assert.equal(fitWithin(...bad), null);
 });
 
 console.log(`\n${passed} passed`);

@@ -39,7 +39,8 @@ export function shapeProgressShot(parsed, fmt) {
     shot = { percent: p !== null && p >= 0 && p <= 100 ? p : null };
   } else if (fmt === "audio") {
     const pos = (v) => { const n = coerceShotNum(v); return n !== null && n >= 0 ? n : null; };
-    shot = { listened: pos(parsed.listened), hours: pos(parsed.hours) };
+    // `remaining` is the "time left" many players show instead of time listened.
+    shot = { listened: pos(parsed.listened), remaining: pos(parsed.remaining), hours: pos(parsed.hours) };
   }
   if (!shot) return null;
   return Object.values(shot).some((v) => v !== null) ? shot : null;
@@ -136,4 +137,69 @@ export function applySimpleSnap(storedFmt, shot) {
     if (typeof v === "number" && Number.isFinite(v)) next[k] = v;
   }
   return next;
+}
+
+/* ── Audiobook ────────────────────────────────────────────────────
+   Players show either time listened or time LEFT. Recording a "left" value
+   as "listened" makes progress run backwards, and a listened time longer than
+   the book clamps to 100%, which auto-marks the book Read (updateBook).
+   So: derive listened from time left when the total is known, and never let a
+   listened > total pair through to a write.
+──────────────────────────────────────────────────────────────── */
+
+// Positive decimal number from a number or an input string, else null.
+function posNum(v) {
+  const n = typeof v === "string" && v.trim() === "" ? null : coerceShotNum(v);
+  return n !== null && n > 0 ? n : null;
+}
+// Non-negative decimal number (0 allowed) from a number or input string, else null.
+function nonNegNum(v) {
+  const n = typeof v === "string" && v.trim() === "" ? null : coerceShotNum(v);
+  return n !== null && n >= 0 ? n : null;
+}
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// What the audio confirm strip should show for a shot.
+// reason: "needs-total" (screen showed only time left and no total is known)
+//       | "inconsistent" (time left is longer than the total) | null.
+export function planAudioSnap(shot, storedAudio) {
+  const prev = storedAudio && typeof storedAudio === "object" ? storedAudio : {};
+  const hours = posNum(shot && shot.hours) ?? posNum(prev.hours);
+  let listened = nonNegNum(shot && shot.listened);
+  let derived = false;
+  let reason = null;
+  if (listened === null) {
+    const remaining = nonNegNum(shot && shot.remaining);
+    if (remaining !== null) {
+      if (hours === null) reason = "needs-total";
+      else if (remaining > hours) reason = "inconsistent";
+      else { listened = round2(hours - remaining); derived = true; }
+    }
+  }
+  return { listened, hours, derived, reason };
+}
+
+// Validate the (editable) listened/total pair before writing. Inputs may be
+// strings straight from <input>. ok=false means Apply must stay disabled.
+// problem: "nothing" | "past-total" | null.
+export function checkAudioSnap(listenedIn, hoursIn) {
+  const listened = nonNegNum(listenedIn);
+  const hours = posNum(hoursIn);
+  let problem = null;
+  if (listened === null && hours === null) problem = "nothing";
+  else if (listened !== null && hours !== null && listened > hours) problem = "past-total";
+  return { ok: problem === null, listened, hours, problem };
+}
+
+/* ── Photo size ───────────────────────────────────────────────────
+   Phone photos can exceed Vercel's 4.5 MB request-body limit once base64'd.
+   Shots are downscaled in the browser first (see src/lib/snapImage.js).
+──────────────────────────────────────────────────────────────── */
+
+// Scale (w,h) down so the longest edge is at most `max`; never upscales.
+// Returns whole-pixel { width, height } (each at least 1), or null for bad input.
+export function fitWithin(w, h, max) {
+  if (![w, h, max].every((n) => typeof n === "number" && Number.isFinite(n) && n > 0)) return null;
+  const scale = Math.min(1, max / Math.max(w, h));
+  return { width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
 }

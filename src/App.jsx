@@ -3,7 +3,8 @@ import NavTab from './components/NavTab';
 import { useState, useRef, useEffect, Fragment } from "react";
 import Papa from "papaparse";
 import { supabase } from './lib/supabase';
-import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySimpleSnap, posInt } from './lib/progressSnap';
+import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySimpleSnap, planAudioSnap, checkAudioSnap, posInt } from './lib/progressSnap';
+import { prepareSnapImage } from './lib/snapImage';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 
@@ -1458,11 +1459,19 @@ const PROGRESS_SHOT_PROMPTS = {
     'Read the percent complete. Respond with ONLY a valid JSON object, nothing else: ' +
     '{"percent": number or null}. "percent" is 0 to 100 (the portion of the book completed). ' +
     'Use null if you cannot read it confidently.',
+  // Many players show time LEFT, not time listened, so it gets its own field and
+  // the app works out `listened` itself (planAudioSnap) instead of trusting the
+  // model to do the subtraction or to keep the two apart.
   audio:
-    'This is a screenshot of an audiobook player (e.g. Audible, Libby) showing listening progress. ' +
-    'Respond with ONLY a valid JSON object, nothing else: {"listened": number or null, "hours": number or null}. ' +
-    '"listened" is the time listened so far and "hours" is the total length, BOTH in DECIMAL hours ' +
-    '(convert hours and minutes, e.g. 2h15m is 2.25, 45m is 0.75). Use null for anything you cannot read confidently.',
+    'This is a screenshot of an audiobook player (e.g. Audible, Libby, Spotify) showing listening progress. ' +
+    'Respond with ONLY a valid JSON object, nothing else: ' +
+    '{"listened": number or null, "remaining": number or null, "hours": number or null}. ' +
+    'All three are for the WHOLE book, in DECIMAL hours (convert hours, minutes and seconds: ' +
+    '2h15m is 2.25, 45m is 0.75, 1:05:30 is 1.09). "listened" is the time listened so far. ' +
+    '"remaining" is the time LEFT, when the screen shows a "left" or "remaining" time. ' +
+    '"hours" is the total length of the book. Ignore times that belong to the current chapter only, ' +
+    'sleep timers and playback speed. Never copy one value into another field: if only the time left ' +
+    'is shown, "listened" must be null. Use null for anything you cannot read confidently.',
 };
 
 // coerceShotNum / shapeProgressShot live in src/lib/progressSnap.js (unit-tested).
@@ -1532,34 +1541,57 @@ function ProgressEditor({ book, onUpdate }) {
   // printed number) and the total (only when the page runs past it).
   const [snapPage, setSnapPage] = useState("");
   const [snapTotal, setSnapTotal] = useState("");
+  // Audio confirm strip: both fields editable, because players disagree on what
+  // they show and a listened time past the total must never be written.
+  const [snapListened, setSnapListened] = useState("");
+  const [snapHours, setSnapHours] = useState("");
+  // Why a snap failed, when we know (shown instead of the generic message).
+  const [snapMsg, setSnapMsg] = useState({});
 
   const openSnap = (fmt) => { snapRefs.current[fmt]?.click(); };
 
-  const handleSnap = (e, fmt) => {
+  const handleSnap = async (e, fmt) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // allow re-picking the same file (Retry)
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      setSnapState((s) => ({ ...s, [fmt]: "loading" }));
-      setSnapResult((r) => ({ ...r, [fmt]: undefined }));
-      const parsed = await readProgressShot(reader.result, fmt);
-      if (!parsed) {
-        // Unreadable / network / garbage AI → manual fallback, no write.
-        setSnapState((s) => ({ ...s, [fmt]: "error" }));
-        setSnapResult((r) => ({ ...r, [fmt]: null }));
-      } else if (fmt === "print") {
-        const plan = planPrintSnap(parsed, prog.print);
-        setSnapPage(plan.page ? String(plan.page) : "");
-        setSnapTotal(plan.page && isPastTotal(plan.page, plan.pages) ? String(plan.page) : "");
-        setSnapState((s) => ({ ...s, [fmt]: "confirm" }));
-        setSnapResult((r) => ({ ...r, [fmt]: plan }));
-      } else {
-        setSnapState((s) => ({ ...s, [fmt]: "confirm" }));
-        setSnapResult((r) => ({ ...r, [fmt]: parsed }));
-      }
+    const fail = (msg) => {
+      // Unreadable / network / garbage AI → manual fallback, no write.
+      setSnapState((s) => ({ ...s, [fmt]: "error" }));
+      setSnapResult((r) => ({ ...r, [fmt]: null }));
+      setSnapMsg((m) => ({ ...m, [fmt]: msg }));
     };
-    reader.readAsDataURL(file);
+    setSnapState((s) => ({ ...s, [fmt]: "loading" }));
+    setSnapResult((r) => ({ ...r, [fmt]: undefined }));
+    setSnapMsg((m) => ({ ...m, [fmt]: undefined }));
+    // Downscale first: a raw phone photo can exceed the proxy's 4.5 MB body limit.
+    const img = await prepareSnapImage(file);
+    if (img.error) {
+      return fail("That photo couldn't be opened (HEIC and some other formats aren't supported). Take it as a JPEG, or enter it by hand below.");
+    }
+    const parsed = await readProgressShot(img.dataUrl, fmt);
+    if (!parsed) return fail(undefined);
+    if (fmt === "print") {
+      const plan = planPrintSnap(parsed, prog.print);
+      setSnapPage(plan.page ? String(plan.page) : "");
+      setSnapTotal(plan.page && isPastTotal(plan.page, plan.pages) ? String(plan.page) : "");
+      setSnapState((s) => ({ ...s, [fmt]: "confirm" }));
+      setSnapResult((r) => ({ ...r, [fmt]: plan }));
+    } else if (fmt === "audio") {
+      const plan = planAudioSnap(parsed, prog.audio);
+      if (plan.reason === "needs-total") {
+        return fail("That screen shows time left, but this audiobook's total length isn't saved yet. Enter the total hours below, then snap again.");
+      }
+      if (plan.reason === "inconsistent") {
+        return fail("The time left on that screen is longer than this audiobook's saved total length. Check the total hours below, then snap again.");
+      }
+      setSnapListened(plan.listened !== null ? String(plan.listened) : "");
+      setSnapHours(plan.hours !== null ? String(plan.hours) : "");
+      setSnapState((s) => ({ ...s, [fmt]: "confirm" }));
+      setSnapResult((r) => ({ ...r, [fmt]: plan }));
+    } else {
+      setSnapState((s) => ({ ...s, [fmt]: "confirm" }));
+      setSnapResult((r) => ({ ...r, [fmt]: parsed }));
+    }
   };
 
   // Apply the confirmed snap into progress[fmt] (idempotent: same parsed →
@@ -1574,6 +1606,10 @@ function ProgressEditor({ book, onUpdate }) {
       const page = posInt(snapPage);
       const pages = isPastTotal(page, parsed.pages) ? posInt(snapTotal) : null;
       onUpdate({ progress: { ...prog, print: applyPrintSnap(prog.print, { page, chapter: parsed.chapter, pages }) } });
+    } else if (fmt === "audio") {
+      const check = checkAudioSnap(snapListened, snapHours);
+      if (!check.ok) return;
+      onUpdate({ progress: { ...prog, audio: applySimpleSnap(prog.audio, { listened: check.listened, hours: check.hours }) } });
     } else {
       onUpdate({ progress: { ...prog, [fmt]: applySimpleSnap(prog[fmt], parsed) } });
     }
@@ -1600,11 +1636,9 @@ function ProgressEditor({ book, onUpdate }) {
   const snapSummary = (fmt, p) => {
     if (!p) return "";
     if (fmt === "print") {
-      // Print renders its own editable strip (printSnapStrip); this is unused for it.
       return "";
     }
-    if (fmt === "ebook") return `${fmtSnapField(p.percent)}%`;
-    return `${fmtSnapField(p.listened)}h / ${fmtSnapField(p.hours)}h`;
+    return `${fmtSnapField(p.percent)}%`; // ebook; print and audio render their own editable strips
   };
 
   return (
@@ -1659,9 +1693,9 @@ function ProgressEditor({ book, onUpdate }) {
               {/* Unreadable → clear next step, no write; manual fields stay below. */}
               {snapState[fmt] === "error" && (
                 <p className="text-[11px] text-pink-300/90">
-                  {fmt === "print"
+                  {snapMsg[fmt] || (fmt === "print"
                     ? "Couldn't find a page number or chapter heading. Snap a page that shows one, or enter it by hand below."
-                    : "Couldn't read that screen — enter it by hand below."}
+                    : "Couldn't read that screen — enter it by hand below.")}
                 </p>
               )}
 
@@ -1710,6 +1744,50 @@ function ProgressEditor({ book, onUpdate }) {
                         )}
                       </div>
                     );
+                  })() : fmt === "audio" ? (() => {
+                    const plan = snapResult.audio || {};
+                    const check = checkAudioSnap(snapListened, snapHours);
+                    const pctA = check.ok && check.listened !== null && check.hours !== null
+                      ? Math.round((check.listened / check.hours) * 100) : null;
+                    const inputCls = `w-16 bg-purple-950/60 border border-purple-700/50 rounded-sm px-1.5 py-0.5 text-[12px] tabular-nums focus:outline-none ${meta.ring}`;
+                    return (
+                      <div className={`w-full space-y-1.5 text-[12px] ${meta.text}`}>
+                        {plan.derived && (
+                          <p className="text-[11px] text-cyan-100/80">
+                            That screen shows time left. Listened is worked out from the total length.
+                          </p>
+                        )}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <label className="flex items-center gap-1.5">
+                            <span className="ht-display text-[11px]">Listened</span>
+                            <input
+                              type="number" min="0" step="0.01" inputMode="decimal"
+                              value={snapListened}
+                              onChange={(e) => setSnapListened(e.target.value)}
+                              className={inputCls}
+                              aria-label="Snapped hours listened"
+                            />
+                          </label>
+                          <label className="flex items-center gap-1.5">
+                            <span>of</span>
+                            <input
+                              type="number" min="0" step="0.01" inputMode="decimal"
+                              value={snapHours}
+                              onChange={(e) => setSnapHours(e.target.value)}
+                              className={inputCls}
+                              aria-label="Snapped total hours"
+                            />
+                            <span>hours</span>
+                          </label>
+                          {pctA !== null && <span className="tabular-nums">({pctA}%)</span>}
+                        </div>
+                        {check.problem === "past-total" && (
+                          <p className="text-[11px] text-pink-200/90">
+                            That is more than the book's total length. Fix the listened time or the total, then Apply.
+                          </p>
+                        )}
+                      </div>
+                    );
                   })() : (
                     <span className={`ht-display text-[12px] tabular-nums ${meta.text}`}>
                       {snapSummary(fmt, snapResult[fmt])}
@@ -1718,7 +1796,7 @@ function ProgressEditor({ book, onUpdate }) {
                   <div className="flex gap-1.5 ml-auto">
                     <button
                       onClick={() => applySnap(fmt)}
-                      disabled={fmt === "print" && !printSnapReady(snapResult.print || {})}
+                      disabled={(fmt === "print" && !printSnapReady(snapResult.print || {})) || (fmt === "audio" && !checkAudioSnap(snapListened, snapHours).ok)}
                       className="ht-display text-[10px] uppercase px-2.5 py-1 rounded-sm bg-pink-600/80 hover:bg-pink-500/90 text-pink-50 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       Apply
