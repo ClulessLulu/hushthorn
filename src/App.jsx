@@ -5,6 +5,7 @@ import Papa from "papaparse";
 import { supabase } from './lib/supabase';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
+import { PASSWORD_RULE_MSG, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl } from './lib/authErrors';
 
 /* ── Claude API configuration ───────────────────────────────
    Production: NO client key. callClaude() posts to the same-origin
@@ -2628,6 +2629,18 @@ export default function Hushthorn() {
   // choose a new password (Supabase signs them in with a temporary recovery
   // session, so without this gate they would land straight in the app).
   const [recovering, setRecovering] = useState(false);
+  // An expired or already-used emailed link comes back as #error_code=otp_expired
+  // in the URL, which the Supabase client swallows. Read it once, show it on the
+  // sign-in page, and strip it from the address bar so a reload doesn't repeat it.
+  const [linkError, setLinkError] = useState(() =>
+    typeof window === 'undefined' ? null : parseAuthLinkError(window.location.hash, window.location.search));
+  useEffect(() => {
+    if (!linkError) return;
+    window.history.replaceState(window.history.state, '', cleanAuthLinkUrl(window.location.href));
+  }, [linkError]);
+  // Already signed in: the sign-in page never showed it, so drop it. Otherwise a
+  // later sign-out would mount a fresh sign-in page and show a stale message.
+  useEffect(() => { if (session) setLinkError(null); }, [session]);
   // Shared-library archive switcher (Phase 2). `currentLibraryId` null = the
   // personal library (unchanged behaviour). `archives` is the list of shared
   // archives the user belongs to, each with the user's own membership role.
@@ -3516,7 +3529,7 @@ export default function Hushthorn() {
       ];
 
   if (!authReady) return <ArchiveLoading />;
-  if (!session) return <AuthPage />;
+  if (!session) return <AuthPage linkError={linkError} />;
   if (recovering) return <ResetPasswordPage onDone={() => setRecovering(false)} />;
   if (!profileReady) return <ArchiveLoading />;
   if (!profile?.username) return (
@@ -5632,9 +5645,6 @@ const AUTH_LBL = "block ht-display text-[9px] uppercase tracking-widest text-pur
 // value has no effect on an existing deployment.
 const GOOGLE_AUTH_ENABLED = import.meta.env.VITE_ENABLE_GOOGLE_AUTH === 'true';
 
-const PASSWORD_RULE_MSG =
-  'Password needs a lowercase letter, an uppercase letter, a number and a symbol (like !@#$). Add what is missing and try again.';
-
 // Shown after someone follows a password-reset email: Supabase has already signed
 // them in with a short-lived recovery session, and updateUser() sets the new
 // password on it. Same card, wordmark and password rules as sign-up.
@@ -5654,17 +5664,7 @@ function ResetPasswordPage({ onDone }) {
       if (authError) throw authError;
       onDone();
     } catch (err) {
-      if (/different from the old|same as the old/i.test(err.message || '')) {
-        setError('Choose a password you have not used before, then try again.');
-      } else if (/password/i.test(err.message || '') || err.code === 'weak_password') {
-        setError(PASSWORD_RULE_MSG);
-      } else if (/session|expired|jwt|not authenticated/i.test(err.message || '') || err.status === 401) {
-        setError('That reset link has expired. Go back and request a new one.');
-      } else if (err.name === 'AuthRetryableFetchError' || /failed to fetch|network|load failed/i.test(err.message || '')) {
-        setError('The archive could not be reached. Check your connection and try again.');
-      } else {
-        setError('The archive refused that password. Try a different one.');
-      }
+      setError(mapResetError(err));
     } finally {
       setLoading(false);
     }
@@ -5711,7 +5711,7 @@ function ResetPasswordPage({ onDone }) {
   );
 }
 
-function AuthPage() {
+function AuthPage({ linkError = null }) {
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -5719,6 +5719,10 @@ function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // Shown once, on Sign in, when an emailed link brought the person here already
+  // expired/used. Any move off Sign in (including "Send a new reset link") ends it.
+  const [linkNotice, setLinkNotice] = useState(linkError);
+  useEffect(() => { if (mode !== 'login') setLinkNotice(null); }, [mode]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -5732,13 +5736,7 @@ function AuthPage() {
         // used to find out who is registered.
         setNotice('If that email has an account, a reset link is on its way. Check your inbox (and spam), then follow the link.');
       } catch (err) {
-        if (/rate limit|too many/i.test(err.message || '') || err.status === 429) {
-          setError('Too many attempts. Wait a few minutes, then try again.');
-        } else if (err.name === 'AuthRetryableFetchError' || /failed to fetch|network|load failed/i.test(err.message || '')) {
-          setError('The archive could not be reached. Check your connection and try again.');
-        } else {
-          setError('The archive could not send that link. Check the email address and try again.');
-        }
+        setError(mapForgotError(err));
       } finally {
         setLoading(false);
       }
@@ -5818,6 +5816,16 @@ function AuthPage() {
         <p className="text-[13px] italic mb-6" style={{ color: '#c084fc' }}>
           a candlelit archive for the books you shouldn't read in public
         </p>
+
+        {linkNotice && mode === 'login' && (
+          <div role="alert" className="mb-5 space-y-1.5">
+            <p className="text-sm text-pink-300">{linkNotice.message}</p>
+            <button type="button" onClick={() => { setMode('forgot'); setError(''); setNotice(''); }}
+              className="ht-display text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300 underline underline-offset-4 min-h-[44px] sm:min-h-0">
+              Send a new reset link
+            </button>
+          </div>
+        )}
 
         {mode === 'forgot' ? (
           <>
