@@ -7,6 +7,7 @@ import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySim
 import { prepareSnapImage } from './lib/snapImage';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
+import { PASSWORD_RULE_MSG, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl } from './lib/authErrors';
 
 /* ── Claude API configuration ───────────────────────────────
    Production: NO client key. callClaude() posts to the same-origin
@@ -2762,6 +2763,22 @@ function ArchiveLoading() {
 export default function Hushthorn() {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
+  // True from the moment someone arrives from a password-reset email until they
+  // choose a new password (Supabase signs them in with a temporary recovery
+  // session, so without this gate they would land straight in the app).
+  const [recovering, setRecovering] = useState(false);
+  // An expired or already-used emailed link comes back as #error_code=otp_expired
+  // in the URL, which the Supabase client swallows. Read it once, show it on the
+  // sign-in page, and strip it from the address bar so a reload doesn't repeat it.
+  const [linkError, setLinkError] = useState(() =>
+    typeof window === 'undefined' ? null : parseAuthLinkError(window.location.hash, window.location.search));
+  useEffect(() => {
+    if (!linkError) return;
+    window.history.replaceState(window.history.state, '', cleanAuthLinkUrl(window.location.href));
+  }, [linkError]);
+  // Already signed in: the sign-in page never showed it, so drop it. Otherwise a
+  // later sign-out would mount a fresh sign-in page and show a stale message.
+  useEffect(() => { if (session) setLinkError(null); }, [session]);
   // Shared-library archive switcher (Phase 2). `currentLibraryId` null = the
   // personal library (unchanged behaviour). `archives` is the list of shared
   // archives the user belongs to, each with the user's own membership role.
@@ -2787,7 +2804,9 @@ export default function Hushthorn() {
         setAuthReady(true);
       })
       .catch(() => setAuthReady(true));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true);
+      if (event === 'SIGNED_OUT') setRecovering(false);
       setSession(session);
     });
     return () => subscription.unsubscribe();
@@ -3648,7 +3667,8 @@ export default function Hushthorn() {
       ];
 
   if (!authReady) return <ArchiveLoading />;
-  if (!session) return <AuthPage />;
+  if (!session) return <AuthPage linkError={linkError} />;
+  if (recovering) return <ResetPasswordPage onDone={() => setRecovering(false)} />;
   if (!profileReady) return <ArchiveLoading />;
   if (!profile?.username) return (
     <UsernameGate
@@ -5763,12 +5783,10 @@ const AUTH_LBL = "block ht-display text-[9px] uppercase tracking-widest text-pur
 // value has no effect on an existing deployment.
 const GOOGLE_AUTH_ENABLED = import.meta.env.VITE_ENABLE_GOOGLE_AUTH === 'true';
 
-const PASSWORD_RULE_MSG =
-  'Password needs a lowercase letter, an uppercase letter, a number and a symbol (like !@#$). Add what is missing and try again.';
-
-function AuthPage() {
-  const [mode, setMode] = useState('login');
-  const [email, setEmail] = useState('');
+// Shown after someone follows a password-reset email: Supabase has already signed
+// them in with a short-lived recovery session, and updateUser() sets the new
+// password on it. Same card, wordmark and password rules as sign-up.
+function ResetPasswordPage({ onDone }) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -5777,6 +5795,91 @@ function AuthPage() {
   const submit = async (e) => {
     e.preventDefault();
     setError('');
+    if (password !== confirm) { setError('Passwords do not match.'); return; }
+    setLoading(true);
+    try {
+      const { error: authError } = await supabase.auth.updateUser({ password });
+      if (authError) throw authError;
+      onDone();
+    } catch (err) {
+      setError(mapResetError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="ht-bg ht-body fixed inset-0 overflow-y-auto flex items-center justify-center p-4">
+      <style>{FONT_CSS}</style>
+      <div className="ht-frame" aria-hidden="true" />
+      <StagingBadge />
+      <div className="ht-card rounded-xl p-8 w-full max-w-sm text-center" style={{ transform: 'none' }}>
+        <BrandCrown className="ht-brand-crown--card" />
+        <h1 className="ht-wordmark-h mt-1 mb-1">
+          <img src="/brand/hushthorn-wordmark.webp" alt="Hushthorn" className="ht-wordmark ht-wordmark--card" width="1040" height="252" />
+        </h1>
+        <h2 className="ht-display text-xs uppercase tracking-widest text-pink-200 mt-4 mb-1">Choose a new password</h2>
+        <p className="text-[13px] italic mb-5" style={{ color: '#c084fc' }}>
+          Pick something you will keep. Use upper and lower case letters, a number and a symbol.
+        </p>
+        <form onSubmit={submit} className="space-y-3 text-left">
+          <div>
+            <label htmlFor="reset-password" className={AUTH_LBL}>New password</label>
+            <input id="reset-password" type="password" autoComplete="new-password" value={password}
+              onChange={e => setPassword(e.target.value)} required placeholder="••••••••••••" className={AUTH_INPUT} />
+          </div>
+          <div>
+            <label htmlFor="reset-confirm" className={AUTH_LBL}>Confirm new password</label>
+            <input id="reset-confirm" type="password" autoComplete="new-password" value={confirm}
+              onChange={e => setConfirm(e.target.value)} required placeholder="••••••••••••" className={AUTH_INPUT} />
+          </div>
+          {error && <p className="text-sm text-pink-300 text-center py-1">{error}</p>}
+          <div className="ht-rule my-1" aria-hidden="true" />
+          <button type="submit" disabled={loading}
+            className="ht-display w-full min-h-[44px] py-3 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest">
+            {loading ? 'Saving…' : 'Save new password'}
+          </button>
+          <button type="button" onClick={() => supabase.auth.signOut()}
+            className="ht-display block mx-auto text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300 underline underline-offset-4 min-h-[44px] sm:min-h-0">
+            Cancel
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AuthPage({ linkError = null }) {
+  const [mode, setMode] = useState('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  // Shown once, on Sign in, when an emailed link brought the person here already
+  // expired/used. Any move off Sign in (including "Send a new reset link") ends it.
+  const [linkNotice, setLinkNotice] = useState(linkError);
+  useEffect(() => { if (mode !== 'login') setLinkNotice(null); }, [mode]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (mode === 'forgot') {
+      setLoading(true);
+      try {
+        const { error: authError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+        if (authError) throw authError;
+        // Same answer whether or not the email has an account, so this cannot be
+        // used to find out who is registered.
+        setNotice('If that email has an account, a reset link is on its way. Check your inbox (and spam), then follow the link.');
+      } catch (err) {
+        setError(mapForgotError(err));
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     if (mode === 'signup' && password !== confirm) {
       setError('Passwords do not match.');
       return;
@@ -5852,9 +5955,27 @@ function AuthPage() {
           a candlelit archive for the books you shouldn't read in public
         </p>
 
+        {linkNotice && mode === 'login' && (
+          <div role="alert" className="mb-5 space-y-1.5">
+            <p className="text-sm text-pink-300">{linkNotice.message}</p>
+            <button type="button" onClick={() => { setMode('forgot'); setError(''); setNotice(''); }}
+              className="ht-display text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300 underline underline-offset-4 min-h-[44px] sm:min-h-0">
+              Send a new reset link
+            </button>
+          </div>
+        )}
+
+        {mode === 'forgot' ? (
+          <>
+            <h2 className="ht-display text-xs uppercase tracking-widest text-pink-200 mb-1">Forgotten password</h2>
+            <p className="text-[13px] italic mb-5" style={{ color: '#c084fc' }}>
+              Enter the email you signed up with and we will send a link to choose a new password.
+            </p>
+          </>
+        ) : (
         <div className="flex mb-6 rounded-sm overflow-hidden border border-purple-700/40">
           {['login', 'signup'].map(m => (
-            <button key={m} onClick={() => { setMode(m); setError(''); }}
+            <button key={m} onClick={() => { setMode(m); setError(''); setNotice(''); }}
               className={`flex-1 py-2 ht-display text-[10px] uppercase tracking-widest transition-colors ${
                 mode === m
                   ? 'bg-gradient-to-r from-purple-600/60 to-pink-600/50 text-pink-200'
@@ -5864,6 +5985,7 @@ function AuthPage() {
             </button>
           ))}
         </div>
+        )}
 
         <form onSubmit={submit} className="space-y-3 text-left">
           <div>
@@ -5871,6 +5993,7 @@ function AuthPage() {
             <input id="auth-email" type="email" value={email} onChange={e => setEmail(e.target.value)}
               required placeholder="your@grimoire.com" className={AUTH_INPUT} />
           </div>
+          {mode !== 'forgot' && (
           <div>
             <label htmlFor="auth-password" className={AUTH_LBL}>Password</label>
             <input id="auth-password" type="password" value={password} onChange={e => setPassword(e.target.value)}
@@ -5880,7 +6003,14 @@ function AuthPage() {
                 Use upper and lower case letters, a number and a symbol.
               </p>
             )}
+            {mode === 'login' && (
+              <button type="button" onClick={() => { setMode('forgot'); setError(''); setNotice(''); }}
+                className="ht-display text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300 underline underline-offset-4 mt-2 min-h-[44px] sm:min-h-0">
+                Forgot your password?
+              </button>
+            )}
           </div>
+          )}
           {mode === 'signup' && (
             <div>
               <label htmlFor="auth-confirm" className={AUTH_LBL}>Confirm password</label>
@@ -5890,18 +6020,25 @@ function AuthPage() {
           )}
 
           {error && <p className="text-sm text-pink-300 text-center py-1">{error}</p>}
+          {notice && <p role="status" className="text-sm text-purple-200 text-center py-1">{notice}</p>}
 
           <div className="ht-rule my-1" aria-hidden="true" />
 
-          <button type="submit" disabled={loading}
-            className="ht-display w-full py-3 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest">
+          <button type="submit" disabled={loading || (mode === 'forgot' && !!notice)}
+            className="ht-display w-full min-h-[44px] py-3 rounded-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-widest">
             {loading
-              ? 'Opening the archive…'
-              : mode === 'login' ? 'Enter the Archive' : '✦ Open the Archive ✦'}
+              ? (mode === 'forgot' ? 'Sending…' : 'Opening the archive…')
+              : mode === 'forgot' ? 'Send reset link' : mode === 'login' ? 'Enter the Archive' : '✦ Open the Archive ✦'}
           </button>
+          {mode === 'forgot' && (
+            <button type="button" onClick={() => { setMode('login'); setError(''); setNotice(''); }}
+              className="ht-display block mx-auto text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300 underline underline-offset-4 min-h-[44px] sm:min-h-0">
+              Back to sign in
+            </button>
+          )}
         </form>
 
-        {GOOGLE_AUTH_ENABLED && (<>
+        {mode !== 'forgot' && GOOGLE_AUTH_ENABLED && (<>
         <div className="flex items-center gap-3 my-4">
           <span className="ht-rule flex-1 inline-block" />
           <span className="text-purple-400/60 text-xs italic">or</span>
