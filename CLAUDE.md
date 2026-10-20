@@ -27,6 +27,11 @@ living alongside the developer's other app, Kindled.
 
 - `npm run dev` — Vite dev server (use Chrome: voice + barcode features are Chrome/Edge only)
 - `npm run build` — production build; must pass before considering work done
+- `npm test` — runs every `tests/*.mjs` with Node's test runner; must pass before
+  considering work done. CI (`.github/workflows/ci.yml`) runs tests + build on every PR.
+- Every bug fix ships with a test in `tests/` that fails without the fix. Put the
+  logic under test in an importable module (e.g. `src/lib/progressSnap.js`) and
+  import it — don't copy functions into the test file.
 - Env (`.env`): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`; optional
   `VITE_ANTHROPIC_API_KEY` for AI features in local dev.
 

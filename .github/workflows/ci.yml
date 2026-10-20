@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      # Placeholder values only: CI never talks to Supabase. They must be set,
+      # because src/lib/supabase.js throws at import when they're missing and
+      # Vite then tree-shakes the whole app out while still printing "built".
+      - name: Production build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: https://placeholder.supabase.co
+          VITE_SUPABASE_ANON_KEY: placeholder
+
+      # Guards against a green build that ships an empty app (see above).
+      - name: Bundle contains the app
+        run: |
+          if ! grep -q "Enter the Archive" dist/assets/*.js; then
+            echo "::error::Built bundle is missing the app's sign-in screen. The app was tree-shaken out."
+            exit 1
+          fi
