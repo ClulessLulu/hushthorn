@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  PASSWORD_RULE_MSG, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl,
+  PASSWORD_RULE_MSG, EMAIL_NOT_ALLOWED_MSG, isEmailNotAllowed, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl,
 } from "../src/lib/authErrors.js";
 
 const RATE = "Too many attempts. Wait a few minutes, then try again.";
@@ -113,4 +113,20 @@ test("clean url then parse: the message is shown once, not again after a reload"
   assert.ok(parseAuthLinkError(new URL(href).hash, new URL(href).search));
   const after = new URL(cleanAuthLinkUrl(href));
   assert.equal(parseAuthLinkError(after.hash, after.search), null);
+});
+
+// ── Supabase's built-in email sender refuses non-team addresses ──
+test("email-not-allowed: recognised by code or by message, nothing else", () => {
+  assert.equal(isEmailNotAllowed({ code: "email_address_not_authorized", status: 400, message: "x" }), true);
+  assert.equal(isEmailNotAllowed({ message: "Email address not authorized" }), true);
+  for (const e of [{ code: "over_email_send_rate_limit" }, { message: "Invalid login credentials" }, {}, null, undefined, "str"]) {
+    assert.equal(isEmailNotAllowed(e), false);
+  }
+});
+test("email-not-allowed: the message says what is true and never blames the password", () => {
+  assert.match(EMAIL_NOT_ALLOWED_MSG, /can't send email to that address/);
+  assert.ok(!/password/i.test(EMAIL_NOT_ALLOWED_MSG));
+});
+test("forgot: email-not-allowed gets its own message, not the generic 'check the email address'", () => {
+  assert.equal(mapForgotError({ code: "email_address_not_authorized", status: 400, message: "Email address not authorized" }), EMAIL_NOT_ALLOWED_MSG);
 });

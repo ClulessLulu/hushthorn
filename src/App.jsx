@@ -7,7 +7,8 @@ import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySim
 import { prepareSnapImage } from './lib/snapImage';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
-import { PASSWORD_RULE_MSG, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl } from './lib/authErrors';
+import { PASSWORD_RULE_MSG, EMAIL_NOT_ALLOWED_MSG, isEmailNotAllowed, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl } from './lib/authErrors';
+import { withTimeout, AI_VISION_TIMEOUT_MS } from './lib/fetchTimeout';
 
 /* ── Claude API configuration ───────────────────────────────
    Production: NO client key. callClaude() posts to the same-origin
@@ -21,34 +22,40 @@ const CLAUDE_PROXY_URL = "/api/claude";
 const ANTHROPIC_DIRECT_URL = "https://api.anthropic.com/v1/messages";
 const CLAUDE_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY || "";
 
-async function callClaude(body) {
-  // Dev-only direct path: a client key is present, call Anthropic directly.
-  if (CLAUDE_API_KEY) {
-    const res = await fetch(ANTHROPIC_DIRECT_URL, {
+// opts.timeoutMs: give up (throws a "TimeoutError") if the whole request, including
+// reading the body, takes longer. Omitted = no limit, as before.
+async function callClaude(body, { timeoutMs } = {}) {
+  return withTimeout(timeoutMs, async (signal) => {
+    // Dev-only direct path: a client key is present, call Anthropic directly.
+    if (CLAUDE_API_KEY) {
+      const res = await fetch(ANTHROPIC_DIRECT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": CLAUDE_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify(body),
+        signal,
+      });
+      if (!res.ok) throw new Error(`Claude API error ${res.status}`);
+      return res.json();
+    }
+    // Production path: go through the server-side proxy with the user's session.
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(CLAUDE_PROXY_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": CLAUDE_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
       },
       body: JSON.stringify(body),
+      signal,
     });
     if (!res.ok) throw new Error(`Claude API error ${res.status}`);
     return res.json();
-  }
-  // Production path: go through the server-side proxy with the user's session.
-  const { data: { session } } = await supabase.auth.getSession();
-  const res = await fetch(CLAUDE_PROXY_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-    },
-    body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Claude API error ${res.status}`);
-  return res.json();
 }
 
 // Extract and parse the strict-JSON payload from a Claude Messages response.
@@ -1495,7 +1502,7 @@ async function readProgressShot(dataUrl, fmt) {
           { type: "text", text: prompt },
         ],
       }],
-    });
+    }, { timeoutMs: AI_VISION_TIMEOUT_MS });
     // Defensive parse, same contract as scanCover — shared parseClaudeJson
     // throws on a missing payload, and the catch below degrades that to null.
     const parsed = parseClaudeJson(data, "{");
@@ -1569,8 +1576,14 @@ function ProgressEditor({ book, onUpdate }) {
     if (img.error) {
       return fail("That photo couldn't be opened (HEIC and some other formats aren't supported). Take it as a JPEG, or enter it by hand below.");
     }
+    const startedAt = Date.now();
     const parsed = await readProgressShot(img.dataUrl, fmt);
-    if (!parsed) return fail(undefined);
+    if (!parsed) {
+      // readProgressShot never throws, so a timeout looks like any other failure;
+      // the elapsed time tells them apart.
+      const timedOut = Date.now() - startedAt >= AI_VISION_TIMEOUT_MS - 250;
+      return fail(timedOut ? "That took too long. Check your connection and try again, or enter it by hand below." : undefined);
+    }
     if (fmt === "print") {
       const plan = planPrintSnap(parsed, prog.print);
       setSnapPage(plan.page ? String(plan.page) : "");
@@ -1676,7 +1689,7 @@ function ProgressEditor({ book, onUpdate }) {
                 <button
                   onClick={() => openSnap(fmt)}
                   disabled={snapState[fmt] === "loading"}
-                  className={`ht-display text-[10px] uppercase tracking-wide px-2.5 py-1 rounded-sm border border-purple-700/50 bg-purple-900/50 hover:bg-purple-800/70 ${meta.text} disabled:opacity-50 disabled:cursor-not-allowed`}
+                  className={`ht-display text-[10px] uppercase tracking-wide px-2.5 py-1 min-h-[44px] sm:min-h-0 rounded-sm border border-purple-700/50 bg-purple-900/50 hover:bg-purple-800/70 ${meta.text} disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                   📸 Snap to update
                 </button>
@@ -1709,7 +1722,7 @@ function ProgressEditor({ book, onUpdate }) {
                     const page = posInt(snapPage);
                     const past = isPastTotal(page, plan.pages);
                     const pct = page && plan.pages && !past ? Math.round((page / plan.pages) * 100) : null;
-                    const inputCls = `w-16 bg-purple-950/60 border border-purple-700/50 rounded-sm px-1.5 py-0.5 text-[12px] tabular-nums focus:outline-none ${meta.ring}`;
+                    const inputCls = `w-16 min-h-[44px] sm:min-h-0 bg-purple-950/60 border border-purple-700/50 rounded-sm px-1.5 py-0.5 text-[12px] tabular-nums focus:outline-none ${meta.ring}`;
                     return (
                       <div className={`w-full space-y-1.5 text-[12px] ${meta.text}`}>
                         {plan.chapter && plan.needsPage && (
@@ -1750,7 +1763,7 @@ function ProgressEditor({ book, onUpdate }) {
                     const check = checkAudioSnap(snapListened, snapHours);
                     const pctA = check.ok && check.listened !== null && check.hours !== null
                       ? Math.round((check.listened / check.hours) * 100) : null;
-                    const inputCls = `w-16 bg-purple-950/60 border border-purple-700/50 rounded-sm px-1.5 py-0.5 text-[12px] tabular-nums focus:outline-none ${meta.ring}`;
+                    const inputCls = `w-16 min-h-[44px] sm:min-h-0 bg-purple-950/60 border border-purple-700/50 rounded-sm px-1.5 py-0.5 text-[12px] tabular-nums focus:outline-none ${meta.ring}`;
                     return (
                       <div className={`w-full space-y-1.5 text-[12px] ${meta.text}`}>
                         {plan.derived && (
@@ -1798,19 +1811,19 @@ function ProgressEditor({ book, onUpdate }) {
                     <button
                       onClick={() => applySnap(fmt)}
                       disabled={(fmt === "print" && !printSnapReady(snapResult.print || {})) || (fmt === "audio" && !checkAudioSnap(snapListened, snapHours).ok)}
-                      className="ht-display text-[10px] uppercase px-2.5 py-1 rounded-sm bg-pink-600/80 hover:bg-pink-500/90 text-pink-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="ht-display text-[10px] uppercase px-2.5 py-1 min-h-[44px] sm:min-h-0 rounded-sm bg-pink-600/80 hover:bg-pink-500/90 text-pink-50 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       Apply
                     </button>
                     <button
                       onClick={() => openSnap(fmt)}
-                      className="ht-display text-[10px] uppercase px-2.5 py-1 rounded-sm bg-purple-800/60 hover:bg-purple-700/80 text-purple-100"
+                      className="ht-display text-[10px] uppercase px-2.5 py-1 min-h-[44px] sm:min-h-0 rounded-sm bg-purple-800/60 hover:bg-purple-700/80 text-purple-100"
                     >
                       Retry
                     </button>
                     <button
                       onClick={() => clearSnap(fmt)}
-                      className="ht-display text-[10px] uppercase px-2.5 py-1 rounded-sm bg-purple-900/50 hover:bg-purple-800/70 text-purple-200"
+                      className="ht-display text-[10px] uppercase px-2.5 py-1 min-h-[44px] sm:min-h-0 rounded-sm bg-purple-900/50 hover:bg-purple-800/70 text-purple-200"
                     >
                       Enter by hand
                     </button>
@@ -5920,6 +5933,8 @@ function AuthPage({ linkError = null }) {
         setError('That email is already registered. Sign in instead, or use a different one.');
       } else if (/invalid login credentials|invalid credentials/i.test(err.message || '')) {
         setError('That email or password is incorrect. Try again.');
+      } else if (isEmailNotAllowed(err)) {
+        setError(EMAIL_NOT_ALLOWED_MSG);
       } else if (/password/i.test(err.message || '') || err.code === 'weak_password') {
         // Prod enforces lower + upper + digit + symbol (Supabase auth policy).
         setError(PASSWORD_RULE_MSG);
@@ -5976,7 +5991,7 @@ function AuthPage({ linkError = null }) {
         <div className="flex mb-6 rounded-sm overflow-hidden border border-purple-700/40">
           {['login', 'signup'].map(m => (
             <button key={m} onClick={() => { setMode(m); setError(''); setNotice(''); }}
-              className={`flex-1 py-2 ht-display text-[10px] uppercase tracking-widest transition-colors ${
+              className={`flex-1 py-2 min-h-[44px] sm:min-h-0 ht-display text-[10px] uppercase tracking-widest transition-colors ${
                 mode === m
                   ? 'bg-gradient-to-r from-purple-600/60 to-pink-600/50 text-pink-200'
                   : 'text-purple-400 hover:text-purple-200'
@@ -6046,7 +6061,7 @@ function AuthPage({ linkError = null }) {
         </div>
 
         <button onClick={signInWithGoogle}
-          className="ht-display w-full py-2.5 rounded-sm border border-purple-700/40 bg-purple-950/40 hover:bg-purple-900/50 text-purple-300 text-[10px] uppercase tracking-widest flex items-center justify-center gap-2">
+          className="ht-display w-full py-2.5 min-h-[44px] rounded-sm border border-purple-700/40 bg-purple-950/40 hover:bg-purple-900/50 text-purple-300 text-[10px] uppercase tracking-widest flex items-center justify-center gap-2">
           <svg width="14" height="14" viewBox="0 0 24 24">
             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
             <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -6379,7 +6394,7 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
               { type: "text", text: 'This is a photo of a book cover. Read the text on it and respond with ONLY a valid JSON object, nothing else: {"title": string or null, "author": string or null}. Use null for anything you cannot read confidently.' },
             ],
           }],
-      });
+      }, { timeoutMs: AI_VISION_TIMEOUT_MS });
       const parsed = parseClaudeJson(data, "{");
       if (parsed.title) {
         // Divining directly below — stash the title so the debounced title
