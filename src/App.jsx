@@ -3708,14 +3708,6 @@ export default function Hushthorn() {
             onClick={() => setAvatarOpen(true)}
           />
         </div>
-        <div className="mt-2 flex justify-center">
-          <button
-            onClick={() => supabase.auth.signOut()}
-            className="ht-display text-[9px] uppercase tracking-widest text-purple-400/50 hover:text-pink-300/70 transition-colors"
-          >
-            leave the archive
-          </button>
-        </div>
       </header>
 
       {cathedralIntro ? (
@@ -3755,8 +3747,8 @@ export default function Hushthorn() {
       {/* Oracle / Codex / Inscribe first, then the shelf filters */}
       <nav className="max-w-5xl mx-auto px-5 flex flex-wrap items-end justify-center gap-2 pb-4" aria-label="Sections">
         <NavTab active={view === "oracle"} onClick={() => setView("oracle")}>Oracle</NavTab>
+        <EnamelButton onClick={() => setAddOpen(true)}>+ Inscribe</EnamelButton>
         <NavTab active={view === "pair"} onClick={() => setView("pair")}>Codex</NavTab>
-        <EnamelButton onClick={() => setAddOpen(true)} className="ml-2">+ Inscribe</EnamelButton>
       </nav>
 
       {/* shelf banners */}
@@ -5772,6 +5764,14 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
           {owned.length < 8 ? ` · ${8 - owned.length} empty slot${8 - owned.length !== 1 ? 's' : ''} waiting` : ''}
         </p>
       </div>
+
+      {/* sign out lives here, not in the header */}
+      <button
+        onClick={() => supabase.auth.signOut()}
+        className="ht-display block mx-auto mt-6 min-h-[44px] px-5 rounded-sm border border-purple-700/50 text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300 hover:border-pink-400/60"
+      >
+        Leave the archive
+      </button>
     </Overlay>
   );
 }
