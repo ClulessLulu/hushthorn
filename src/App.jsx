@@ -3751,6 +3751,13 @@ export default function Hushthorn() {
         />
       )}
 
+      {/* Oracle / Codex / Inscribe first, then the shelf filters */}
+      <nav className="max-w-5xl mx-auto px-5 flex flex-wrap items-end justify-center gap-2 pb-4" aria-label="Sections">
+        <NavTab active={view === "oracle"} onClick={() => setView("oracle")}>Oracle</NavTab>
+        <NavTab active={view === "pair"} onClick={() => setView("pair")}>Codex</NavTab>
+        <EnamelButton onClick={() => setAddOpen(true)} className="ml-2">+ Inscribe</EnamelButton>
+      </nav>
+
       {/* shelf banners */}
       <nav className="max-w-5xl mx-auto px-5 flex flex-wrap items-end justify-center gap-2 pb-6" aria-label="Shelves">
         {shelfTabs.map((t) => (
@@ -3763,9 +3770,6 @@ export default function Hushthorn() {
             {t.label}
           </button>
         ))}
-        <NavTab active={view === "oracle"} onClick={() => setView("oracle")}>Oracle</NavTab>
-        <NavTab active={view === "pair"} onClick={() => setView("pair")}>Codex</NavTab>
-        <EnamelButton onClick={() => setAddOpen(true)} className="ml-2">+ Inscribe</EnamelButton>
       </nav>
 
       {/* library controls — only in the library view */}
