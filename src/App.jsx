@@ -6088,6 +6088,11 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
   const [scanView, setScanView] = useState(seed ? "review" : "capture"); // capture | review
   const [scanMultiple, setScanMultiple] = useState(false);
   const [queue, setQueue] = useState([]);
+  // "Add several" in the search tab: results queue up (one entry per title)
+  // and are written together by addSearchBatch.
+  const [searchMulti, setSearchMulti] = useState(false);
+  const [searchQueue, setSearchQueue] = useState([]);
+  const searchInputRef = useRef(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -6221,8 +6226,32 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
 
   const pick = async (doc, shelf) => {
     const coverUrl = doc._coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : "");
-    const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
     const pageCount = asPageCount(doc.pageCount);
+    // Queue mode returns before any await: the box must clear and refocus at
+    // once, or a title typed meanwhile would be wiped by a late setQuery("").
+    if (searchMulti) {
+      // Queue it and keep the window open. One entry per title (case-insensitive).
+      const key = (doc.title || "").trim().toLowerCase();
+      setSearchQueue((q) => q.some((b) => b.key === key) ? q : [...q, {
+        key,
+        title: doc.title,
+        author: doc.author_name?.[0] || "Unknown author",
+        year: doc.first_publish_year || null,
+        coverUrl,
+        genres: cleanGenres(doc.subject),
+        shelf,
+        read: false,
+        overall: 0,
+        smut: 0,
+        notes: [],
+        progress: pageCount ? { print: { pages: pageCount } } : {},
+        inArchive: !!existingByTitle(doc.title),
+      }]);
+      setQuery("");
+      searchInputRef.current?.focus();
+      return;
+    }
+    const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
     const book = {
       title: doc.title,
       author: doc.author_name?.[0] || "Unknown author",
@@ -6612,6 +6641,13 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
 
   const removeFromQueue = (isbn) => setQueue((q) => q.filter((b) => b.isbn !== isbn));
 
+  const removeFromSearchQueue = (key) => setSearchQueue((q) => q.filter((b) => b.key !== key));
+  const addSearchBatch = () => {
+    const items = searchQueue.filter((b) => !b.inArchive).map(({ key, inArchive, ...book }) => book);
+    if (items.length && onAddMany) onAddMany(items);
+    onClose();
+  };
+
   const addBatch = () => {
     const items = queue.filter((q) => !q.inArchive).map((q) => {
       const validPageCount = asPageCount(q.pageCount);
@@ -6729,12 +6765,49 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
       {mode === "search" ? (
         <>
           <input
+            ref={searchInputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search by title or author…"
             autoFocus
             className="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400"
           />
+          <label className="mt-3 flex items-center gap-2 cursor-pointer min-h-[44px] sm:min-h-0">
+            <input type="checkbox" checked={searchMulti} onChange={(e) => setSearchMulti(e.target.checked)} className="accent-pink-500" />
+            <span className="ht-display text-[10px] uppercase tracking-widest text-purple-300">Add several</span>
+            <span className="text-xs text-purple-400/60 italic">— pick books one after another, then add them all at once</span>
+          </label>
+
+          {searchMulti && (
+            <div className="ht-card rounded-md p-3 mt-2 space-y-2">
+              <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300">{searchQueue.length} queued</p>
+              {searchQueue.length === 0 ? (
+                <p className="text-sm text-purple-400/60 italic">Search, then tap + Owned or + Wishlist. Picks collect here.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {searchQueue.map((b) => (
+                    <div key={b.key} className={`flex items-center gap-2 rounded-sm p-1.5 border ${b.inArchive ? "border-purple-800/40 opacity-50" : "border-purple-700/40 bg-purple-950/40"}`}>
+                      <div className="w-7 h-10 rounded-sm overflow-hidden bg-purple-900/60 flex-shrink-0">
+                        <CoverImage src={b.coverUrl} alt="" className="w-full h-full object-cover" fallback={<span className="text-purple-500 text-xs flex items-center justify-center h-full">♛</span>} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] text-pink-100 truncate">{b.title}</p>
+                        <p className="text-[11px] text-purple-400 truncate italic">
+                          {b.author} · {b.shelf === "wishlist" ? "wishlist" : "owned"}{b.inArchive ? " · already in archive" : ""}
+                        </p>
+                      </div>
+                      <button onClick={() => removeFromSearchQueue(b.key)} aria-label={`Remove ${b.title} from the queue`} className="text-purple-400 hover:text-pink-300 px-2 min-h-[44px]">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {searchQueue.some((b) => !b.inArchive) && (
+                <button onClick={addSearchBatch} className="ht-display w-full min-h-[44px] py-2 rounded-sm bg-gradient-to-r from-indigo-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 text-white text-xs font-semibold uppercase">
+                  Add {searchQueue.filter((b) => !b.inArchive).length} to the archive
+                </button>
+              )}
+            </div>
+          )}
 
           {loading && <p className="mt-4 text-[15px] text-purple-300/70 italic">Consulting the archives…</p>}
           {error && <p className="mt-4 text-[15px] text-pink-300">{error}</p>}
