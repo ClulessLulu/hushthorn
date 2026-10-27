@@ -11,10 +11,20 @@ export const PASSWORD_RULE_MSG =
 
 const NETWORK_MSG = 'The archive could not be reached. Check your connection and try again.';
 
+// Supabase's built-in email sender only delivers to a project's own team members
+// and answers everyone else with code `email_address_not_authorized`. The person
+// can't fix that, and "check your email and password" blames them, so say what
+// is true and what to try.
+export const EMAIL_NOT_ALLOWED_MSG = "We can't send email to that address right now. Try a different address, or try again later.";
+
 const text = (err) => (err && typeof err.message === 'string' ? err.message : '');
 
 function isNetworkError(err) {
   return !!err && (err.name === 'AuthRetryableFetchError' || /failed to fetch|network|load failed/i.test(text(err)));
+}
+
+export function isEmailNotAllowed(err) {
+  return !!err && (err.code === 'email_address_not_authorized' || /email address not authorized/i.test(text(err)));
 }
 
 function isRateLimit(err) {
@@ -23,6 +33,7 @@ function isRateLimit(err) {
 
 // Request-a-reset-link failures (resetPasswordForEmail).
 export function mapForgotError(err) {
+  if (isEmailNotAllowed(err)) return EMAIL_NOT_ALLOWED_MSG;
   if (isRateLimit(err)) return 'Too many attempts. Wait a few minutes, then try again.';
   if (isNetworkError(err)) return NETWORK_MSG;
   return 'The archive could not send that link. Check the email address and try again.';
