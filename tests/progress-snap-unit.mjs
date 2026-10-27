@@ -191,4 +191,16 @@ t("fitWithin: extreme aspect keeps at least 1px; bad input → null", () => {
     assert.equal(fitWithin(...bad), null);
 });
 
+t("audio: listened + time left shown, no total saved → total = sum (Libby 19:13:25 / -4:54:54)", () => {
+  const plan = planAudioSnap({ listened: 19.22, remaining: 4.92, hours: null }, {});
+  assert.deepEqual(plan, { listened: 19.22, hours: 24.14, derived: false, reason: null });
+});
+t("audio: a read total wins over the sum; stored total is used only when nothing else", () => {
+  assert.equal(planAudioSnap({ listened: 19.22, remaining: 4.92, hours: 24.1 }, {}).hours, 24.1);
+  assert.equal(planAudioSnap({ listened: 5, remaining: null, hours: null }, { hours: 10 }).hours, 10);
+});
+t("audio: screen sum overrides a wrong stored total", () => {
+  assert.equal(planAudioSnap({ listened: 19.22, remaining: 4.92, hours: null }, { hours: 9 }).hours, 24.14);
+});
+
 console.log(`\n${passed} passed`);

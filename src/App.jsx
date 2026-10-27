@@ -1469,7 +1469,9 @@ const PROGRESS_SHOT_PROMPTS = {
     '{"listened": number or null, "remaining": number or null, "hours": number or null}. ' +
     'All three are for the WHOLE book, in DECIMAL hours (convert hours, minutes and seconds: ' +
     '2h15m is 2.25, 45m is 0.75, 1:05:30 is 1.09). "listened" is the time listened so far. ' +
-    '"remaining" is the time LEFT, when the screen shows a "left" or "remaining" time. ' +
+    '"remaining" is the time LEFT, when the screen shows a "left" or "remaining" time, including a time ' +
+    'with a leading minus such as "-4:54:54". When both the time listened and the time left are visible, ' +
+    'report BOTH. ' +
     '"hours" is the total length of the book. Ignore times that belong to the current chapter only, ' +
     'sleep timers and playback speed. Never copy one value into another field: if only the time left ' +
     'is shown, "listened" must be null. Use null for anything you cannot read confidently.',
@@ -1530,9 +1532,9 @@ function ProgressEditor({ book, onUpdate }) {
   };
 
   /* ── Snap to update: read a photo/screenshot, confirm, then write ──
-     One control per format. Hidden file input (capture="environment" so
-     mobile opens the camera; desktop opens the screenshot picker — the same
-     input is the upload fallback when the camera is blocked). Nothing touches
+     One control per format. Hidden file input with no `capture` attribute, so
+     phones offer both "take a photo" and "choose from library", and desktop
+     opens the screenshot picker (also the fallback when the camera is blocked). Nothing touches
      `progress` until the user taps Apply: handleSnap only sets local state
      (loading → confirm | error). cyan stays reserved for audio. */
   const snapRefs = useRef({});                 // { [fmt]: <input> }
@@ -1668,7 +1670,6 @@ function ProgressEditor({ book, onUpdate }) {
                   ref={(el) => { snapRefs.current[fmt] = el; }}
                   type="file"
                   accept="image/*"
-                  capture="environment"
                   className="hidden"
                   onChange={(e) => handleSnap(e, fmt)}
                   aria-label={`Snap a ${meta.label} progress screen`}
@@ -1687,7 +1688,7 @@ function ProgressEditor({ book, onUpdate }) {
 
               {snapState[fmt] !== "confirm" && (
                 <p className="text-[10px] italic text-purple-400/60">
-                  Reads the screen you show it — Hushthorn can't sync from Kindle or Libby.
+                  Take a photo or choose one from your library. Hushthorn reads the screen you show it — it can't sync from Kindle or Libby.
                 </p>
               )}
 
@@ -6196,6 +6197,9 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
         let docs;
         try {
           docs = await fromGoogleBooks(q);
+          // Google answers 200 with zero items for some titles (and 429s when its
+          // shared daily quota runs out): try Open Library before giving up.
+          if (!docs.length) docs = await fromOpenLibrary(q);
         } catch {
           docs = await fromOpenLibrary(q);
         }

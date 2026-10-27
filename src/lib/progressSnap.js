@@ -164,8 +164,12 @@ const round2 = (n) => Math.round(n * 100) / 100;
 //       | "inconsistent" (time left is longer than the total) | null.
 export function planAudioSnap(shot, storedAudio) {
   const prev = storedAudio && typeof storedAudio === "object" ? storedAudio : {};
-  const hours = posNum(shot && shot.hours) ?? posNum(prev.hours);
   let listened = nonNegNum(shot && shot.listened);
+  // Screens that show both "listened" and "time left" give the total for free.
+  const lp = posNum(shot && shot.listened);
+  const rp = posNum(shot && shot.remaining);
+  const sum = lp !== null && rp !== null ? round2(lp + rp) : null;
+  const hours = posNum(shot && shot.hours) ?? sum ?? posNum(prev.hours);
   let derived = false;
   let reason = null;
   if (listened === null) {
