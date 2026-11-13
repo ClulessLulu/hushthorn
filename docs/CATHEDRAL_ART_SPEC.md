@@ -68,6 +68,10 @@ Use both `ivy-pilaster.png` and `ivy-pilaster-glow.png` for variety across pilla
 
 ### Winged sprite variants
 
+**Future achievement asset:** `flapping-glowing-sprite.png` uses the elegant pink-violet sprite as a separate unlockable decoration. Prepared in `output/cathedral-v1/` as a 1024×96 alpha atlas with eight 128×96 frames, ordered left to right. Separate frames and an 8 fps animated preview use the same filename prefix. Reuses the animation made from the identical elegant sprite source; slight shape variation remains between generated poses. Achievement criteria and app integration are deferred. The main sprite remains `flapping-sprite.png`.
+
+The main animated sprite is the rounded-wing woodland sprite: `output/cathedral-v1/flapping-sprite.png`, a 1024×96 alpha atlas containing eight 128×96 frames ordered left to right. Individual frames are in `flapping-sprite-frames/`; `flapping-sprite-preview.webp` previews the loop at 8 fps. Generated poses have slight shape variation; app integration is pending. The elegant sprite remains an alternate design.
+
 Two separate woodland sprite overlays are available in `output/cathedral-v1/`:
 
 | Asset | Dimensions | Format | Appearance |

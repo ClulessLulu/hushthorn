@@ -1,139 +1,401 @@
 # CLAUDE.md — Hushthorn
 
-Gothic book-cataloging app for spicy/romantasy readers. Currently a Vite + React
-web prototype; planned to become a React Native (Expo Router) app with Supabase,
-living alongside the developer's other app, Kindled.
+Rewritten 2026-11-13 from a full read of the repo and the production schema.
+Where this file disagrees with `CLAUDE.local.md`, `AGENTS.md`, `.claude/agents/*`,
+`.codex/*`, `README.md` or anything under `docs/`, this file wins. Where this
+file disagrees with the code, the code wins: fix this file in the same change.
 
-## Source of truth
+## 1. What this is
 
-- The repo's current code wins over any docs when they conflict.
-- `prototype/hushthorn-demo.jsx` is the reference implementation from the design
-  phase — port features from it, don't treat it as the live app.
-- Full feature inventory and design decisions: `docs/PROTOTYPE_SPEC.md`. Read it
-  before implementing or modifying any feature listed there.
+Hushthorn is a gothic book-cataloging web app for romantasy / spicy-romance
+readers: shelves (owned, wishlist, read, unread), two ratings, per-format
+reading progress, notes ("marginalia"), book search and camera scanning, AI
+helpers, Kindle/Goodreads import, shared libraries, and a painted "cathedral"
+spine shelf that unlocks decorations as you finish books.
 
-## Project structure
+It is live and has real data. The owner (Crystal) is a QE/SDET shipping this as
+a portfolio piece, so correctness, tests and evidence matter more than speed.
 
-- `src/App.jsx` — the entire app in one ~5.5k-line file: all components, helpers
-  (`callClaude`, `cleanGenres`, `noteFingerprint`), the shared `Overlay` modal,
-  and the `FONT_CSS` `<style>` block. `fetchByIsbn` is a local helper inside
-  `AddBookModal`, not a top-level one. Navigate by search.
-- `src/main.jsx` — entry; renders `<App/>` in `<React.StrictMode>` (double-invokes
-  effects in dev — keep imperative setup like camera start idempotent).
-- `src/lib/supabase.js` — Supabase client. `src/index.css` — Tailwind entry.
-- `.claude/agents/` — the project's 7 specialist subagents.
+**Stack (all verified in `package.json`):** Vite 8, React 18, Tailwind 3,
+`@supabase/supabase-js` 2, `papaparse`, `@zxing/browser`, `react-image-crop`.
+Plain JavaScript/JSX, ES modules. No TypeScript, no ESLint, no router, no state
+library, no test framework beyond Node's built-in runner. Do not add any of
+these without being asked.
 
-## Commands
+**Runtime shape:**
 
-- `npm run dev` — Vite dev server (use Chrome: voice + barcode features are Chrome/Edge only)
-- `npm run build` — production build; must pass before considering work done
-- `npm test` — runs every `tests/*.mjs` with Node's test runner; must pass before
-  considering work done. CI (`.github/workflows/ci.yml`) runs tests + build on every PR.
-- Every bug fix ships with a test in `tests/` that fails without the fix. Put the
-  logic under test in an importable module (e.g. `src/lib/progressSnap.js`) and
-  import it — don't copy functions into the test file.
-- Env (`.env`): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`; optional
-  `VITE_ANTHROPIC_API_KEY` for AI features in local dev.
+- Browser SPA, hosted on Vercel. One serverless function, `api/claude.js`.
+- Supabase does auth, Postgres, and Storage. The browser talks to it directly
+  with the anon key; Row Level Security is the only thing protecting data.
+- AI: every call goes `callClaude()` (top of `src/App.jsx`) → `/api/claude` →
+  Anthropic. The proxy holds `ANTHROPIC_API_KEY` server-side and rejects callers
+  without a valid Supabase session. In local dev only, if
+  `VITE_ANTHROPIC_API_KEY` is set, `callClaude()` calls Anthropic straight from
+  the browser (Vite serves no `/api`).
+- Book data: Google Books is the primary search, Open Library is the fallback,
+  the ISBN lookup, and the page-count source.
 
-## Architecture facts
+**Two Supabase projects. Know which one you are touching.**
 
-- All Claude API calls go through the single `callClaude()` helper (top of App.jsx).
-  It currently calls `api.anthropic.com` directly from the browser via
-  `VITE_ANTHROPIC_API_KEY` (dev only). A server-side proxy (Kindled's Express
-  pattern, port 3001) is the intended production path but is NOT built yet — don't
-  assume it exists. Never ship the key in a production client.
-- Backend is Supabase (already live, not just planned): auth + Postgres tables
-  `books`, `notes`, `avatars`, all RLS owner-only (`user_id = auth.uid()`). Schema
-  changes go through the Supabase MCP (no local migrations folder).
-- Model for in-app AI calls: `claude-sonnet-4-6`. AI responses are
-  requested as strict JSON; always parse defensively (strip ``` fences, slice to
-  outermost `[`...`]` or `{`...`}`) and fail quietly with a manual-entry fallback.
-- Book data: Google Books (`googleapis.com/books/v1/volumes`) is the primary
-  search; Open Library is used for ISBN lookups + cover fallback. Covers: Google
-  Books `imageLinks.thumbnail` (https-ify) or `covers.openlibrary.org/b/id/{cover_i}-M.jpg`
-  — the OL ISBN endpoint without `?default=false` serves a blank placeholder, not
-  a 404. Subject tags are noisy — always run them through `cleanGenres()`.
-- Books are unique by title (case-insensitive) — one entry per book, with a
-  `formats` array (print/ebook/audio), never duplicate entries per format.
-- Imported highlights dedupe by `noteFingerprint()` (normalized text hash).
-  Re-importing the same file must be idempotent — preserve this invariant.
+| Name | Ref | Use |
+| --- | --- | --- |
+| `hushthorn` | `ujxsrcxbhcbihhdluzyl` | PRODUCTION. The owner's real library. Never test against it. |
+| `hushthorn-staging` | `shwhzfpqjbwukjztlzee` | Same schema, throwaway data. All testing that writes goes here. |
 
-## Design system (do not drift)
+## 2. Folder map
 
-- Palette: near-black `#0c0714` bg, blue-violet cards, fuchsia/pink accents,
-  cyan reserved for audio features. Tailwind utility classes + the `ht-*`
-  custom classes in the FONT_CSS block.
-- Fonts: Rozha One (wordmark "Hushthorn"), Cinzel (headings/labels, uppercase),
-  EB Garamond (body). Gothic-but-modern; no blackletter.
-- Voice: themed copy ("Inscribe", "tome", "marginalia", "The Oracle",
-  "The Binding") but error messages always state clearly what to do next.
-- Ratings: Verdict = 5 swords (overall), Smoulder = 5 candles (spice/heat). Tap
-  the same icon again to clear to 0. DB fields: `overall` = Verdict, `smut` = Smoulder.
+The workspace is `Documents/Hushthorn/` with two siblings: the app repo
+(`hushthorn/`, a git repo, default branch `master`) and `toolbox/` (planning and
+checks, not in git).
 
-## Conventions
+```
+hushthorn/
+  src/
+    App.jsx              THE APP. ~8,300 lines: every screen, most helpers, and the
+                         FONT_CSS <style> block holding all .ht-* classes. Find things
+                         by searching for the function name, never by line number.
+    main.jsx             Entry. Renders <App/> inside React.StrictMode.
+    index.css            Tailwind directives only.
+    button-preview.jsx   Dev-only review page for EnamelButton (button-preview.html).
+    components/
+      EnamelButton.jsx/.css   The button. Variants: primary, secondary, quiet, metal, rose.
+      NavTab.jsx/.css         Stained-glass arch tabs (Oracle, + Inscribe, Codex).
+      SpineAppearance.jsx     Per-book "use a photo of the real spine" (localStorage only).
+    lib/                 Pure, importable, unit-tested logic. New logic goes here.
+      supabase.js        Client. THROWS at import if the two VITE_SUPABASE_* vars are missing.
+      progressSnap.js    Snap-to-update maths (print / ebook / audio).
+      snapImage.js       Downscale a photo before it is sent to the AI proxy.
+      shelfLayout.js     Spine widths and shelf row packing.
+      spinePhoto.js      Spine-photo URL validation and crop maths.
+      authErrors.js      Auth error text and emailed-link error parsing.
+  api/claude.js          Vercel serverless proxy to Anthropic (session required).
+  tests/
+    *.mjs                Unit tests. These are what `npm test` runs.
+    *-test-plan.md, report.md, *-qa-report.md, manual-test-tracker.md   QA plans and evidence.
+    screenshots/         Gitignored QA evidence.
+  public/
+    brand/               Wordmark, crown, button art (webp + 9-slice pieces).
+    cathedral/           Runtime cathedral art (optimized webp).
+  docs/
+    BOOK_DESIGN.md       Spec for spines, cover cards, controls, modals. Read before UI work.
+    BUTTON_REDESIGN.md   Button family spec.
+    CATHEDRAL_ART_SPEC.md  Painted layers and the asset audit.
+    HYBRID_SAVE_SPEC.md, VISAGE_SPEC.md, PROTOTYPE_SPEC.md   Feature specs.
+    BUGS.md              QA bug log, with fixes and measurements.
+    CODE_REVIEW_TODO.md  Open review findings. Check before touching spine code.
+    TODO.md              Parked features.
+    superpowers/specs, superpowers/plans   Dated design specs and build plans.
+  prototype/             Design-phase references. NOT built, NOT imported. Port logic, never markup.
+  output/                Gitignored art sources (large PNGs). Never load at runtime.
+  dist/                  Build output. Gitignored.
+  .github/workflows/ci.yml   Tests + build on every PR and on push to master.
+  .claude/agents/        7 subagent definitions (partly stale, see section 8).
+  .agents/, agent/, .claude/skills/   Vendored third-party Vercel skills. Not project code.
+  .remember/, .superpowers/, .playwright-mcp/, test-results/   Tool scratch. Ignore.
+  .env, .env.staging     Secrets. Never print, paste, or commit their values.
 
-- Sharp corners (`rounded-sm`/`rounded-md`), never large radii.
-- Modals use the shared `Overlay` (caps height at `max-h-[92dvh]`). Don't reuse
-  the `ht-bg` class on a modal card without `!min-h-0` — `ht-bg` carries
-  `min-height:100vh`, which overrides the cap and breaks modals on mobile.
-- New features get graceful fallbacks: camera blocked → photo upload; speech
-  unsupported → typed notes; AI call fails → manual fields. Never a dead end.
-- Quality bar: the developer is a QE — when adding parsers or merge logic,
-  list the test cases (especially idempotency and malformed input) in the PR
-  or alongside the code.
+toolbox/
+  NEXT.md                The single action for the next work session. Read it first.
+  MILESTONES.md          v1 plan, M0-M5. Decides whether a task belongs now.
+  PARKING.md             Parked ideas. New ideas go here, not into the session.
+  scripts/check-dist-for-keys.mjs   Fails if a build contains a secret key.
+  api-checks/            Playwright API checks against STAGING (host-guarded).
+```
 
-## Deferred / future ideas
+**Inside `App.jsx`, in file order:** Claude helpers (`callClaude`,
+`parseClaudeJson`) → `FONT_CSS` → icons → genres and tropes → cathedral progress
+engine → covers and spine color → progress (`ProgressEditor`) → `Spine`,
+cathedral pieces, `SpineShelf`, `ControlsBar`, `ArchiveSwitcher` → **`Hushthorn`
+(the root: all state, all data loading, every write)** → import parsers
+(`parseClippings`, `parseGoodreads`, `noteFingerprint`, `mergeImport`,
+`PairSection`) → `OracleSection` → username gate → Visage (avatar) → shared
+archives → auth pages → `AddBookModal` → cover crop/editor → `DetailPanel`,
+notes → `Overlay`.
 
-Most prototype-era features are shipped: spine shelf, per-format reading
-progress, snap-to-update, hybrid save, and the shared library (built as the
-**union model** — an archive merges members' personal libraries through two
-SECURITY DEFINER views; the old Phase-2 `book_personal_state`/`book_ownership`
-design was superseded and dropped). Genuinely unshipped:
+## 3. Commands
 
-- **Spine shelf at scale** — A–Z jump rail for author sort at 100+ books; row
-  virtualization for very large shelves. (The spine shelf itself, cover-sampled
-  spine colors, and the `spine_color` column are already shipped.)
+Run from `hushthorn/` in PowerShell. Use Chrome or Edge (voice notes and native
+barcode detection are Chromium-only).
 
-- **Cathedral spine shelf** — designed, NOT built yet. Plan:
-  `docs/superpowers/plans/2026-09-29-cathedral-spine-shelf.md` (read it first).
-  Art spec + v1 asset audit (which images are swaps vs overlays):
-  `docs/CATHEDRAL_ART_SPEC.md`. Runtime assets: `public/cathedral/*.webp`
-  (optimized; sources in `output/cathedral-v1/`, never load those at runtime).
-  Behavior reference: `prototype/cathedral/` (design-canvas files — port the
-  logic in their `class Component` script, not the markup). Spines view only;
-  Covers view unchanged; unlock progress is private per reader. Plan Task 8
-  covers the "Spine shelf at scale" item above.
+| Command | What it does |
+| --- | --- |
+| `npm install` | Install dependencies |
+| `npm run dev` | Dev server, port 5173, **production** Supabase via `.env` |
+| `npm run dev:staging` | Dev server, port 5174, **staging** Supabase via `.env.staging`. Shows a staging badge |
+| `npm test` | Runs every `tests/*.mjs` with `node --test` (6 files, all passing on 2026-11-13) |
+| `node tests/<file>.mjs` | Run one test file |
+| `npm run build` | Production build into `dist/` |
+| `node ..\toolbox\scripts\check-dist-for-keys.mjs` | After every build: must print `OK` |
+| `npm run preview` | Serve the built `dist/` |
+| `cd ..\toolbox\api-checks; npx playwright test` | API/RLS checks against staging only |
 
-- **The Visage (avatar creation)** — BUILT, shipped **dormant** behind the
-  `VISAGE_ENABLED` flag (`src/App.jsx`, currently `false`). Gallery + Atelier +
-  seal-to-Storage are implemented and integrated; the flag hides the editor UI
-  and forces the `❦` avatar placeholder everywhere. To launch: flip
-  `VISAGE_ENABLED = true`, drop the broad `co-members read avatars` policy,
-  redeploy, then verify a co-member `select traits from avatars` returns 0.
-  Spec with structural rules, schema, locked verbiage, and test cases:
-  `docs/VISAGE_SPEC.md`. Asset pipeline: `docs/VISAGE_PROMPT_TEMPLATES.md`
-  (painterly PNG path) + `docs/VISAGE_FIGMA_SETUP.md` (vector SVG path).
-  Reference UI: `prototype/hushthorn-visage.jsx` (placeholder art; the
-  architecture is the deliverable). Summary: two modes — Gallery (preset
-  portraits from Storage) and Atelier (layered builder) — across three forms:
-  **The Rose** (feminine) / **The Thorn** (masculine) / **The Vine**
-  (non-binary). Build Gallery (Phase 1) first; Atelier facial pickers
-  (eyes/nose/mouth) are implemented in the prototype but stay feature-flagged
-  off until Phase 3 art exists. Key rules: the 9-layer stack order is fixed;
-  form never restricts traits (shapes silhouette + curates presets only);
-  "Seal the Likeness" flattens to one PNG — upload to Storage BEFORE updating
-  the `avatars` row (extend the existing table: `form`, `traits jsonb`,
-  `image_path`, `preset_name`), and the app displays only the flattened image.
-  `avatars` RLS stays owner-only; if archive members should see each other's
-  avatars beside shared books, grant a narrow read on `image_path` only —
-  never `traits` (route it through the union-model views, same discipline as
-  the shared library).
+CI (`.github/workflows/ci.yml`, Node 22) runs `npm ci`, `npm test`,
+`npm run build` with placeholder Supabase vars, then greps the bundle for the
+text `Enter the Archive`. That last step exists because a build with missing
+Supabase vars prints "built" while shipping an empty app. If you rename that
+button, update the CI grep in the same commit.
 
-See also `docs/TODO.md` (richer signup + 2FA) and `README.md` "Known TODOs"
-(enable Supabase leaked-password protection before real users).
+Env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (required);
+`VITE_ENABLE_GOOGLE_AUTH` (`true` shows Google sign-in; off by default);
+`VITE_ANTHROPIC_API_KEY` (local dev only; it belongs in `.env.development.local`,
+or `.env.staging.local` for staging, never in `.env`, which builds also read;
+moving it is the open M0 task in `toolbox/NEXT.md`). Server-side on Vercel:
+`ANTHROPIC_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`. Anything named
+`VITE_*` is compiled into the public bundle.
 
-## Naming note
+## 4. Data model (verified against production, 2026-11-13)
 
-The prototype calls the heat rating **Spicy** with chili-pepper icons; the repo
-renamed it to **Smoulder** with candle icons (`smut` column unchanged). When
-porting prototype code, translate Spicy/chili → Smoulder/candle.
+Tables, all with RLS on: `books`, `notes`, `avatars`, `profiles`, `libraries`,
+`library_members`, `library_invites`, `invite_attempts`, `cathedral_progress`.
+
+- `books`: `id, user_id, title, author, year, cover_url, genres[], tropes[],
+  shelf ('owned'|'wishlist'), read, overall (int), smut (int), spine_color,
+  formats[], progress (jsonb), hidden_from_archives, created_at`.
+  `overall` is the Verdict rating, `smut` is the Smoulder rating.
+- `progress` shape: `{ print: {page, pages, chapters}, ebook: {percent, pages},
+  audio: {listened, hours} }`. Any part may be missing or malformed; read it
+  through `formatPercent` / `num` / `asPageCount`, never directly.
+- `notes`: `id, book_id, user_id, page, is_quote, text, is_voice, is_time, date`.
+- `avatars`: legacy cosmetic columns, Visage columns (`form, traits, image_path,
+  preset_name`), and the view prefs `pref_layout`, `pref_sort`.
+- Views: `archive_shelf`, `archive_reveal`, `archive_avatar`. Functions:
+  `create_library`, `accept_library_invite`, `username_available`,
+  `bump_cathedral_progress`, `my_library_ids`, `is_library_owner`.
+- Storage buckets: `covers`, `avatar-assets` (both public; path starts with the
+  user id).
+
+**There is no migrations folder.** Schema changes are applied through the
+Supabase MCP (`apply_migration`), to staging first, then proven with a query,
+then to production only after the owner says so.
+
+**In-memory book** (camelCase) is mapped by hand from the row (snake_case) in
+the root load effect, and written back through `FIELD_MAP`. Adding a book field
+means touching all of: the migration (both projects), the load mapping,
+`FIELD_MAP`, the `addBook` insert, the `importBooks` insert, and
+`loadArchiveUnion`. If co-members should see it, the views too.
+
+**Rules the code depends on:**
+
+1. **One book per title.** Books are unique by title, case-insensitive. A second
+   format is added to `formats`, never a second row. `mergeImport` and
+   `isTitleTaken` enforce it.
+2. **Imports are idempotent.** Notes dedupe by `noteFingerprint()`. Importing the
+   same file twice must write nothing.
+3. **Books are personal. A shared archive is a lens, not a table.** It merges
+   members' own rows by `title|author` key. Co-members' data is read ONLY
+   through the three `archive_*` views. `archive_shelf` has no ratings columns;
+   `archive_reveal` only returns marks for members who opted in
+   (`library_members.share_reading`); notes are never shared; `archive_avatar`
+   exposes `image_path` only.
+4. **Two book shapes share the UI.** Personal books have `id`. Archive entries
+   (UnionBooks) have `key`, `owners[]`, `reveals[]`, `mineBookId` (undefined if I
+   don't own it), `tropes` (merged) and `myTropes` (mine). Every write goes to
+   `mineBookId ?? id`. Check `b.owners` before assuming `b.id` exists.
+5. **Tropes are a closed list.** `normalizeTropes()` is the only way into
+   `tropes`; unknown strings are dropped. Removing a trope from `TROPE_GROUPS`
+   orphans stored data and needs a migration. Genres are open text, snapped to
+   known spellings by `canonicalGenre()`. Raw API subjects go through
+   `cleanGenres()` first.
+6. **Auto-read.** `updateBook` marks a book read when any format reaches 100%.
+   A patch that should not finish a book must not push progress to 100%.
+7. **Cathedral progress is private, monotonic, and silent about numbers.** It
+   counts finished books (read, not wishlist, deduped by title). `peak` never
+   goes down. `runCathedralCheck` runs once per mutation or once per import
+   batch, never per book in a loop. It is never read for another member.
+8. **Covers load only from allowlisted hosts** (`isAllowedCoverSrc`). A
+   co-member controls their `cover_url`, so do not bypass `CoverImage`.
+9. **AI calls** use model `claude-sonnet-4-6` (5 call sites), ask for strict
+   JSON, and parse with `parseClaudeJson()`. Every one has a manual fallback.
+   `SNAP_MAX_EDGE = 1568` in `snapImage.js` is tied to that model tier; do not
+   change the model without asking.
+
+## 5. Coding rules
+
+- Match the file you are in: functional components, hooks, the quote style of
+  the surrounding code, Tailwind classes inline, `ht-*` classes for anything
+  reusable.
+- New logic that can be wrong (parsing, merging, maths, validation, error
+  mapping) goes in `src/lib/` as pure functions with no DOM and no Supabase, and
+  is imported by both `App.jsx` and its test. Do not grow `App.jsx` with
+  testable logic. Do not split `App.jsx` into modules unless asked; that
+  refactor is deliberately parked (`toolbox/PARKING.md`).
+- **Every bug fix ships with a test in `tests/` that fails without the fix.**
+  Test files are plain `.mjs`, import `node:assert/strict`, import the real
+  module, and must exit non-zero on failure. List the cases: happy path, empty,
+  malformed, boundary, and run-it-twice.
+- Supabase calls never throw; they return `{ data, error }`. Check `error` on
+  every call, log it with a label (`console.error('addBook:', error.message)`),
+  and leave the UI in a usable state. `updateBook` returns `false` on a failed
+  write; callers that report success must check it.
+- Update local state only after the write succeeds, or roll back on failure when
+  a wrong value would mislead (see `setHidden`).
+- `React.StrictMode` runs effects twice in dev. Camera, scanner, timers and
+  subscriptions must be idempotent and cleaned up. State updaters stay pure.
+- No dead ends. Camera blocked → file upload. Speech unsupported → typing. AI
+  fails or returns junk → manual fields. Lookup finds nothing → enter by hand.
+- Never show raw server or URL text to the user. Map errors to fixed strings.
+- External input (API responses, AI output, imported files, another member's
+  rows) is untrusted: tolerate missing fields and wrong types.
+- Comments explain why, and name the bug they prevent. Keep that habit.
+- Git: commit style is `type(scope): what the user gets` (`feat`, `fix`, `docs`,
+  `ci`, `chore`). Line endings are LF (`.gitattributes`). Do not commit, push,
+  merge, or deploy unless asked. Never commit `.env*`, `output/`, `dist/`.
+
+## 6. Design rules
+
+Read `docs/BOOK_DESIGN.md` before changing any shelf, card, control or modal.
+
+- **Palette.** Background `#0c0714`. Blue-violet cards. Fuchsia/pink accents
+  (`#f0a6e0`, `#e267b0`, `#f59ad0`). Violet = print progress, indigo = ebook.
+  **Cyan is for audio only.** Antique gold/brass (`#e8c877`) only on cathedral
+  furniture and plaques. No browns or greens in UI chrome.
+- **Type.** Cinzel for headings, labels and buttons: uppercase, letter-spaced,
+  small (9-12px). EB Garamond for body and italics. The wordmark is an image
+  (`/brand/hushthorn-wordmark.webp`). No blackletter faces. (The class
+  `.ht-blackletter` is Rozha One despite its name.)
+- **Corners are sharp.** `rounded-sm` / `rounded-md`, or 2px in CSS. Existing
+  exceptions only: the page frame, the avatar arch, and round dots, halos and
+  avatars. Do not add `rounded-lg` or larger.
+- **Buttons.** Use `<EnamelButton variant=…>` for actions and `<NavTab>` for the
+  three arch tabs; shelf filters use `.ht-ribbon`. Do not hand-roll a new button
+  style. Art is decorative: the label is live HTML text, the element is a real
+  `<button>`.
+- **Art is never stretched.** Assets are 2x; size elements to the art's own
+  ratio or use the 9-slice pieces. Runtime art is optimized `.webp` in
+  `public/`. Sources stay in `output/`.
+- **Spines and cover cards are drawn in code** because they carry data (color,
+  rating gem, progress rails, wishlist ghost, owner count). Never bake a book
+  into an image. Decoration never replaces a data mark.
+- **Cathedral unlocks never show a number, a count, or a progress bar.** Only
+  the unlock name, its description, or a hint.
+- **Modals** use the shared `Overlay`. If you put `.ht-bg` on any other panel,
+  add `!min-h-0`: `.ht-bg` sets `min-height:100vh` and breaks the height cap.
+- **`FONT_CSS` is injected as-is.** Source order decides ties, so a
+  `prefers-reduced-motion` rule must come after the rule it overrides. The
+  cathedral backdrop relies on `z-index:-1` plus `isolation:isolate` on
+  `.ht-bg`; do not "tidy" either.
+- **Accessibility is part of the design.** Every animation has a
+  `prefers-reduced-motion` rule. Focus uses `:focus-visible` with the `#ffd5ee`
+  outline. Touch targets are at least 44px. Text over art needs measured
+  contrast (see the comments in `EnamelButton.css` and `NavTab.css`). Buttons
+  keep a `forced-colors` fallback.
+- **Layout must hold at 390px and 1280px** with no sideways scroll, and at 200%
+  zoom. Grid cards reserve space for title and genre rows so rows stay aligned.
+- **Voice.** Themed nouns and verbs: Inscribe (add), tome (book), marginalia
+  (notes), The Oracle (recommendations), Codex / The Binding (import), archive
+  (library), "Banish from the archive" (delete). Error messages are plain and
+  always end with what to do next.
+- **Ratings.** Verdict = 5 swords. Smoulder = 5 candles. Tapping the current
+  value clears it to 0. The prototypes and README say "Spicy" with chili
+  peppers; that name is dead. Translate on sight. (The sort key is still
+  `'spice'` and the column is still `smut`; leave both.)
+- `.impeccable/config.json` deliberately ignores four detector rules (palette,
+  gradient text, accent border, broken image). Do not "fix" those findings.
+
+## 7. Mistakes a weaker model makes here, and what to do instead
+
+1. **Trusting a doc over the code.** `README.md` says there is no persistence
+   and uses "Spicy". `CLAUDE.local.md`, `AGENTS.md` and several
+   `.claude/agents/*` files say the proxy is unbuilt, name an Express server on
+   port 3001, name the wrong model, and call Open Library primary.
+   `toolbox/PARKING.md` says the cathedral shelf is not built; it shipped.
+   `VISAGE_SPEC.md` points at two docs that do not exist. → Search the code and
+   believe it.
+2. **Reading `App.jsx` top to bottom, or quoting line numbers.** It is 8,300
+   lines and numbers move daily. → Search for the function name, read that
+   function and its callers, and cite names.
+3. **Testing on production.** `npm run dev` is the real library. → Anything that
+   creates, edits or deletes uses `npm run dev:staging` and the staging project.
+   Check for the staging badge before you click.
+4. **Leaking the Anthropic key.** A local `npm run build` with
+   `VITE_ANTHROPIC_API_KEY` in `.env` bakes the key into `dist/`. → Never add a
+   secret under a `VITE_` name. Run the key check after every build. Never
+   deploy a local `dist/`. Never echo `.env` contents.
+5. **Calling Anthropic some other way.** → Only `callClaude()`. Only
+   `parseClaudeJson()`. Always a manual fallback.
+6. **Breaking the privacy seam.** Selecting another user's `books`, `avatars` or
+   `cathedral_progress` rows directly, adding rating columns to
+   `archive_shelf`, or widening an RLS policy "to make it work". → Co-member
+   data only through the `archive_*` views. After any schema or policy change,
+   prove with two staging accounts that B cannot read A's private data.
+7. **Treating an archive entry like a personal book.** Using `b.id` on a
+   UnionBook writes with `undefined`. → Branch on `b.owners`; write to
+   `mineBookId ?? id`; after changing shelf, formats, title or author inside an
+   archive call `refreshArchiveUnion()`.
+8. **Creating duplicates.** Inserting a second row for a new format, or
+   bypassing `mergeImport`. → Merge into the existing title.
+9. **Writing free-text tropes**, or raw API subjects into genres. →
+   `normalizeTropes`, `cleanGenres`, `canonicalGenre`.
+10. **Adding a column in one place.** The field saves but vanishes on reload, or
+    works on staging and 400s on production. → Follow the full list in section 4.
+11. **A "test" that copies the function into the test file.**
+    `tests/import-dedupe-unit.mjs` and `tests/_progress_unit.mjs` do this for
+    code still inside `App.jsx`; they can pass while the app is broken. → Do not
+    add more. When you touch `mergeImport`, `noteFingerprint`, `formatPercent`
+    or `num`, move them to `src/lib/` and import them in both places.
+12. **Saying "tests pass" as proof a UI change works.** Unit tests cover six
+    small modules. → Open the app on staging, do the thing, and look, at 390px
+    and at desktop width. Say exactly what you checked and what you did not.
+13. **Design drift.** Rounded cards, cyan on non-audio UI, a new button style, a
+    progress bar for unlocks, stretched art, generic copy, an error with no next
+    step. → Section 6. Reuse existing `ht-*` classes before adding one.
+14. **Dropping motion or accessibility rules** when adding a class. → Add the
+    reduced-motion, focus-visible and forced-colors rules with it.
+15. **Camera and scanner bugs from StrictMode.** Two streams, two decoders, a
+    camera left on. → Guard against a second start; stop everything in cleanup.
+16. **A green build that ships nothing.** → Never remove the env placeholders or
+    the bundle grep in CI.
+17. **Scope creep.** Refactoring `App.jsx`, adding TypeScript or a linter,
+    renaming `smut`, launching the Visage, "cleaning up" vendored skill folders
+    or `output/`. → Do the task asked. Park the idea in `toolbox/PARKING.md`.
+18. **Flipping `VISAGE_ENABLED`.** The avatar builder is built but dormant.
+    Launch needs the broad `co-members read avatars` policy dropped first (it
+    still exists in production). → Leave it `false` unless asked; follow
+    `docs/VISAGE_SPEC.md` if asked.
+19. **Changing the database casually.** → Inspect first, staging first, additive
+    and reversible, verify with a query, run the security advisors, then ask
+    before production.
+20. **Agreeing to be agreeable.** → If the request has a flaw, say so first, with
+    the evidence, then do the best version of it.
+
+## 8. How to work in this repo
+
+- Start by reading `toolbox/NEXT.md` and `toolbox/MILESTONES.md`. Work on one
+  thing. If the task is outside the current milestone, say so before starting.
+- Before editing: read the function, its callers, the matching spec in `docs/`,
+  and `docs/CODE_REVIEW_TODO.md` / `docs/BUGS.md` for known issues in that area.
+- The working tree usually holds uncommitted work and untracked files that are
+  not yours. Do not stage, revert, reformat or delete them. Ask.
+- Keep changes small and reviewable. No drive-by reformatting; a whitespace-only
+  diff across `App.jsx` hides the real change.
+- Report plainly: what changed, how you verified it, what you could not verify,
+  what is still broken. No praise, no padding. If you are unsure, say so and
+  check rather than guess.
+- The subagents in `.claude/agents/` are useful for their roles but several
+  carry stale facts (see mistake 1). This file overrides them.
+
+## 9. Before you say a task is done
+
+Tick every line, or state which one you skipped and why.
+
+- [ ] I re-read my diff. It contains only what the task needs. No stray edits,
+      no debug logs, no secrets, no changes to files that were not mine.
+- [ ] `npm test` passes, and I looked at the output.
+- [ ] If I fixed a bug or added logic: there is a test in `tests/` that imports
+      the real module and fails without my change.
+- [ ] `npm run build` succeeds, and `check-dist-for-keys.mjs` prints `OK`.
+- [ ] I ran it on **staging** in Chrome and did the actual user action. For UI:
+      checked at 390px and desktop, with keyboard focus, and with no console
+      errors.
+- [ ] Failure paths behave: bad input, AI or network failure, permission denied.
+      Each ends somewhere usable with a plain next step.
+- [ ] If data is involved: reload keeps the change; doing it twice changes
+      nothing the second time; no duplicate title was created.
+- [ ] If it touches shared archives, avatars or RLS: a second staging account
+      cannot see anything private.
+- [ ] If the schema changed: applied to staging, verified by query, advisors
+      clean, and production either done with approval or listed as pending.
+- [ ] Design rules in section 6 hold. No new radius, colour, font or button style.
+- [ ] Docs match: this file, the relevant spec, `docs/CODE_REVIEW_TODO.md`,
+      `docs/BUGS.md`, and the CI grep if sign-in copy changed.
+- [ ] My report says what I verified, what I did not, and what is left.

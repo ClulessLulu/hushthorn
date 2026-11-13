@@ -1,10 +1,12 @@
 import EnamelButton from './components/EnamelButton';
 import NavTab from './components/NavTab';
+import SpineAppearance, { useShelfSpine } from './components/SpineAppearance';
 import { useState, useRef, useEffect, Fragment } from "react";
 import Papa from "papaparse";
 import { supabase } from './lib/supabase';
 import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySimpleSnap, planAudioSnap, checkAudioSnap, posInt } from './lib/progressSnap';
 import { prepareSnapImage } from './lib/snapImage';
+import { hashStr, asPageCount, spineWidthOf, layoutShelfRows } from './lib/shelfLayout';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { PASSWORD_RULE_MSG, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl } from './lib/authErrors';
@@ -1150,12 +1152,6 @@ function CoverImage({ src, alt, className, fallback }) {
    Supabase data model (lazy backfill via onPersist).
 ─────────────────────────────────────────────────────────────── */
 
-function hashStr(s) {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h;
-}
-
 const GENRE_SPINE_COLORS = [
   [/vampire|blood/i, "#5b1f3f"],
   [/fae|fairy/i, "#33306e"],
@@ -1253,11 +1249,6 @@ async function uploadCoverPhoto(session, dataUrl) {
     return publicUrl;
   } catch { return null; }
 }
-
-// Valid page counts are positive integers; anything else (0, negative, float,
-// string, null, undefined) coerces to null. Shared by the add/scan paths and
-// the lazy backfill.
-const asPageCount = (v) => (typeof v === "number" && Number.isInteger(v) && v > 0) ? v : null;
 
 // Lazy page-count resolver for existing print books that have no page count.
 // Primary: Open Library search.json (no quota). Fallback: Google Books.
@@ -1954,13 +1945,8 @@ const SPINE_GLOW = {
   audio: "rgba(34,211,238,0.95)",
 };
 
-// Rendered width of a spine, 17-28px, from its title+author hash. The shelf
-// layout packs rows with this same number, so rows fill the shelf exactly.
-function spineWidthOf(book) {
-  return 17 + (hashStr((book.author || "") + (book.title || "")) % 12);
-}
-
 function Spine({ book, onOpen, dimmed, onPersist }) {
+  const { photo: actualSpine } = useShelfSpine(book.owners ? null : book.id);
   const color = useSpineColor(book, onPersist);
   const h = 122 + (hashStr(book.title || "") % 48);
   const w = spineWidthOf(book);
@@ -1995,13 +1981,15 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
     <button
       onClick={onOpen}
       title={tip}
+      aria-label={tip}
       className={`relative flex flex-col items-center justify-between rounded-t-[3px] rounded-b-[2px] transition-all duration-200 hover:-translate-y-2 hover:-rotate-3 hover:z-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${
         dimmed ? "opacity-20" : wish ? "opacity-60" : ""
       }`}
       style={{
         width: w,
         height: h,
-        background: `linear-gradient(90deg, rgba(0,0,0,0.35), transparent 30%, transparent 70%, rgba(0,0,0,0.45)), ${color}`,
+        background: actualSpine ? `url("${actualSpine}") center / 100% 100% no-repeat, ${color}`
+          : `linear-gradient(90deg, rgba(0,0,0,0.35), transparent 30%, transparent 70%, rgba(0,0,0,0.45)), ${color}`,
         boxShadow: book.read
           ? "1px 0 2px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(232,200,119,0.55)"
           : "1px 0 2px rgba(0,0,0,0.6)",
@@ -2058,7 +2046,7 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
         <span className="mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0 border border-cyan-300/90 bg-transparent" />
       )}
       <span
-        className="ht-display text-[8px] leading-none text-pink-50/85 overflow-hidden"
+        className={actualSpine ? "invisible" : "ht-display text-[8px] leading-none text-pink-50/85 overflow-hidden"}
         style={{ writingMode: "vertical-rl", maxHeight: h - 44, letterSpacing: "0.06em" }}
       >
         {(book.title || "").length > 24 ? book.title.slice(0, 23) + "…" : book.title}
@@ -2072,7 +2060,6 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
   );
 }
 
-const SPINE_GAP = 5;
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
 // One bookcase = up to 3 shelf rows, framed in painted cathedral art (Task 4).
@@ -2301,42 +2288,6 @@ function CathedralCuriosities({ peak, open, onToggle }) {
       )}
     </div>
   );
-}
-
-// Rows are packed by real width, so a shelf fills edge to edge at any screen
-// size. Decorations take their own width: the rose urn ends shelf 2 (or the
-// last shelf when the library is shorter) and the thorn tree ends the very
-// last shelf, i.e. the apse of the last bookcase.
-const URN_W = 66, TREE_W = 92; // match .ht-deco-urn / .ht-deco-tree
-function layoutShelfRows(books, innerW, peak, widthOf = spineWidthOf) {
-  const W = Math.max(innerW, 120);
-  const wOf = (it) => (it.deco === "urn" ? URN_W : it.deco === "tree" ? TREE_W : widthOf(it));
-  const used = (row) => row.reduce((n, it, i) => n + wOf(it) + (i ? SPINE_GAP : 0), 0);
-  const withUrn = peak >= 10;
-  const rows = [];
-  let row = [], urnPlaced = false;
-  const flush = () => {
-    if (withUrn && !urnPlaced && rows.length === 1) { row.push({ deco: "urn" }); urnPlaced = true; }
-    rows.push(row);
-    row = [];
-  };
-  for (const b of books) {
-    const reserve = withUrn && !urnPlaced && rows.length === 1 ? URN_W + SPINE_GAP : 0;
-    if (row.length && used(row) + SPINE_GAP + wOf(b) > W - reserve) flush();
-    row.push(b);
-  }
-  if (row.length) flush();
-  if (!rows.length) rows.push([]);
-  const last = () => rows[rows.length - 1];
-  if (withUrn && !urnPlaced) {
-    if (last().length && used(last()) + SPINE_GAP + URN_W > W) rows.push([]);
-    last().push({ deco: "urn" });
-  }
-  if (peak >= 21) {
-    if (last().length && used(last()) + SPINE_GAP + TREE_W > W) rows.push([]);
-    last().push({ deco: "tree" });
-  }
-  return rows;
 }
 
 const ROMAN = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
@@ -3747,7 +3698,7 @@ export default function Hushthorn() {
       {/* Oracle / Codex / Inscribe first, then the shelf filters */}
       <nav className="max-w-5xl mx-auto px-5 flex flex-wrap items-end justify-center gap-2 pb-4" aria-label="Sections">
         <NavTab active={view === "oracle"} onClick={() => setView("oracle")}>Oracle</NavTab>
-        <EnamelButton onClick={() => setAddOpen(true)}>+ Inscribe</EnamelButton>
+        <NavTab className="ht-inscribe-arch" aria-expanded={addOpen} aria-haspopup="dialog" onClick={() => setAddOpen(true)}>+ Inscribe</NavTab>
         <NavTab active={view === "pair"} onClick={() => setView("pair")}>Codex</NavTab>
       </nav>
 
@@ -5781,6 +5732,25 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
 const AUTH_INPUT ="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2.5 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400 text-purple-100";
 const AUTH_LBL = "block ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1.5";
 
+// Password field with a Show/Hide toggle so a typo can be spotted before submitting.
+function PasswordInput(props) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <input {...props} type={show ? 'text' : 'password'} className={AUTH_INPUT + ' pr-16'} />
+      <button type="button" onClick={() => setShow(s => !s)} aria-pressed={show}
+        aria-label={show ? 'Hide password' : 'Show password'}
+        className="absolute right-0 top-0 h-full min-h-[44px] min-w-[44px] flex items-center justify-center text-purple-600 hover:text-pink-500">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+          <circle cx="12" cy="12" r="3" />
+          {show && <path d="M4 4l16 16" />}
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 // Feature flag: Google sign-in stays hidden until the Google provider is
 // enabled in that environment's Supabase project (Authentication > Providers).
 // Opt-in: set VITE_ENABLE_GOOGLE_AUTH=true in the Vercel env for the target
@@ -5830,13 +5800,13 @@ function ResetPasswordPage({ onDone }) {
         <form onSubmit={submit} className="space-y-3 text-left">
           <div>
             <label htmlFor="reset-password" className={AUTH_LBL}>New password</label>
-            <input id="reset-password" type="password" autoComplete="new-password" value={password}
-              onChange={e => setPassword(e.target.value)} required placeholder="••••••••••••" className={AUTH_INPUT} />
+            <PasswordInput id="reset-password" autoComplete="new-password" value={password}
+              onChange={e => setPassword(e.target.value)} required placeholder="••••••••••••" />
           </div>
           <div>
             <label htmlFor="reset-confirm" className={AUTH_LBL}>Confirm new password</label>
-            <input id="reset-confirm" type="password" autoComplete="new-password" value={confirm}
-              onChange={e => setConfirm(e.target.value)} required placeholder="••••••••••••" className={AUTH_INPUT} />
+            <PasswordInput id="reset-confirm" autoComplete="new-password" value={confirm}
+              onChange={e => setConfirm(e.target.value)} required placeholder="••••••••••••" />
           </div>
           {error && <p className="text-sm text-pink-300 text-center py-1">{error}</p>}
           <div className="ht-rule my-1" aria-hidden="true" />
@@ -6001,8 +5971,8 @@ function AuthPage({ linkError = null }) {
           {mode !== 'forgot' && (
           <div>
             <label htmlFor="auth-password" className={AUTH_LBL}>Password</label>
-            <input id="auth-password" type="password" value={password} onChange={e => setPassword(e.target.value)}
-              required placeholder="••••••••••••" className={AUTH_INPUT} />
+            <PasswordInput id="auth-password" value={password} onChange={e => setPassword(e.target.value)}
+              required placeholder="••••••••••••" />
             {mode === 'signup' && (
               <p className="text-[11px] italic mt-1" style={{ color: '#c084fc' }}>
                 Use upper and lower case letters, a number and a symbol.
@@ -6019,8 +5989,8 @@ function AuthPage({ linkError = null }) {
           {mode === 'signup' && (
             <div>
               <label htmlFor="auth-confirm" className={AUTH_LBL}>Confirm password</label>
-              <input id="auth-confirm" type="password" required value={confirm} onChange={e => setConfirm(e.target.value)}
-                placeholder="••••••••••••" className={AUTH_INPUT} />
+              <PasswordInput id="auth-confirm" required value={confirm} onChange={e => setConfirm(e.target.value)}
+                placeholder="••••••••••••" />
             </div>
           )}
 
@@ -8040,6 +8010,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
       <div className="flex flex-col sm:flex-row gap-5">
         <div className="sm:w-52 flex-shrink-0">
           <CoverEditor book={book} onUpdate={onUpdate} session={session} />
+          <SpineAppearance key={book.id} id={book.id} />
           <div className="mt-3 flex flex-col gap-1.5">
             <ToggleRow
               label={book.shelf === "owned" ? "On the Owned shelf" : "On the Wishlist"}
