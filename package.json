@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "dev:staging": "vite --mode staging --port 5174",
-    "test": "node --test \"tests/*.mjs\""
+    "test": "node --test \"tests/*.mjs\"",
+    "test:e2e": "playwright test",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",
@@ -19,6 +21,7 @@
     "react-image-crop": "^11.1.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@vitejs/plugin-react": "^6.0.2",
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",
