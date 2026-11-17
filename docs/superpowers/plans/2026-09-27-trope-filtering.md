@@ -1,5 +1,11 @@
 # Trope Tagging & Filtering — Implementation Plan
 
+> **Status (updated 2026-11-17): SHIPPED and merged to `master`.** All five tasks were built 2026-09-27/28
+> (feature commits `a6010c1` … `a625ae7`, plus follow-up fixes `a44524b`, `6f5b86a`, `92306a6`, `b243ca9`,
+> `9af1796`). The body below is the original build plan, kept as a historical record: it is not pending work, and
+> where it disagrees with `src/App.jsx` the code wins. Line numbers (`~NNNN`) are long out of date; search by symbol.
+> Corrections to facts that have since changed are marked "(updated 2026-11-17: …)".
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Tag books with romantasy tropes from a controlled vocabulary — Claude suggests, the reader confirms — and let the library be filtered by them.
@@ -13,6 +19,9 @@
 ## Verification model — READ THIS FIRST
 
 **No test runner exists** (no `npm test`, no Jest/Vitest). Do not add one; do not write `*.test.js`.
+*(updated 2026-11-17: `npm test` now exists and runs `node --test "tests/*.mjs"` using Node's built-in runner;
+Playwright UI tests live in `tests/e2e`. Still no Jest/Vitest. `normalizeTropes` and the other trope helpers still
+live in `src/App.jsx`, so no unit test imports them.)*
 Verification per task is:
 
 1. `npm run build` — must pass. Paste real output.
@@ -21,6 +30,8 @@ Verification per task is:
 ⚠️ **Use port 5174 (staging) for all testing. NEVER 5173 — that is production with the owner's real
 80-book library.** Staging shows an amber "Staging · throwaway data" bar at the bottom; if you don't see it,
 you are on production, so stop. Staging already has the `tropes` column; production does NOT (deliberately).
+*(updated 2026-11-17: production now has it too. `books.tropes` is `text[] not null default '{}'` and
+`archive_shelf` exposes `tropes` on both `hushthorn` and `hushthorn-staging`, confirmed by `information_schema`.)*
 
 Seeded staging logins: `qa.alpha@hushthorn.local` / `qa.beta@hushthorn.local`, password in `.env.staging.local` (gitignored, never commit it).
 
@@ -47,6 +58,9 @@ If you cannot drive a browser, say so plainly and list what is unverified. Never
 - `TROPE_GROUPS` — `{ [groupName: string]: string[] }`
 - `TROPES` — flat `string[]` of every canonical trope
 - `normalizeTropes(list, max = 6) => string[]` — canonicalises, dedupes, drops off-vocabulary values, caps
+  *(updated 2026-11-17: the default cap is now `TROPE_MAX = 12` (what a book may carry); the AI suggestion cap
+  is a separate `TROPE_SUGGEST_MAX = 6`, passed explicitly (commits `a44524b`, `6f5b86a`). Vocabulary also gained
+  "Dual POV" under Plot & Structure (`a625ae7`).)*
 - `book.tropes` — always a `string[]` on every book object in state
 
 - [ ] **Step 1: Add the vocabulary and validator**
@@ -149,6 +163,9 @@ Then find `loadArchiveUnion` and do the same for archive entries: wherever it ma
 `genres`, map `tropes: r.tropes || []` alongside it (the `archive_shelf` view already returns the column).
 If the union merges two readers' copies of one title, union their trope arrays through
 `normalizeTropes([...a, ...b])` so a merged card shows every trope either reader tagged.
+*(updated 2026-11-17: archive entries also carry `myTropes` (the reader's own), and the archive picker must write
+only to the reader's own row; the original plan caused co-members' tropes to be written onto it, fixed in
+`92306a6` and `b243ca9`.)*
 
 - [ ] **Step 5: Verify**
 
@@ -558,6 +575,12 @@ In `AvatarPage`, add state and the runner:
 `AvatarPage` does not currently receive an update function — add `onUpdateBook` to its props and pass
 `updateBook` from `Hushthorn` at the `<AvatarPage …>` call site.
 
+*(updated 2026-11-17: the shipped `runBulkTropes` differs from the sketch above. `updateBook` resolves `false` on
+a failed write instead of throwing, so the `try/catch` here would have reported failed writes as tagged; the code
+checks the returned `ok` and keeps a `failed` list. It also freezes the queue (`const queue = untagged`) so the
+"N of M" readout does not count down, and a module-level `bulkTropeRunInFlight` guard blocks a second run across
+`AvatarPage` remounts.)*
+
 - [ ] **Step 3: Render the control and the summary**
 
 Add above the Reading Chronicle heading:
@@ -750,6 +773,9 @@ Then reload and confirm the chips read cleanly, and that no card shows `Fiction,
 
 **Do NOT run this against production** — promoting it is a separate, explicitly-approved step.
 
+*(updated 2026-11-17: shipped as `99cb039`. The final `GENRE_GENERIC` in `src/App.jsx` has no `literary`
+entry, unlike the sketch below. Whether the one-time row rewrite was ever run on production was not checked.)*
+
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -765,3 +791,6 @@ All five tasks committed, `npm run build` passing, and the spec's QE checklist
 (`docs/superpowers/specs/2026-09-20-trope-filtering-design.md` §9) walked on **staging**. Promotion to
 production — the `tropes` migration plus the genre cleanup — is a separate step requiring the owner's
 explicit go-ahead.
+
+*(updated 2026-11-17: the `tropes` column and the `archive_shelf` `tropes` column are now present in production,
+so the schema half of promotion is done. The spec §9 checklist is not recorded as walked anywhere in `tests/`.)*
