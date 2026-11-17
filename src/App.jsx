@@ -3747,7 +3747,7 @@ export default function Hushthorn() {
       {/* Oracle / Codex / Inscribe first, then the shelf filters */}
       <nav className="max-w-5xl mx-auto px-5 flex flex-wrap items-end justify-center gap-2 pb-4" aria-label="Sections">
         <NavTab active={view === "oracle"} onClick={() => setView("oracle")}>Oracle</NavTab>
-        <EnamelButton onClick={() => setAddOpen(true)}>+ Inscribe</EnamelButton>
+        <NavTab className="ht-inscribe-arch" aria-expanded={addOpen} aria-haspopup="dialog" onClick={() => setAddOpen(true)}>+ Inscribe</NavTab>
         <NavTab active={view === "pair"} onClick={() => setView("pair")}>Codex</NavTab>
       </nav>
 

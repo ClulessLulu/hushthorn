@@ -15,12 +15,19 @@
   transition: filter 140ms ease, transform 140ms ease;
 }
 .ht-navtab--on { --tab-art: url('/brand/buttons/tab-selected.webp'); filter: none; }
+.ht-inscribe-arch {
+  width: 132px; height: 154px;
+}
+.ht-inscribe-arch[aria-expanded=true], .ht-inscribe-arch:active {
+  --tab-art: url('/brand/buttons/tab-selected.webp');
+}
+@media (max-width: 400px) {
+  .ht-navtab { width: min(25vw, 98px); height: min(25vw, 98px); }
+  .ht-inscribe-arch { width: min(30vw, 116px); height: min(36vw, 140px); }
+}
 .ht-navtab__label {
   position: absolute;
-  /* the words share a line with + INSCRIBE: that button is 50px tall with its text
-     centred, so its text centre is 25px above the bottom edge; the row is
-     bottom-aligned, so the label centre sits 25px above this tab's bottom.
-     Horizontally on the art's centre column (95.5 of 192 = 49.7%). */
+  /* Align all three labels across the lower glass panes. */
   left: 49.7%; top: calc(100% - 24.9px);
   transform: translate(-50%, -50%);
   display: inline-flex; align-items: center; gap: 4px;
