@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  PASSWORD_RULE_MSG, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl,
+  PASSWORD_RULE_MSG, passwordProblem, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl,
 } from "../src/lib/authErrors.js";
 
 const RATE = "Too many attempts. Wait a few minutes, then try again.";
@@ -13,9 +13,34 @@ const SAME = "Choose a password you have not used before, then try again.";
 const EXPIRED = "That reset link has expired. Go back and request a new one.";
 const RESET_GENERIC = "The archive refused that password. Try a different one.";
 
-test("sign-up and reset share one password-rules message (text unchanged)", () => {
+test("sign-up and reset share one password-rules message, and it names the 8-character minimum", () => {
   assert.equal(PASSWORD_RULE_MSG,
-    "Password needs a lowercase letter, an uppercase letter, a number and a symbol (like !@#$). Add what is missing and try again.");
+    "Password needs at least 8 characters, with a lowercase letter, an uppercase letter, a number and a symbol (like !@#$). Add what is missing and try again.");
+});
+
+// ── password checked before sending (sign-up and reset) ──
+test("password check: a strong password passes, including exactly 8 characters", () => {
+  assert.equal(passwordProblem("S@chi1xy"), null);
+  assert.equal(passwordProblem("Thorn&Rose2026"), null);
+});
+test("password check: too short says so, even when every kind of character is there (the reported bug)", () => {
+  assert.equal(passwordProblem("S@chi1"), "Password needs at least 8 characters. Add what is missing and try again.");
+  assert.equal(passwordProblem("S@chi1x"), "Password needs at least 8 characters. Add what is missing and try again."); // 7: boundary
+});
+test("password check: names each missing kind of character", () => {
+  assert.equal(passwordProblem("S@CHI1XY"), "Password needs a lowercase letter. Add what is missing and try again.");
+  assert.equal(passwordProblem("s@chi1xy"), "Password needs an uppercase letter. Add what is missing and try again.");
+  assert.equal(passwordProblem("S@chiXyz"), "Password needs a number. Add what is missing and try again.");
+  assert.equal(passwordProblem("Schi1xyz"), "Password needs a symbol (like !@#$). Add what is missing and try again.");
+  assert.equal(passwordProblem("short"),
+    "Password needs at least 8 characters, an uppercase letter, a number and a symbol (like !@#$). Add what is missing and try again.");
+});
+test("password check: empty or not a string lists everything, and never throws", () => {
+  const all = "Password needs at least 8 characters, a lowercase letter, an uppercase letter, a number and a symbol (like !@#$). Add what is missing and try again.";
+  for (const v of ["", null, undefined, 12345678, {}]) assert.equal(passwordProblem(v), all);
+});
+test("password check: same answer when run twice", () => {
+  assert.equal(passwordProblem("S@chi1"), passwordProblem("S@chi1"));
 });
 
 // ── request a reset link ──

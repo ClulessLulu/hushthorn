@@ -5,9 +5,30 @@
    able to put its own words on the sign-in page.
 ──────────────────────────────────────────────────────────────── */
 
-// Prod enforces lower + upper + digit + symbol (Supabase auth password policy).
+// Prod enforces at least 8 characters with lower + upper + digit + symbol
+// (Supabase auth password policy). Shown when the server rejects a password.
 export const PASSWORD_RULE_MSG =
-  'Password needs a lowercase letter, an uppercase letter, a number and a symbol (like !@#$). Add what is missing and try again.';
+  'Password needs at least 8 characters, with a lowercase letter, an uppercase letter, a number and a symbol (like !@#$). Add what is missing and try again.';
+
+// Checked in the browser before sign-up or reset is sent, so the message names
+// exactly what is missing. Every rejection used to say "missing characters",
+// even for a 6-character password that had all four kinds (the server said
+// "at least 8 characters").
+// ponytail: mirrors the Supabase policy by hand; if the dashboard setting
+// changes, change PASSWORD_MIN too. The server still has the final say.
+export const PASSWORD_MIN = 8;
+export function passwordProblem(pw) {
+  const s = typeof pw === 'string' ? pw : '';
+  const missing = [];
+  if (s.length < PASSWORD_MIN) missing.push(`at least ${PASSWORD_MIN} characters`);
+  if (!/[a-z]/.test(s)) missing.push('a lowercase letter');
+  if (!/[A-Z]/.test(s)) missing.push('an uppercase letter');
+  if (!/[0-9]/.test(s)) missing.push('a number');
+  if (!/[^A-Za-z0-9]/.test(s)) missing.push('a symbol (like !@#$)');
+  if (!missing.length) return null;
+  const list = missing.length === 1 ? missing[0] : `${missing.slice(0, -1).join(', ')} and ${missing.at(-1)}`;
+  return `Password needs ${list}. Add what is missing and try again.`;
+}
 
 const NETWORK_MSG = 'The archive could not be reached. Check your connection and try again.';
 

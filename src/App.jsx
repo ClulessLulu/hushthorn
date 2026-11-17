@@ -9,7 +9,7 @@ import { hashStr, asPageCount, spineWidthOf, layoutShelfRows } from './lib/shelf
 import { mergeImport } from './lib/importMerge';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
-import { PASSWORD_RULE_MSG, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl } from './lib/authErrors';
+import { PASSWORD_RULE_MSG, passwordProblem, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl } from './lib/authErrors';
 
 /* ── Claude API configuration ───────────────────────────────
    Production: NO client key. callClaude() posts to the same-origin
@@ -5675,6 +5675,8 @@ function ResetPasswordPage({ onDone }) {
   const submit = async (e) => {
     e.preventDefault();
     setError('');
+    const problem = passwordProblem(password);
+    if (problem) { setError(problem); return; }
     if (password !== confirm) { setError('Passwords do not match.'); return; }
     setLoading(true);
     try {
@@ -5700,7 +5702,7 @@ function ResetPasswordPage({ onDone }) {
         </h1>
         <h2 className="ht-display text-xs uppercase tracking-widest text-pink-200 mt-4 mb-1">Choose a new password</h2>
         <p className="text-[13px] italic mb-5" style={{ color: '#c084fc' }}>
-          Pick something you will keep. Use upper and lower case letters, a number and a symbol.
+          Pick something you will keep. Use at least 8 characters, with upper and lower case letters, a number and a symbol.
         </p>
         <form onSubmit={submit} className="space-y-3 text-left">
           <div>
@@ -5760,6 +5762,8 @@ function AuthPage({ linkError = null }) {
       }
       return;
     }
+    const problem = mode === 'signup' && passwordProblem(password);
+    if (problem) { setError(problem); return; }
     if (mode === 'signup' && password !== confirm) {
       setError('Passwords do not match.');
       return;
@@ -5801,7 +5805,8 @@ function AuthPage({ linkError = null }) {
       } else if (/invalid login credentials|invalid credentials/i.test(err.message || '')) {
         setError('That email or password is incorrect. Try again.');
       } else if (/password/i.test(err.message || '') || err.code === 'weak_password') {
-        // Prod enforces lower + upper + digit + symbol (Supabase auth policy).
+        // Prod enforces 8+ characters with lower + upper + digit + symbol (Supabase
+        // auth policy). passwordProblem catches most of it before sending.
         setError(PASSWORD_RULE_MSG);
       } else if (/rate limit|too many/i.test(err.message || '') || err.status === 429) {
         setError('Too many attempts. Wait a few minutes, then try again.');
@@ -5880,7 +5885,7 @@ function AuthPage({ linkError = null }) {
               required placeholder="••••••••••••" />
             {mode === 'signup' && (
               <p className="text-[11px] italic mt-1" style={{ color: '#c084fc' }}>
-                Use upper and lower case letters, a number and a symbol.
+                Use at least 8 characters, with upper and lower case letters, a number and a symbol.
               </p>
             )}
             {mode === 'login' && (
