@@ -70,6 +70,7 @@ hushthorn/
       shelfLayout.js     Spine widths and shelf row packing.
       importMerge.js     noteFingerprint and mergeImport (import and batch-add merge).
       authErrors.js      Auth error text and emailed-link error parsing.
+      oracle.js          The Oracle's prompt, reply cleaning, and already-suggested titles.
   api/claude.js          Vercel serverless proxy to Anthropic (session required).
   tests/
     *.mjs                Unit tests. These are what `npm test` runs.
@@ -127,7 +128,7 @@ barcode detection are Chromium-only).
 | `npm install` | Install dependencies |
 | `npm run dev` | Dev server, port 5173, **production** Supabase via `.env` |
 | `npm run dev:staging` | Dev server, port 5174, **staging** Supabase via `.env.staging`. Shows a staging badge |
-| `npm test` | Runs every `tests/*.mjs` with `node --test` (6 files, all passing on 2026-11-13) |
+| `npm test` | Runs every `tests/*.mjs` with `node --test` (7 files, all passing on 2026-11-17) |
 | `node tests/<file>.mjs` | Run one test file |
 | `npm run build` | Production build into `dist/` |
 | `node ..\toolbox\scripts\check-dist-for-keys.mjs` | After every build: must print `OK` |

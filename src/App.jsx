@@ -7,6 +7,7 @@ import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySim
 import { prepareSnapImage } from './lib/snapImage';
 import { hashStr, asPageCount, spineWidthOf, layoutShelfRows } from './lib/shelfLayout';
 import { mergeImport } from './lib/importMerge';
+import { buildOraclePrompt, cleanRecs, rememberSeen } from './lib/oracle';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { PASSWORD_RULE_MSG, passwordProblem, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl } from './lib/authErrors';
@@ -4193,6 +4194,7 @@ function PairSection({ books, onImport }) {
 
 /* ── the oracle: AI recommendations ────────────────────────── */
 
+const ORACLE_SEEN_KEY = "ht-oracle-seen";
 function OracleSection({ books, onAddToWishlist }) {
   const [recs, setRecs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -4202,6 +4204,14 @@ function OracleSection({ books, onAddToWishlist }) {
   // `disabled` only applies after a re-render, so a same-instant double press
   // sent two paid AI calls; the ref blocks the second one immediately.
   const busyRef = useRef(false);
+  const runRef = useRef(0);
+  // Titles already offered, remembered in this browser so a later visit is fresh too.
+  // ponytail: one list per browser, not per account; key it by user id if shared devices matter.
+  const seenRef = useRef(null);
+  if (seenRef.current === null) {
+    try { seenRef.current = JSON.parse(localStorage.getItem(ORACLE_SEEN_KEY) || "[]"); } catch { seenRef.current = []; }
+    if (!Array.isArray(seenRef.current)) seenRef.current = [];
+  }
 
   const ownedTitles = new Set(books.map((b) => b.title.toLowerCase()));
 
@@ -4221,53 +4231,23 @@ function OracleSection({ books, onAddToWishlist }) {
     setError("");
     setAddError("");
     setRecs([]);
+    const run = ++runRef.current;
+    let shown = [];
     try {
-      const library = books.map((b) => ({
-        title: b.title,
-        author: b.author,
-        genres: b.genres || [],
-        shelf: b.shelf,
-        read: b.read,
-        verdict: b.overall || null,
-        spicy: b.smut || null,
-      }));
-
-      const prompt = `You are the recommendation oracle for Hushthorn, a gothic book-cataloging app focused on romantasy and spicy reads.
-
-Here is the user's current library as JSON. "shelf" is owned or wishlist, "verdict" is their 1-5 overall rating, "spicy" is their 1-5 spice rating (null means unrated):
-${JSON.stringify(library)}
-
-Infer the genres, vibes, and spice preferences from this library, weighting highly-rated and wishlisted books most. Recommend exactly 10 real, published books that are NOT already in the library, best fit first.
-
-Respond with ONLY a valid JSON array and nothing else — no preamble, no markdown fences. Each element must have exactly these keys:
-"title" (string), "author" (string), "genre" (short string, e.g. "Vampire romantasy"), "reason" (one sentence explaining why it fits THIS library — reference their taste specifically), "spice" (integer 1-5, your estimate of its spice level).`;
-
+      // Prompt and cleaning live in src/lib/oracle.js (tested). `seen` makes
+      // "Consult again" ask for fresh picks instead of the same list.
       const data = await callClaude({
           model: "claude-sonnet-4-6",
-          max_tokens: 1800,
-          messages: [{ role: "user", content: prompt }],
+          max_tokens: 1200,
+          messages: [{ role: "user", content: buildOraclePrompt(books, seenRef.current) }],
       });
-      // AI output is untrusted: an entry with no title (null, {}) rendered as a blank card.
-      const raw = parseClaudeJson(data, "[");
-      const parsed = Array.isArray(raw) ? raw.filter((r) => r && typeof r.title === "string" && r.title.trim()) : [];
-      if (parsed.length === 0) throw new Error("empty");
-
-      // fetch covers from Open Library, best-effort per book
-      const withCovers = await Promise.all(
-        parsed.map(async (r) => {
-          try {
-            const q = await fetch(
-              `https://openlibrary.org/search.json?title=${encodeURIComponent(r.title)}&author=${encodeURIComponent(r.author)}&limit=1&fields=cover_i`
-            );
-            const d = await q.json();
-            const cover_i = d.docs?.[0]?.cover_i;
-            return { ...r, coverUrl: cover_i ? `https://covers.openlibrary.org/b/id/${cover_i}-M.jpg` : "" };
-          } catch {
-            return { ...r, coverUrl: "" };
-          }
-        })
-      );
-      setRecs(withCovers);
+      shown = cleanRecs(parseClaudeJson(data, "["));
+      if (shown.length === 0) throw new Error("empty");
+      seenRef.current = rememberSeen(seenRef.current, shown);
+      try { localStorage.setItem(ORACLE_SEEN_KEY, JSON.stringify(seenRef.current)); } catch { /* private mode: in-memory only */ }
+      // Show the list now; covers fill in per card. It used to wait for the
+      // slowest of ten Open Library lookups before showing anything.
+      setRecs(shown.map((r) => ({ ...r, coverUrl: "" })));
       setConsulted(true);
     } catch {
       setError("The Oracle's vision clouded over. Try consulting again.");
@@ -4275,6 +4255,17 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
       setLoading(false);
       busyRef.current = false;
     }
+    shown.forEach(async (r) => {
+      try {
+        const q = await fetch(
+          `https://openlibrary.org/search.json?title=${encodeURIComponent(r.title)}&author=${encodeURIComponent(r.author)}&limit=1&fields=cover_i`
+        );
+        const cover_i = (await q.json()).docs?.[0]?.cover_i;
+        // A newer consult replaced the list: don't paint covers onto it.
+        if (!cover_i || runRef.current !== run) return;
+        setRecs((list) => list.map((x) => (x.title === r.title ? { ...x, coverUrl: `https://covers.openlibrary.org/b/id/${cover_i}-M.jpg` } : x)));
+      } catch { /* no cover: the crown placeholder stays */ }
+    });
   };
 
   const addRec = async (rec) => {
