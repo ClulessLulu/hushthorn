@@ -105,13 +105,34 @@ test.describe('sign up', () => {
     await expect(page.getByText('That email is already registered. Sign in instead, or use a different one.')).toBeVisible();
   });
 
+  // Negative: checked before sending, so the message names what is missing. A
+  // 6-character password with every kind of character used to get the
+  // "missing characters" message instead of "too short".
+  test('too short: says it needs at least 8 characters, and sends nothing', async ({ page }) => {
+    const sent = await mockAuth(page, 'signup');
+    await openSignUp(page);
+    await fillSignUp(page, newEmail(), 'S@chi1');
+    await expect(page.getByText('Password needs at least 8 characters. Add what is missing and try again.')).toBeVisible();
+    expect(sent).toHaveLength(0);
+  });
+
+  test('missing a symbol: names the symbol, and sends nothing', async ({ page }) => {
+    const sent = await mockAuth(page, 'signup');
+    await openSignUp(page);
+    await fillSignUp(page, newEmail(), 'Schi1xyz');
+    await expect(page.getByText('Password needs a symbol (like !@#$). Add what is missing and try again.')).toBeVisible();
+    expect(sent).toHaveLength(0);
+  });
+
+  // The server can still refuse a password the browser accepts (its policy may be
+  // stricter); then the full rule is shown.
   test('weak password: shows the password rule', async ({ page }) => {
     await mockAuth(page, 'signup', {
       status: 422,
       body: { code: 422, error_code: 'weak_password', msg: 'Password should contain at least one character of each: abcdefghijklmnopqrstuvwxyz, ABCDEFGHIJKLMNOPQRSTUVWXYZ, 0123456789, !@#$%^&*().', weak_password: { reasons: ['characters'] } },
     });
     await openSignUp(page);
-    await fillSignUp(page, newEmail(), 'weakpass');
+    await fillSignUp(page, newEmail(), STRONG);
     await expect(page.getByText(PASSWORD_RULE_MSG)).toBeVisible();
   });
 
