@@ -5,6 +5,8 @@ import Papa from "papaparse";
 import { supabase } from './lib/supabase';
 import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySimpleSnap, planAudioSnap, checkAudioSnap, posInt } from './lib/progressSnap';
 import { prepareSnapImage } from './lib/snapImage';
+import { hashStr, asPageCount, spineWidthOf, layoutShelfRows } from './lib/shelfLayout';
+import { mergeImport } from './lib/importMerge';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { PASSWORD_RULE_MSG, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl } from './lib/authErrors';
@@ -1150,12 +1152,6 @@ function CoverImage({ src, alt, className, fallback }) {
    Supabase data model (lazy backfill via onPersist).
 ─────────────────────────────────────────────────────────────── */
 
-function hashStr(s) {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h;
-}
-
 const GENRE_SPINE_COLORS = [
   [/vampire|blood/i, "#5b1f3f"],
   [/fae|fairy/i, "#33306e"],
@@ -1253,11 +1249,6 @@ async function uploadCoverPhoto(session, dataUrl) {
     return publicUrl;
   } catch { return null; }
 }
-
-// Valid page counts are positive integers; anything else (0, negative, float,
-// string, null, undefined) coerces to null. Shared by the add/scan paths and
-// the lazy backfill.
-const asPageCount = (v) => (typeof v === "number" && Number.isInteger(v) && v > 0) ? v : null;
 
 // Lazy page-count resolver for existing print books that have no page count.
 // Primary: Open Library search.json (no quota). Fallback: Google Books.
@@ -1954,12 +1945,6 @@ const SPINE_GLOW = {
   audio: "rgba(34,211,238,0.95)",
 };
 
-// Rendered width of a spine, 17-28px, from its title+author hash. The shelf
-// layout packs rows with this same number, so rows fill the shelf exactly.
-function spineWidthOf(book) {
-  return 17 + (hashStr((book.author || "") + (book.title || "")) % 12);
-}
-
 function Spine({ book, onOpen, dimmed, onPersist }) {
   const color = useSpineColor(book, onPersist);
   const h = 122 + (hashStr(book.title || "") % 48);
@@ -1995,6 +1980,7 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
     <button
       onClick={onOpen}
       title={tip}
+      aria-label={tip}
       className={`relative flex flex-col items-center justify-between rounded-t-[3px] rounded-b-[2px] transition-all duration-200 hover:-translate-y-2 hover:-rotate-3 hover:z-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${
         dimmed ? "opacity-20" : wish ? "opacity-60" : ""
       }`}
@@ -2072,7 +2058,6 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
   );
 }
 
-const SPINE_GAP = 5;
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
 // One bookcase = up to 3 shelf rows, framed in painted cathedral art (Task 4).
@@ -2301,42 +2286,6 @@ function CathedralCuriosities({ peak, open, onToggle }) {
       )}
     </div>
   );
-}
-
-// Rows are packed by real width, so a shelf fills edge to edge at any screen
-// size. Decorations take their own width: the rose urn ends shelf 2 (or the
-// last shelf when the library is shorter) and the thorn tree ends the very
-// last shelf, i.e. the apse of the last bookcase.
-const URN_W = 66, TREE_W = 92; // match .ht-deco-urn / .ht-deco-tree
-function layoutShelfRows(books, innerW, peak, widthOf = spineWidthOf) {
-  const W = Math.max(innerW, 120);
-  const wOf = (it) => (it.deco === "urn" ? URN_W : it.deco === "tree" ? TREE_W : widthOf(it));
-  const used = (row) => row.reduce((n, it, i) => n + wOf(it) + (i ? SPINE_GAP : 0), 0);
-  const withUrn = peak >= 10;
-  const rows = [];
-  let row = [], urnPlaced = false;
-  const flush = () => {
-    if (withUrn && !urnPlaced && rows.length === 1) { row.push({ deco: "urn" }); urnPlaced = true; }
-    rows.push(row);
-    row = [];
-  };
-  for (const b of books) {
-    const reserve = withUrn && !urnPlaced && rows.length === 1 ? URN_W + SPINE_GAP : 0;
-    if (row.length && used(row) + SPINE_GAP + wOf(b) > W - reserve) flush();
-    row.push(b);
-  }
-  if (row.length) flush();
-  if (!rows.length) rows.push([]);
-  const last = () => rows[rows.length - 1];
-  if (withUrn && !urnPlaced) {
-    if (last().length && used(last()) + SPINE_GAP + URN_W > W) rows.push([]);
-    last().push({ deco: "urn" });
-  }
-  if (peak >= 21) {
-    if (last().length && used(last()) + SPINE_GAP + TREE_W > W) rows.push([]);
-    last().push({ deco: "tree" });
-  }
-  return rows;
 }
 
 const ROMAN = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
@@ -3319,6 +3268,10 @@ export default function Hushthorn() {
       if (error) {
         console.error('import books insert:', error.message);
         ok = false; // skip their notes too — the book_id FKs don't exist
+        // Take the unsaved books back off the shelf. Left there, they vanish on
+        // reload, and a retry would see them as "already here" and write nothing.
+        const failed = new Set(additions.map((b) => b.id));
+        setBooks((cur) => cur.filter((b) => !failed.has(b.id)));
       } else {
         const noteRows = additions.flatMap(b => (b.notes || []).map(n => toNoteRow(n, b.id)));
         if (noteRows.length) {
@@ -4048,103 +4001,6 @@ function parseGoodreads(csvText) {
   return out;
 }
 
-// Fingerprint a highlight for dedupe: lowercase, strip punctuation and quote
-// glyphs, collapse whitespace. The same passage from different sources
-// (clippings re-export, notebook export, re-import) converges to one stable
-// string — the `noteFingerprint()` invariant documented in CLAUDE.md. Ported
-// from the design prototype (prototype/hushthorn-demo.jsx) with a non-string
-// guard added.
-function noteFingerprint(text) {
-  return (typeof text === "string" ? text : "")
-    .toLowerCase()
-    .replace(/[“”"'‘’.,!?;:—–\-…()]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// Pure smart-merge for The Binding / batch add. Given the current shelf and
-// the parsed import items, computes the next local state plus exactly what
-// must be persisted. Books are unique by title (case-insensitive): a match
-// merges into the existing entry — including entries created earlier in the
-// SAME batch, so one file can never mint duplicate rows. Notes dedupe by
-// noteFingerprint(), both against the book's existing marginalia and within
-// the batch (Kindle clippings can repeat a highlight verbatim). Pure — ids
-// and the date stamp are injected — so tests/import-dedupe-unit.mjs can
-// exercise it directly. Returns { next, additions, updates }:
-//   next      — the full next books array (for setBooks)
-//   additions — brand-new book objects with notes attached (INSERT books+notes)
-//   updates   — { id, fields, newNotes } per changed existing book
-//               (UPDATE books when fields is non-empty; INSERT newNotes)
-function mergeImport(prevBooks, items, today, makeId) {
-  const updated = (prevBooks || []).map((b) => ({ ...b, notes: [...(b.notes || [])] }));
-  const byTitle = new Map(updated.map((b) => [b.title.toLowerCase(), b]));
-  const additions = [];
-  const addedIds = new Set(); // books minted earlier in THIS batch
-  const updates = [];
-  for (const item of items || []) {
-    if (!item || typeof item.title !== "string" || !item.title.trim()) continue;
-    const key = item.title.toLowerCase();
-    // Build note objects: drop empty/non-string text (a fingerprint of "" means
-    // no textual content) and dedupe within the batch itself.
-    const seen = new Set();
-    const newNotes = [];
-    for (const n of item.notes || []) {
-      const fp = noteFingerprint(n && n.text);
-      if (!fp || seen.has(fp)) continue;
-      seen.add(fp);
-      newNotes.push({
-        id: makeId(),
-        page: (n && n.page) || "",
-        isQuote: !!(n && n.isQuote),
-        text: n.text,
-        isVoice: false,
-        isTime: false,
-        date: today,
-      });
-    }
-    const existing = byTitle.get(key);
-    if (existing) {
-      const have = new Set((existing.notes || []).map((n) => noteFingerprint(n.text)));
-      const fresh = newNotes.filter((n) => !have.has(noteFingerprint(n.text)));
-      // Only genuine upgrades become fields — an unchanged book yields no write.
-      const fields = {};
-      if (!existing.read && item.read) fields.read = true;
-      if (item.shelf === "owned" && existing.shelf !== "owned") fields.shelf = "owned";
-      if (!existing.overall && item.overall) fields.overall = item.overall;
-      if ((!existing.genres || existing.genres.length === 0) && item.genres?.length) fields.genres = item.genres;
-      if (!existing.coverUrl && item.coverUrl) fields.coverUrl = item.coverUrl;
-      Object.assign(existing, fields);
-      existing.notes = [...fresh, ...existing.notes];
-      if (addedIds.has(existing.id)) {
-        // Same title twice within one file (e.g. casing variants): merged into
-        // the pending addition object — its INSERT already carries this.
-      } else if (fresh.length || Object.keys(fields).length) {
-        updates.push({ id: existing.id, fields, newNotes: fresh });
-      }
-    } else {
-      const book = {
-        id: makeId(),
-        title: item.title,
-        author: item.author || "Unknown author",
-        year: null,
-        coverUrl: item.coverUrl || "",
-        genres: item.genres || [],
-        shelf: item.shelf || "owned",
-        read: !!item.read,
-        overall: item.overall || 0,
-        smut: 0,
-        formats: ["print"],
-        progress: item.progress || {},
-        notes: newNotes,
-      };
-      additions.push(book);
-      addedIds.add(book.id);
-      byTitle.set(key, book); // unique-by-title holds within the batch too
-    }
-  }
-  return { next: [...additions, ...updated], additions, updates };
-}
-
 function PairSection({ books, onImport }) {
   const [preview, setPreview] = useState(null); // { source, items: [{...book, include, existing}] }
   const [busy, setBusy] = useState(false);
@@ -4216,7 +4072,7 @@ function PairSection({ books, onImport }) {
       );
     } else {
       setError(
-        "Some of that couldn't be bound to the archive. The books are on your shelf for this session — check your connection and upload the same file again. Re-importing never creates duplicates."
+        "Some of that couldn't be bound to the archive. Check your connection and upload the same file again. Re-importing never creates duplicates."
       );
     }
     setPreview(null);
@@ -5781,6 +5637,25 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
 const AUTH_INPUT ="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2.5 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400 text-purple-100";
 const AUTH_LBL = "block ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1.5";
 
+// Password field with a Show/Hide toggle so a typo can be spotted before submitting.
+function PasswordInput(props) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <input {...props} type={show ? 'text' : 'password'} className={AUTH_INPUT + ' pr-16'} />
+      <button type="button" onClick={() => setShow(s => !s)} aria-pressed={show}
+        aria-label={show ? 'Hide password' : 'Show password'}
+        className="absolute right-0 top-0 h-full min-h-[44px] min-w-[44px] flex items-center justify-center text-purple-600 hover:text-pink-500">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+          <circle cx="12" cy="12" r="3" />
+          {show && <path d="M4 4l16 16" />}
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 // Feature flag: Google sign-in stays hidden until the Google provider is
 // enabled in that environment's Supabase project (Authentication > Providers).
 // Opt-in: set VITE_ENABLE_GOOGLE_AUTH=true in the Vercel env for the target
@@ -5830,13 +5705,13 @@ function ResetPasswordPage({ onDone }) {
         <form onSubmit={submit} className="space-y-3 text-left">
           <div>
             <label htmlFor="reset-password" className={AUTH_LBL}>New password</label>
-            <input id="reset-password" type="password" autoComplete="new-password" value={password}
-              onChange={e => setPassword(e.target.value)} required placeholder="••••••••••••" className={AUTH_INPUT} />
+            <PasswordInput id="reset-password" autoComplete="new-password" value={password}
+              onChange={e => setPassword(e.target.value)} required placeholder="••••••••••••" />
           </div>
           <div>
             <label htmlFor="reset-confirm" className={AUTH_LBL}>Confirm new password</label>
-            <input id="reset-confirm" type="password" autoComplete="new-password" value={confirm}
-              onChange={e => setConfirm(e.target.value)} required placeholder="••••••••••••" className={AUTH_INPUT} />
+            <PasswordInput id="reset-confirm" autoComplete="new-password" value={confirm}
+              onChange={e => setConfirm(e.target.value)} required placeholder="••••••••••••" />
           </div>
           {error && <p className="text-sm text-pink-300 text-center py-1">{error}</p>}
           <div className="ht-rule my-1" aria-hidden="true" />
@@ -6001,8 +5876,8 @@ function AuthPage({ linkError = null }) {
           {mode !== 'forgot' && (
           <div>
             <label htmlFor="auth-password" className={AUTH_LBL}>Password</label>
-            <input id="auth-password" type="password" value={password} onChange={e => setPassword(e.target.value)}
-              required placeholder="••••••••••••" className={AUTH_INPUT} />
+            <PasswordInput id="auth-password" value={password} onChange={e => setPassword(e.target.value)}
+              required placeholder="••••••••••••" />
             {mode === 'signup' && (
               <p className="text-[11px] italic mt-1" style={{ color: '#c084fc' }}>
                 Use upper and lower case letters, a number and a symbol.
@@ -6019,8 +5894,8 @@ function AuthPage({ linkError = null }) {
           {mode === 'signup' && (
             <div>
               <label htmlFor="auth-confirm" className={AUTH_LBL}>Confirm password</label>
-              <input id="auth-confirm" type="password" required value={confirm} onChange={e => setConfirm(e.target.value)}
-                placeholder="••••••••••••" className={AUTH_INPUT} />
+              <PasswordInput id="auth-confirm" required value={confirm} onChange={e => setConfirm(e.target.value)}
+                placeholder="••••••••••••" />
             </div>
           )}
 
@@ -6088,6 +5963,28 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
   const [scanView, setScanView] = useState(seed ? "review" : "capture"); // capture | review
   const [scanMultiple, setScanMultiple] = useState(false);
   const [queue, setQueue] = useState([]);
+  // "Add several" in the search tab: results queue up (one entry per title)
+  // and are written together by addSearchBatch.
+  const [searchMulti, setSearchMulti] = useState(false);
+  const [searchQueue, setSearchQueue] = useState([]);
+  const searchInputRef = useRef(null);
+  const [batchSaving, setBatchSaving] = useState(false);
+  const [batchError, setBatchError] = useState("");
+  // Shared by both batch adds. A ref, because the disabled state only exists after
+  // a re-render: two presses in the same instant would both save (duplicate titles).
+  const batchBusyRef = useRef(false);
+  const saveBatch = async (items) => {
+    if (batchBusyRef.current) return;
+    if (!items.length || !onAddMany) return onClose();
+    batchBusyRef.current = true;
+    setBatchSaving(true);
+    setBatchError("");
+    const ok = await onAddMany(items);
+    if (ok) return onClose();
+    batchBusyRef.current = false;
+    setBatchSaving(false);
+    setBatchError("Those tomes could not be saved. Check your connection, then tap Add again.");
+  };
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -6221,8 +6118,32 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
 
   const pick = async (doc, shelf) => {
     const coverUrl = doc._coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : "");
-    const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
     const pageCount = asPageCount(doc.pageCount);
+    // Queue mode returns before any await: the box must clear and refocus at
+    // once, or a title typed meanwhile would be wiped by a late setQuery("").
+    if (searchMulti) {
+      // Queue it and keep the window open. One entry per title (case-insensitive).
+      const key = (doc.title || "").trim().toLowerCase();
+      setSearchQueue((q) => q.some((b) => b.key === key) ? q : [...q, {
+        key,
+        title: doc.title,
+        author: doc.author_name?.[0] || "Unknown author",
+        year: doc.first_publish_year || null,
+        coverUrl,
+        genres: cleanGenres(doc.subject),
+        shelf,
+        read: false,
+        overall: 0,
+        smut: 0,
+        notes: [],
+        progress: pageCount ? { print: { pages: pageCount } } : {},
+        inArchive: !!existingByTitle(doc.title),
+      }]);
+      setQuery("");
+      searchInputRef.current?.focus();
+      return;
+    }
+    const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
     const book = {
       title: doc.title,
       author: doc.author_name?.[0] || "Unknown author",
@@ -6612,6 +6533,12 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
 
   const removeFromQueue = (isbn) => setQueue((q) => q.filter((b) => b.isbn !== isbn));
 
+  const removeFromSearchQueue = (key) => setSearchQueue((q) => q.filter((b) => b.key !== key));
+  // Close only once the books are saved. On a failed write the window and the
+  // queue stay, so the picks are not lost and the user can try again.
+  const addSearchBatch = () =>
+    saveBatch(searchQueue.filter((b) => !b.inArchive).map(({ key, inArchive, ...book }) => book));
+
   const addBatch = () => {
     const items = queue.filter((q) => !q.inArchive).map((q) => {
       const validPageCount = asPageCount(q.pageCount);
@@ -6625,8 +6552,9 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
         progress: validPageCount ? { print: { pages: validPageCount } } : {},
       };
     });
-    if (items.length && onAddMany) onAddMany(items);
-    onClose();
+    // Same as the search batch: it used to close at once and lose the queue
+    // without a word when the save failed.
+    saveBatch(items);
   };
 
   const scanAnother = () => {
@@ -6729,12 +6657,50 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
       {mode === "search" ? (
         <>
           <input
+            ref={searchInputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search by title or author…"
             autoFocus
             className="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-2 text-[15px] placeholder-purple-400/50 focus:outline-none focus:border-pink-400"
           />
+          <label className="mt-3 flex items-center gap-2 cursor-pointer min-h-[44px] sm:min-h-0">
+            <input type="checkbox" checked={searchMulti} onChange={(e) => setSearchMulti(e.target.checked)} className="accent-pink-500" />
+            <span className="ht-display text-[10px] uppercase tracking-widest text-purple-300">Add several</span>
+            <span className="text-xs text-purple-400/60 italic">— pick books one after another, then add them all at once</span>
+          </label>
+
+          {searchMulti && (
+            <div className="ht-card rounded-md p-3 mt-2 space-y-2">
+              <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300">{searchQueue.length} queued</p>
+              {searchQueue.length === 0 ? (
+                <p className="text-sm text-purple-400/60 italic">Search, then tap + Owned or + Wishlist. Picks collect here.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {searchQueue.map((b) => (
+                    <div key={b.key} className={`flex items-center gap-2 rounded-sm p-1.5 border ${b.inArchive ? "border-purple-800/40 opacity-50" : "border-purple-700/40 bg-purple-950/40"}`}>
+                      <div className="w-7 h-10 rounded-sm overflow-hidden bg-purple-900/60 flex-shrink-0">
+                        <CoverImage src={b.coverUrl} alt="" className="w-full h-full object-cover" fallback={<span className="text-purple-500 text-xs flex items-center justify-center h-full">♛</span>} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] text-pink-100 truncate">{b.title}</p>
+                        <p className="text-[11px] text-purple-400 truncate italic">
+                          {b.author} · {b.shelf === "wishlist" ? "wishlist" : "owned"}{b.inArchive ? " · already in archive" : ""}
+                        </p>
+                      </div>
+                      <button onClick={() => removeFromSearchQueue(b.key)} aria-label={`Remove ${b.title} from the queue`} className="text-purple-400 hover:text-pink-300 px-2 min-h-[44px]">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {searchQueue.some((b) => !b.inArchive) && (
+                <button onClick={addSearchBatch} disabled={batchSaving} className="ht-display w-full min-h-[44px] py-2 rounded-sm bg-gradient-to-r from-indigo-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 disabled:opacity-50 text-white text-xs font-semibold uppercase">
+                  {batchSaving ? "Inscribing…" : `Add ${searchQueue.filter((b) => !b.inArchive).length} to the archive`}
+                </button>
+              )}
+              {batchError && <p role="alert" className="text-sm text-pink-300">{batchError}</p>}
+            </div>
+          )}
 
           {loading && <p className="mt-4 text-[15px] text-purple-300/70 italic">Consulting the archives…</p>}
           {error && <p className="mt-4 text-[15px] text-pink-300">{error}</p>}
@@ -7021,8 +6987,8 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
               )}
               {queue.some((q) => !q.inArchive) && (
                 <div className="flex gap-2 items-center">
-                  <button onClick={addBatch} className="ht-display flex-1 py-2 rounded-sm bg-gradient-to-r from-indigo-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 text-white text-xs font-semibold uppercase">
-                    Add {queue.filter((q) => !q.inArchive).length} to
+                  <button onClick={addBatch} disabled={batchSaving} className="ht-display flex-1 py-2 rounded-sm bg-gradient-to-r from-indigo-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 disabled:opacity-50 text-white text-xs font-semibold uppercase">
+                    {batchSaving ? "Inscribing…" : `Add ${queue.filter((q) => !q.inArchive).length} to`}
                   </button>
                   <select value={batchShelf} onChange={(e) => setBatchShelf(e.target.value)}
                     className="bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-2 text-sm text-purple-100 focus:outline-none focus:border-pink-400">
@@ -7031,6 +6997,7 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
                   </select>
                 </div>
               )}
+              {batchError && <p role="alert" className="text-sm text-pink-300">{batchError}</p>}
             </div>
           )}
 

@@ -9,6 +9,7 @@
 **Tech Stack:** Vite + React, Tailwind + `ht-*` classes in `FONT_CSS`, Supabase (new `cathedral_progress` table), static assets in `public/cathedral/`.
 
 **Read before Task 1:**
+- `docs/BOOK_DESIGN.md` — how a book looks (spine anatomy, states, contrast cap), the filter buttons, controls bar, Curiosities, notifications and modals.
 - `docs/CATHEDRAL_ART_SPEC.md` — the art layers and the **v1 asset audit** (how each image must be used; some are swaps, not overlays).
 - `prototype/cathedral/library.dc.html` — behavior reference from the design canvas (spines view, covers view, shared archive, notifications, unlock logic). Design-canvas format: markup on top, all logic in the `class Component` script at the bottom (`milestones()`, `commit()`, `renderVals()`). **Port the logic and layout intent, not the markup** — the prototype draws the cathedral with CSS/SVG; production uses the painted assets.
 - `prototype/cathedral/nave-at-scale.dc.html` — how 1,000+ books look (stacked bookcases, A–Z rail, overview).

@@ -14,3 +14,6 @@ tests/screenshots/
 
 # Cathedral asset sources (22MB PNGs, never loaded at runtime - see docs/CATHEDRAL_ART_SPEC.md)
 output/
+
+# Local-only env files (keys stay out of builds)
+.env.*.local
