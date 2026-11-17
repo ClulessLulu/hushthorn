@@ -22,7 +22,7 @@ Verification per task is:
 80-book library.** Staging shows an amber "Staging · throwaway data" bar at the bottom; if you don't see it,
 you are on production, so stop. Staging already has the `tropes` column; production does NOT (deliberately).
 
-Seeded staging logins: `qa.alpha@hushthorn.local` / `qa.beta@hushthorn.local`, password `StagingQA!2026x`.
+Seeded staging logins: `qa.alpha@hushthorn.local` / `qa.beta@hushthorn.local`, password in `.env.staging.local` (gitignored, never commit it).
 
 If you cannot drive a browser, say so plainly and list what is unverified. Never claim an unobserved pass.
 
