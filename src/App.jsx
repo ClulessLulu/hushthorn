@@ -4198,6 +4198,10 @@ function OracleSection({ books, onAddToWishlist }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [consulted, setConsulted] = useState(false);
+  const [addError, setAddError] = useState("");
+  // `disabled` only applies after a re-render, so a same-instant double press
+  // sent two paid AI calls; the ref blocks the second one immediately.
+  const busyRef = useRef(false);
 
   const ownedTitles = new Set(books.map((b) => b.title.toLowerCase()));
 
@@ -4211,8 +4215,11 @@ function OracleSection({ books, onAddToWishlist }) {
     .slice(0, ORACLE_VISIBLE);
 
   const consult = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setLoading(true);
     setError("");
+    setAddError("");
     setRecs([]);
     try {
       const library = books.map((b) => ({
@@ -4240,8 +4247,10 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
           max_tokens: 1800,
           messages: [{ role: "user", content: prompt }],
       });
-      const parsed = parseClaudeJson(data, "[");
-      if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("empty");
+      // AI output is untrusted: an entry with no title (null, {}) rendered as a blank card.
+      const raw = parseClaudeJson(data, "[");
+      const parsed = Array.isArray(raw) ? raw.filter((r) => r && typeof r.title === "string" && r.title.trim()) : [];
+      if (parsed.length === 0) throw new Error("empty");
 
       // fetch covers from Open Library, best-effort per book
       const withCovers = await Promise.all(
@@ -4264,11 +4273,13 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
       setError("The Oracle's vision clouded over. Try consulting again.");
     } finally {
       setLoading(false);
+      busyRef.current = false;
     }
   };
 
-  const addRec = (rec) => {
-    onAddToWishlist({
+  const addRec = async (rec) => {
+    setAddError("");
+    const ok = await onAddToWishlist({
       title: rec.title,
       author: rec.author,
       year: null,
@@ -4280,6 +4291,8 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
       smut: 0,
       notes: [],
     });
+    // It used to fail silently: the card just stayed put.
+    if (ok === false) setAddError(`“${rec.title}” could not be saved to your wishlist. Check your connection, then tap + Wishlist again.`);
   };
 
   return (
@@ -4305,6 +4318,7 @@ Respond with ONLY a valid JSON array and nothing else — no preamble, no markdo
         <p className="text-center text-[15px] text-purple-300/70 italic">Reading the leaves of your library…</p>
       )}
       {error && <p className="text-center text-[15px] text-pink-300">{error}</p>}
+      {addError && <p role="alert" className="mb-3 text-center text-[15px] text-pink-300">{addError}</p>}
 
       <div className="space-y-3">
         {visible.map((r) => {
