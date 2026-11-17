@@ -31,7 +31,7 @@ export default defineConfig({
     { name: 'auth', testMatch: /(auth|buttons\.signin)\.spec\.js/, use: { ...devices['Desktop Chrome'] } },
     {
       name: 'app',
-      testMatch: /(books|navigation|buttons\.(library|inscribe|camera|detail)|negative\.(inscribe|detail))\.spec\.js/,
+      testMatch: /(books|navigation|buttons\.(library|inscribe|camera|detail)|negative\.(inscribe|detail|codex|oracle))\.spec\.js/,
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: 'tests/e2e/.auth/alpha.json' },
     },
