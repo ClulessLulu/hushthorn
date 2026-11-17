@@ -1,108 +1,12 @@
 // The Binding import — dedupe/merge unit harness.
-// Functions copied VERBATIM from src/App.jsx (noteFingerprint, mergeImport) so
-// we test the real logic, not a paraphrase. Run: node tests/import-dedupe-unit.mjs
+// Imports the real noteFingerprint and mergeImport from src/lib/importMerge.js. Run: node tests/import-dedupe-unit.mjs
 //
 // Invariants under test (CLAUDE.md):
 //  - Books unique by title (case-insensitive) — merge, never a duplicate row.
 //  - Notes dedupe by noteFingerprint() (normalized text); re-importing the
 //    same file is idempotent (zero additions, zero updates, identical state).
 
-// Fingerprint a highlight for dedupe: lowercase, strip punctuation and quote
-// glyphs, collapse whitespace. The same passage from different sources
-// (clippings re-export, notebook export, re-import) converges to one stable
-// string — the `noteFingerprint()` invariant documented in CLAUDE.md. Ported
-// from the design prototype (prototype/hushthorn-demo.jsx) with a non-string
-// guard added.
-function noteFingerprint(text) {
-  return (typeof text === "string" ? text : "")
-    .toLowerCase()
-    .replace(/[“”"'‘’.,!?;:—–\-…()]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// Pure smart-merge for The Binding / batch add. Given the current shelf and
-// the parsed import items, computes the next local state plus exactly what
-// must be persisted. Books are unique by title (case-insensitive): a match
-// merges into the existing entry — including entries created earlier in the
-// SAME batch, so one file can never mint duplicate rows. Notes dedupe by
-// noteFingerprint(), both against the book's existing marginalia and within
-// the batch (Kindle clippings can repeat a highlight verbatim). Pure — ids
-// and the date stamp are injected — so tests/import-dedupe-unit.mjs can
-// exercise it directly. Returns { next, additions, updates }:
-//   next      — the full next books array (for setBooks)
-//   additions — brand-new book objects with notes attached (INSERT books+notes)
-//   updates   — { id, fields, newNotes } per changed existing book
-//               (UPDATE books when fields is non-empty; INSERT newNotes)
-function mergeImport(prevBooks, items, today, makeId) {
-  const updated = (prevBooks || []).map((b) => ({ ...b, notes: [...(b.notes || [])] }));
-  const byTitle = new Map(updated.map((b) => [b.title.toLowerCase(), b]));
-  const additions = [];
-  const addedIds = new Set(); // books minted earlier in THIS batch
-  const updates = [];
-  for (const item of items || []) {
-    if (!item || typeof item.title !== "string" || !item.title.trim()) continue;
-    const key = item.title.toLowerCase();
-    // Build note objects: drop empty/non-string text (a fingerprint of "" means
-    // no textual content) and dedupe within the batch itself.
-    const seen = new Set();
-    const newNotes = [];
-    for (const n of item.notes || []) {
-      const fp = noteFingerprint(n && n.text);
-      if (!fp || seen.has(fp)) continue;
-      seen.add(fp);
-      newNotes.push({
-        id: makeId(),
-        page: (n && n.page) || "",
-        isQuote: !!(n && n.isQuote),
-        text: n.text,
-        isVoice: false,
-        isTime: false,
-        date: today,
-      });
-    }
-    const existing = byTitle.get(key);
-    if (existing) {
-      const have = new Set((existing.notes || []).map((n) => noteFingerprint(n.text)));
-      const fresh = newNotes.filter((n) => !have.has(noteFingerprint(n.text)));
-      // Only genuine upgrades become fields — an unchanged book yields no write.
-      const fields = {};
-      if (!existing.read && item.read) fields.read = true;
-      if (item.shelf === "owned" && existing.shelf !== "owned") fields.shelf = "owned";
-      if (!existing.overall && item.overall) fields.overall = item.overall;
-      if ((!existing.genres || existing.genres.length === 0) && item.genres?.length) fields.genres = item.genres;
-      if (!existing.coverUrl && item.coverUrl) fields.coverUrl = item.coverUrl;
-      Object.assign(existing, fields);
-      existing.notes = [...fresh, ...existing.notes];
-      if (addedIds.has(existing.id)) {
-        // Same title twice within one file (e.g. casing variants): merged into
-        // the pending addition object — its INSERT already carries this.
-      } else if (fresh.length || Object.keys(fields).length) {
-        updates.push({ id: existing.id, fields, newNotes: fresh });
-      }
-    } else {
-      const book = {
-        id: makeId(),
-        title: item.title,
-        author: item.author || "Unknown author",
-        year: null,
-        coverUrl: item.coverUrl || "",
-        genres: item.genres || [],
-        shelf: item.shelf || "owned",
-        read: !!item.read,
-        overall: item.overall || 0,
-        smut: 0,
-        formats: ["print"],
-        progress: item.progress || {},
-        notes: newNotes,
-      };
-      additions.push(book);
-      addedIds.add(book.id);
-      byTitle.set(key, book); // unique-by-title holds within the batch too
-    }
-  }
-  return { next: [...additions, ...updated], additions, updates };
-}
+import { noteFingerprint, mergeImport } from '../src/lib/importMerge.js';
 
 /* ── harness (same style as tests/_progress_unit.mjs) ── */
 
@@ -275,6 +179,31 @@ check("E-NF-punct-only", "punctuation-only", noteFingerprint("…!!! —"), "");
   const r = mergeImport([], [{ title: "T", notes: [{ text: "a" }, { text: "b" }] }], TODAY, mkId());
   const ids = [r.additions[0].id, ...r.additions[0].notes.map((n) => n.id)];
   check("M-ids-unique", "book + note ids distinct", new Set(ids).size, 3);
+}
+
+// M-batch: "Add several" sends 1..N search picks; each keeps its OWN data.
+// The year used to be dropped to null for every book in a batch.
+{
+  const pick = (n, extra = {}) => ({
+    title: `Book ${n}`, author: `Author ${n}`, year: 2000 + n, coverUrl: `https://x/${n}.jpg`,
+    genres: [`G${n}`], shelf: n % 2 ? "owned" : "wishlist", read: false, overall: 0, smut: 0,
+    notes: [], progress: { print: { pages: 100 * n } }, ...extra,
+  });
+  const own = (b) => [b.title, b.author, b.year, b.coverUrl, b.genres, b.shelf, b.progress];
+  const one = mergeImport([], [pick(1)], TODAY, mkId());
+  check("M-batch-one", "a batch of one adds one book with its data",
+    one.additions.map(own), [["Book 1", "Author 1", 2001, "https://x/1.jpg", ["G1"], "owned", { print: { pages: 100 } }]]);
+  const three = mergeImport([], [pick(1), pick(2), pick(3)], TODAY, mkId());
+  check("M-batch-many", "three picks, three books, each with its own data",
+    three.additions.map(own), [pick(1), pick(2), pick(3)].map(own));
+  check("M-batch-empty", "empty batch adds nothing", mergeImport([], [], TODAY, mkId()).additions.length, 0);
+  check("M-batch-year-bad", "a year that is not a whole number becomes null",
+    mergeImport([], [pick(1, { year: "2001" }), pick(2, { year: 1.5 }), pick(3, { year: undefined })], TODAY, mkId())
+      .additions.map((b) => b.year), [null, null, null]);
+  const again = mergeImport(three.next, [pick(1), pick(2), pick(3)], TODAY, mkId());
+  check("M-batch-twice", "the same batch again writes nothing", [again.additions.length, again.updates.length], [0, 0]);
+  const dup = mergeImport([{ id: "x", title: "BOOK 1", shelf: "owned", notes: [] }], [pick(1), pick(2)], TODAY, mkId());
+  check("M-batch-existing", "a title already owned is not added again", dup.additions.map((b) => b.title), ["Book 2"]);
 }
 
 console.log(`PASS ${pass}  FAIL ${fail}`);

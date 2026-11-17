@@ -1,6 +1,9 @@
 # CLAUDE.md — Hushthorn
 
 Rewritten 2026-11-13 from a full read of the repo and the production schema.
+Numbers in this file were recounted that day: `App.jsx` 8,336 lines, 69 `ht-*`
+classes, 6 unit-test files, 31 UI tests, 5 AI call sites, 9 tables, 3 views,
+6 database functions, 25 production migrations, 7 subagents.
 Where this file disagrees with `CLAUDE.local.md`, `AGENTS.md`, `.claude/agents/*`,
 `.codex/*`, `README.md` or anything under `docs/`, this file wins. Where this
 file disagrees with the code, the code wins: fix this file in the same change.
@@ -60,17 +63,18 @@ hushthorn/
     components/
       EnamelButton.jsx/.css   The button. Variants: primary, secondary, quiet, metal, rose.
       NavTab.jsx/.css         Stained-glass arch tabs (Oracle, + Inscribe, Codex).
-      SpineAppearance.jsx     Per-book "use a photo of the real spine" (localStorage only).
     lib/                 Pure, importable, unit-tested logic. New logic goes here.
       supabase.js        Client. THROWS at import if the two VITE_SUPABASE_* vars are missing.
       progressSnap.js    Snap-to-update maths (print / ebook / audio).
       snapImage.js       Downscale a photo before it is sent to the AI proxy.
       shelfLayout.js     Spine widths and shelf row packing.
-      spinePhoto.js      Spine-photo URL validation and crop maths.
+      importMerge.js     noteFingerprint and mergeImport (import and batch-add merge).
       authErrors.js      Auth error text and emailed-link error parsing.
   api/claude.js          Vercel serverless proxy to Anthropic (session required).
   tests/
     *.mjs                Unit tests. These are what `npm test` runs.
+    e2e/                 Playwright UI tests for the critical paths. Staging only.
+                         `npm test` does NOT run these; CI does not run them yet.
     *-test-plan.md, report.md, *-qa-report.md, manual-test-tracker.md   QA plans and evidence.
     screenshots/         Gitignored QA evidence.
   public/
@@ -88,11 +92,12 @@ hushthorn/
   prototype/             Design-phase references. NOT built, NOT imported. Port logic, never markup.
   output/                Gitignored art sources (large PNGs). Never load at runtime.
   dist/                  Build output. Gitignored.
-  .github/workflows/ci.yml   Tests + build on every PR and on push to master.
-  .claude/agents/        7 subagent definitions (partly stale, see section 8).
+  playwright.config.js   UI test config (port 5174, one worker, staging).
+  .github/workflows/ci.yml   Unit tests + build on every PR and on push to master.
+  .claude/agents/        7 subagent definitions, each with its model (section 8).
   .agents/, agent/, .claude/skills/   Vendored third-party Vercel skills. Not project code.
   .remember/, .superpowers/, .playwright-mcp/, test-results/   Tool scratch. Ignore.
-  .env, .env.staging     Secrets. Never print, paste, or commit their values.
+  .env, .env.staging, .env.*.local   Secrets. Never print, paste, or commit their values.
 
 toolbox/
   NEXT.md                The single action for the next work session. Read it first.
@@ -127,6 +132,8 @@ barcode detection are Chromium-only).
 | `npm run build` | Production build into `dist/` |
 | `node ..\toolbox\scripts\check-dist-for-keys.mjs` | After every build: must print `OK` |
 | `npm run preview` | Serve the built `dist/` |
+| `npm run test:e2e` | Playwright UI tests (`tests/e2e`) against **staging**; starts the staging server itself. One file: `npx playwright test auth`. See `tests/e2e/README.md` |
+| `npm run test:e2e:report` | Open the last UI test report, with traces of failures |
 | `cd ..\toolbox\api-checks; npx playwright test` | API/RLS checks against staging only |
 
 CI (`.github/workflows/ci.yml`, Node 22) runs `npm ci`, `npm test`,
@@ -138,8 +145,8 @@ button, update the CI grep in the same commit.
 Env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (required);
 `VITE_ENABLE_GOOGLE_AUTH` (`true` shows Google sign-in; off by default);
 `VITE_ANTHROPIC_API_KEY` (local dev only; it belongs in `.env.development.local`,
-or `.env.staging.local` for staging, never in `.env`, which builds also read;
-moving it is the open M0 task in `toolbox/NEXT.md`). Server-side on Vercel:
+or `.env.staging.local` for staging, never in `.env`, which builds also read).
+The staging test accounts (`E2E_*`) live in `.env.staging.local`. Server-side on Vercel:
 `ANTHROPIC_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`. Anything named
 `VITE_*` is compiled into the public bundle.
 
@@ -255,7 +262,8 @@ Read `docs/BOOK_DESIGN.md` before changing any shelf, card, control or modal.
   `.ht-blackletter` is Rozha One despite its name.)
 - **Corners are sharp.** `rounded-sm` / `rounded-md`, or 2px in CSS. Existing
   exceptions only: the page frame, the avatar arch, and round dots, halos and
-  avatars. Do not add `rounded-lg` or larger.
+  avatars. Do not add `rounded-lg` or larger. (The three sign-in cards still use
+  `rounded-xl`; that is a logged defect, not a precedent.)
 - **Buttons.** Use `<EnamelButton variant=…>` for actions and `<NavTab>` for the
   three arch tabs; shelf filters use `.ht-ribbon`. Do not hand-roll a new button
   style. Art is decorative: the label is live HTML text, the element is a real
@@ -295,11 +303,10 @@ Read `docs/BOOK_DESIGN.md` before changing any shelf, card, control or modal.
 ## 7. Mistakes a weaker model makes here, and what to do instead
 
 1. **Trusting a doc over the code.** `README.md` says there is no persistence
-   and uses "Spicy". `CLAUDE.local.md`, `AGENTS.md` and several
-   `.claude/agents/*` files say the proxy is unbuilt, name an Express server on
-   port 3001, name the wrong model, and call Open Library primary.
-   `toolbox/PARKING.md` says the cathedral shelf is not built; it shipped.
-   `VISAGE_SPEC.md` points at two docs that do not exist. → Search the code and
+   and uses "Spicy". `SHARED_LIBRARY_SPEC.md` describes a design that was
+   replaced by the union model. `VISAGE_SPEC.md` points at two docs that do not
+   exist. Older plans under `docs/superpowers/` quote line numbers that moved
+   long ago. → Search the code and
    believe it.
 2. **Reading `App.jsx` top to bottom, or quoting line numbers.** It is 8,300
    lines and numbers move daily. → Search for the function name, read that
@@ -329,10 +336,11 @@ Read `docs/BOOK_DESIGN.md` before changing any shelf, card, control or modal.
 10. **Adding a column in one place.** The field saves but vanishes on reload, or
     works on staging and 400s on production. → Follow the full list in section 4.
 11. **A "test" that copies the function into the test file.**
-    `tests/import-dedupe-unit.mjs` and `tests/_progress_unit.mjs` do this for
-    code still inside `App.jsx`; they can pass while the app is broken. → Do not
-    add more. When you touch `mergeImport`, `noteFingerprint`, `formatPercent`
-    or `num`, move them to `src/lib/` and import them in both places.
+    `tests/_progress_unit.mjs` does this for code still inside `App.jsx`; it can
+    pass while the app is broken. → Do not add more. When you touch
+    `formatPercent` or `num`, move them to `src/lib/` and import them in both
+    places (`mergeImport` and `noteFingerprint` already live in
+    `src/lib/importMerge.js`).
 12. **Saying "tests pass" as proof a UI change works.** Unit tests cover six
     small modules. → Open the app on staging, do the thing, and look, at 390px
     and at desktop width. Say exactly what you checked and what you did not.
@@ -349,8 +357,10 @@ Read `docs/BOOK_DESIGN.md` before changing any shelf, card, control or modal.
     renaming `smut`, launching the Visage, "cleaning up" vendored skill folders
     or `output/`. → Do the task asked. Park the idea in `toolbox/PARKING.md`.
 18. **Flipping `VISAGE_ENABLED`.** The avatar builder is built but dormant.
-    Launch needs the broad `co-members read avatars` policy dropped first (it
-    still exists in production). → Leave it `false` unless asked; follow
+    Launch needs the broad `co-members read avatars` policy dropped first. It
+    still exists in production and the owner has accepted that until the Visage
+    is picked up again (2026-11-13): leave the policy, the flag and the Visage
+    code exactly as they are. → Keep it `false` and hidden unless asked; follow
     `docs/VISAGE_SPEC.md` if asked.
 19. **Changing the database casually.** → Inspect first, staging first, additive
     and reversible, verify with a query, run the security advisors, then ask
@@ -371,8 +381,13 @@ Read `docs/BOOK_DESIGN.md` before changing any shelf, card, control or modal.
 - Report plainly: what changed, how you verified it, what you could not verify,
   what is still broken. No praise, no padding. If you are unsure, say so and
   check rather than guess.
-- The subagents in `.claude/agents/` are useful for their roles but several
-  carry stale facts (see mistake 1). This file overrides them.
+- Subagents in `.claude/agents/` and the model each runs on (chosen by what a
+  mistake costs, not by habit): `supabase-migrator`, `parser-qe`, `qa-tester`
+  and `frontend-dev` on `opus` (privacy rules, data-corrupting edge cases,
+  sceptical verification, edits inside the 8,300-line file); `backend-dev`,
+  `book-data` and `design-guardian` on `sonnet` (small, well-specified work).
+  This file overrides them if they ever disagree.
+- The model the APP calls is a separate thing: `claude-sonnet-4-6` (section 4).
 
 ## 9. Before you say a task is done
 
@@ -387,6 +402,8 @@ Tick every line, or state which one you skipped and why.
 - [ ] I ran it on **staging** in Chrome and did the actual user action. For UI:
       checked at 390px and desktop, with keyboard focus, and with no console
       errors.
+- [ ] If I touched sign-in, books, navigation or any text or role those screens
+      show: `npm run test:e2e` passes, and I updated `tests/e2e` to match.
 - [ ] Failure paths behave: bad input, AI or network failure, permission denied.
       Each ends somewhere usable with a plain next step.
 - [ ] If data is involved: reload keeps the change; doing it twice changes

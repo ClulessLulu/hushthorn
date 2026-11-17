@@ -1,12 +1,12 @@
 import EnamelButton from './components/EnamelButton';
 import NavTab from './components/NavTab';
-import SpineAppearance, { useShelfSpine } from './components/SpineAppearance';
 import { useState, useRef, useEffect, Fragment } from "react";
 import Papa from "papaparse";
 import { supabase } from './lib/supabase';
 import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySimpleSnap, planAudioSnap, checkAudioSnap, posInt } from './lib/progressSnap';
 import { prepareSnapImage } from './lib/snapImage';
 import { hashStr, asPageCount, spineWidthOf, layoutShelfRows } from './lib/shelfLayout';
+import { mergeImport } from './lib/importMerge';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { PASSWORD_RULE_MSG, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl } from './lib/authErrors';
@@ -1946,7 +1946,6 @@ const SPINE_GLOW = {
 };
 
 function Spine({ book, onOpen, dimmed, onPersist }) {
-  const { photo: actualSpine } = useShelfSpine(book.owners ? null : book.id);
   const color = useSpineColor(book, onPersist);
   const h = 122 + (hashStr(book.title || "") % 48);
   const w = spineWidthOf(book);
@@ -1988,8 +1987,7 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
       style={{
         width: w,
         height: h,
-        background: actualSpine ? `url("${actualSpine}") center / 100% 100% no-repeat, ${color}`
-          : `linear-gradient(90deg, rgba(0,0,0,0.35), transparent 30%, transparent 70%, rgba(0,0,0,0.45)), ${color}`,
+        background: `linear-gradient(90deg, rgba(0,0,0,0.35), transparent 30%, transparent 70%, rgba(0,0,0,0.45)), ${color}`,
         boxShadow: book.read
           ? "1px 0 2px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(232,200,119,0.55)"
           : "1px 0 2px rgba(0,0,0,0.6)",
@@ -2046,7 +2044,7 @@ function Spine({ book, onOpen, dimmed, onPersist }) {
         <span className="mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0 border border-cyan-300/90 bg-transparent" />
       )}
       <span
-        className={actualSpine ? "invisible" : "ht-display text-[8px] leading-none text-pink-50/85 overflow-hidden"}
+        className="ht-display text-[8px] leading-none text-pink-50/85 overflow-hidden"
         style={{ writingMode: "vertical-rl", maxHeight: h - 44, letterSpacing: "0.06em" }}
       >
         {(book.title || "").length > 24 ? book.title.slice(0, 23) + "…" : book.title}
@@ -3270,6 +3268,10 @@ export default function Hushthorn() {
       if (error) {
         console.error('import books insert:', error.message);
         ok = false; // skip their notes too — the book_id FKs don't exist
+        // Take the unsaved books back off the shelf. Left there, they vanish on
+        // reload, and a retry would see them as "already here" and write nothing.
+        const failed = new Set(additions.map((b) => b.id));
+        setBooks((cur) => cur.filter((b) => !failed.has(b.id)));
       } else {
         const noteRows = additions.flatMap(b => (b.notes || []).map(n => toNoteRow(n, b.id)));
         if (noteRows.length) {
@@ -3999,103 +4001,6 @@ function parseGoodreads(csvText) {
   return out;
 }
 
-// Fingerprint a highlight for dedupe: lowercase, strip punctuation and quote
-// glyphs, collapse whitespace. The same passage from different sources
-// (clippings re-export, notebook export, re-import) converges to one stable
-// string — the `noteFingerprint()` invariant documented in CLAUDE.md. Ported
-// from the design prototype (prototype/hushthorn-demo.jsx) with a non-string
-// guard added.
-function noteFingerprint(text) {
-  return (typeof text === "string" ? text : "")
-    .toLowerCase()
-    .replace(/[“”"'‘’.,!?;:—–\-…()]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// Pure smart-merge for The Binding / batch add. Given the current shelf and
-// the parsed import items, computes the next local state plus exactly what
-// must be persisted. Books are unique by title (case-insensitive): a match
-// merges into the existing entry — including entries created earlier in the
-// SAME batch, so one file can never mint duplicate rows. Notes dedupe by
-// noteFingerprint(), both against the book's existing marginalia and within
-// the batch (Kindle clippings can repeat a highlight verbatim). Pure — ids
-// and the date stamp are injected — so tests/import-dedupe-unit.mjs can
-// exercise it directly. Returns { next, additions, updates }:
-//   next      — the full next books array (for setBooks)
-//   additions — brand-new book objects with notes attached (INSERT books+notes)
-//   updates   — { id, fields, newNotes } per changed existing book
-//               (UPDATE books when fields is non-empty; INSERT newNotes)
-function mergeImport(prevBooks, items, today, makeId) {
-  const updated = (prevBooks || []).map((b) => ({ ...b, notes: [...(b.notes || [])] }));
-  const byTitle = new Map(updated.map((b) => [b.title.toLowerCase(), b]));
-  const additions = [];
-  const addedIds = new Set(); // books minted earlier in THIS batch
-  const updates = [];
-  for (const item of items || []) {
-    if (!item || typeof item.title !== "string" || !item.title.trim()) continue;
-    const key = item.title.toLowerCase();
-    // Build note objects: drop empty/non-string text (a fingerprint of "" means
-    // no textual content) and dedupe within the batch itself.
-    const seen = new Set();
-    const newNotes = [];
-    for (const n of item.notes || []) {
-      const fp = noteFingerprint(n && n.text);
-      if (!fp || seen.has(fp)) continue;
-      seen.add(fp);
-      newNotes.push({
-        id: makeId(),
-        page: (n && n.page) || "",
-        isQuote: !!(n && n.isQuote),
-        text: n.text,
-        isVoice: false,
-        isTime: false,
-        date: today,
-      });
-    }
-    const existing = byTitle.get(key);
-    if (existing) {
-      const have = new Set((existing.notes || []).map((n) => noteFingerprint(n.text)));
-      const fresh = newNotes.filter((n) => !have.has(noteFingerprint(n.text)));
-      // Only genuine upgrades become fields — an unchanged book yields no write.
-      const fields = {};
-      if (!existing.read && item.read) fields.read = true;
-      if (item.shelf === "owned" && existing.shelf !== "owned") fields.shelf = "owned";
-      if (!existing.overall && item.overall) fields.overall = item.overall;
-      if ((!existing.genres || existing.genres.length === 0) && item.genres?.length) fields.genres = item.genres;
-      if (!existing.coverUrl && item.coverUrl) fields.coverUrl = item.coverUrl;
-      Object.assign(existing, fields);
-      existing.notes = [...fresh, ...existing.notes];
-      if (addedIds.has(existing.id)) {
-        // Same title twice within one file (e.g. casing variants): merged into
-        // the pending addition object — its INSERT already carries this.
-      } else if (fresh.length || Object.keys(fields).length) {
-        updates.push({ id: existing.id, fields, newNotes: fresh });
-      }
-    } else {
-      const book = {
-        id: makeId(),
-        title: item.title,
-        author: item.author || "Unknown author",
-        year: null,
-        coverUrl: item.coverUrl || "",
-        genres: item.genres || [],
-        shelf: item.shelf || "owned",
-        read: !!item.read,
-        overall: item.overall || 0,
-        smut: 0,
-        formats: ["print"],
-        progress: item.progress || {},
-        notes: newNotes,
-      };
-      additions.push(book);
-      addedIds.add(book.id);
-      byTitle.set(key, book); // unique-by-title holds within the batch too
-    }
-  }
-  return { next: [...additions, ...updated], additions, updates };
-}
-
 function PairSection({ books, onImport }) {
   const [preview, setPreview] = useState(null); // { source, items: [{...book, include, existing}] }
   const [busy, setBusy] = useState(false);
@@ -4167,7 +4072,7 @@ function PairSection({ books, onImport }) {
       );
     } else {
       setError(
-        "Some of that couldn't be bound to the archive. The books are on your shelf for this session — check your connection and upload the same file again. Re-importing never creates duplicates."
+        "Some of that couldn't be bound to the archive. Check your connection and upload the same file again. Re-importing never creates duplicates."
       );
     }
     setPreview(null);
@@ -6063,6 +5968,23 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
   const [searchMulti, setSearchMulti] = useState(false);
   const [searchQueue, setSearchQueue] = useState([]);
   const searchInputRef = useRef(null);
+  const [batchSaving, setBatchSaving] = useState(false);
+  const [batchError, setBatchError] = useState("");
+  // Shared by both batch adds. A ref, because the disabled state only exists after
+  // a re-render: two presses in the same instant would both save (duplicate titles).
+  const batchBusyRef = useRef(false);
+  const saveBatch = async (items) => {
+    if (batchBusyRef.current) return;
+    if (!items.length || !onAddMany) return onClose();
+    batchBusyRef.current = true;
+    setBatchSaving(true);
+    setBatchError("");
+    const ok = await onAddMany(items);
+    if (ok) return onClose();
+    batchBusyRef.current = false;
+    setBatchSaving(false);
+    setBatchError("Those tomes could not be saved. Check your connection, then tap Add again.");
+  };
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -6612,11 +6534,10 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
   const removeFromQueue = (isbn) => setQueue((q) => q.filter((b) => b.isbn !== isbn));
 
   const removeFromSearchQueue = (key) => setSearchQueue((q) => q.filter((b) => b.key !== key));
-  const addSearchBatch = () => {
-    const items = searchQueue.filter((b) => !b.inArchive).map(({ key, inArchive, ...book }) => book);
-    if (items.length && onAddMany) onAddMany(items);
-    onClose();
-  };
+  // Close only once the books are saved. On a failed write the window and the
+  // queue stay, so the picks are not lost and the user can try again.
+  const addSearchBatch = () =>
+    saveBatch(searchQueue.filter((b) => !b.inArchive).map(({ key, inArchive, ...book }) => book));
 
   const addBatch = () => {
     const items = queue.filter((q) => !q.inArchive).map((q) => {
@@ -6631,8 +6552,9 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
         progress: validPageCount ? { print: { pages: validPageCount } } : {},
       };
     });
-    if (items.length && onAddMany) onAddMany(items);
-    onClose();
+    // Same as the search batch: it used to close at once and lose the queue
+    // without a word when the save failed.
+    saveBatch(items);
   };
 
   const scanAnother = () => {
@@ -6772,10 +6694,11 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
                 </div>
               )}
               {searchQueue.some((b) => !b.inArchive) && (
-                <button onClick={addSearchBatch} className="ht-display w-full min-h-[44px] py-2 rounded-sm bg-gradient-to-r from-indigo-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 text-white text-xs font-semibold uppercase">
-                  Add {searchQueue.filter((b) => !b.inArchive).length} to the archive
+                <button onClick={addSearchBatch} disabled={batchSaving} className="ht-display w-full min-h-[44px] py-2 rounded-sm bg-gradient-to-r from-indigo-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 disabled:opacity-50 text-white text-xs font-semibold uppercase">
+                  {batchSaving ? "Inscribing…" : `Add ${searchQueue.filter((b) => !b.inArchive).length} to the archive`}
                 </button>
               )}
+              {batchError && <p role="alert" className="text-sm text-pink-300">{batchError}</p>}
             </div>
           )}
 
@@ -7064,8 +6987,8 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
               )}
               {queue.some((q) => !q.inArchive) && (
                 <div className="flex gap-2 items-center">
-                  <button onClick={addBatch} className="ht-display flex-1 py-2 rounded-sm bg-gradient-to-r from-indigo-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 text-white text-xs font-semibold uppercase">
-                    Add {queue.filter((q) => !q.inArchive).length} to
+                  <button onClick={addBatch} disabled={batchSaving} className="ht-display flex-1 py-2 rounded-sm bg-gradient-to-r from-indigo-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 disabled:opacity-50 text-white text-xs font-semibold uppercase">
+                    {batchSaving ? "Inscribing…" : `Add ${queue.filter((q) => !q.inArchive).length} to`}
                   </button>
                   <select value={batchShelf} onChange={(e) => setBatchShelf(e.target.value)}
                     className="bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-2 text-sm text-purple-100 focus:outline-none focus:border-pink-400">
@@ -7074,6 +6997,7 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
                   </select>
                 </div>
               )}
+              {batchError && <p role="alert" className="text-sm text-pink-300">{batchError}</p>}
             </div>
           )}
 
@@ -8010,7 +7934,6 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
       <div className="flex flex-col sm:flex-row gap-5">
         <div className="sm:w-52 flex-shrink-0">
           <CoverEditor book={book} onUpdate={onUpdate} session={session} />
-          <SpineAppearance key={book.id} id={book.id} />
           <div className="mt-3 flex flex-col gap-1.5">
             <ToggleRow
               label={book.shelf === "owned" ? "On the Owned shelf" : "On the Wishlist"}
