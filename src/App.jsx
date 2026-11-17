@@ -2683,7 +2683,8 @@ function Meter({ value, onChange, Icon, label, readOnly = false, size }) {
           key={n}
           type="button"
           disabled={readOnly}
-          onClick={() => { if (onChange) { onChange(n === value ? 0 : n); setFlash((f) => f + 1); } }}
+          // "Saved" only once the write was not refused (false); it used to flash beside the error.
+          onClick={async () => { if (onChange && (await onChange(n === value ? 0 : n)) !== false) setFlash((f) => f + 1); }}
           className={`p-0.5 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${readOnly ? "cursor-default" : "cursor-pointer hover:scale-110 transition-transform"}`}
           aria-label={`${label}: ${n} of 5`}
         >
@@ -3414,11 +3415,11 @@ export default function Hushthorn() {
           is_time: added.isTime ?? false,
           date: added.date,
         });
-        if (error) { console.error('note insert:', error.message); return; }
+        if (error) { console.error('note insert:', error.message); return false; }
       }
       if (removed) {
         const { error } = await supabase.from('notes').delete().eq('id', removed.id);
-        if (error) { console.error('note delete:', error.message); return; }
+        if (error) { console.error('note delete:', error.message); return false; }
       }
     }
     // Auto-Read: any format reaching 100% marks the book Read. Centralized here
@@ -3926,8 +3927,9 @@ export default function Hushthorn() {
             // update directly by id. If there is no mineBookId the book is not
             // mine — the panel offers "Add to my library" instead of edits.
             const id = activeBook.mineBookId ?? activeBook.id;
-            if (!id) return;
-            await updateBook(id, patch);
+            if (!id) return false;
+            // The book window shows "could not be saved" when this is false.
+            if ((await updateBook(id, patch)) === false) return false;
             // formats/shelf reshape the union entry's owners[] + top-level union,
             // which the lightweight in-place mirror can't recompute — reload so the
             // archive card / WhoHasIt reflect the change immediately. title/author
@@ -7661,14 +7663,35 @@ function RevealGrid({ book, meId }) {
 //   `me`        — session.user.id for archive branch ownership checks
 //   `setHidden` — toggles hidden_from_archives on my book row
 //   `onOpenAdd` — opens AddBookModal prefilled from the UnionBook
-function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden, onOpenAdd, isTitleTaken }) {
+function DetailPanel({ book, onClose, onUpdate: saveRaw, onRemove, session, me, setHidden, onOpenAdd, isTitleTaken }) {
   const isUnion = !!book.owners;
   const isMine  = isUnion ? !!book.mineBookId : true; // personal books are always mine
+
+  // Every control in this window saves through here, so a refused write is
+  // never silent (it used to be: ratings didn't light, Save & Close dropped
+  // the edit, a note's words were wiped). Returns false on failure.
+  const [saveError, setSaveError] = useState("");
+  const onUpdate = async (patch) => {
+    const ok = await saveRaw(patch);
+    setSaveError(ok === false ? "That change could not be saved. Check your connection, then try again." : "");
+    return ok;
+  };
 
   // "Divine tropes" — populates suggestions for the trope picker below; this
   // confirm-first path never applies them itself (unlike the bulk backfill).
   const [tropeSuggestions, setTropeSuggestions] = useState([]);
   const [tropeBusy, setTropeBusy] = useState(false);
+  const [tropeMsg, setTropeMsg] = useState("");
+  // suggestTropes returns [] for AI down, junk and "no idea" alike; all three
+  // end the same way: tag by hand. Without a message the button looked broken.
+  const divine = async () => {
+    setTropeBusy(true);
+    setTropeMsg("");
+    const s = await suggestTropes(book.title, book.author);
+    setTropeSuggestions(s);
+    if (!s.length) setTropeMsg("The scribe found no tropes for this tome. Choose them by hand from Browse all tropes.");
+    setTropeBusy(false);
+  };
 
   // Buffered title/author/genres — edits stage here and only reach onUpdate
   // (and the DB) on Save & Close. The `key` at the render site resets this
@@ -7690,7 +7713,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
     buf.author !== (book.author || "")
   );
   const discard = () => { setBuf({ title: book.title || "", author: book.author || "" }); setGenreInput(""); };
-  const saveAndClose = () => {
+  const saveAndClose = async () => {
     const t = buf.title.trim();
     // Hard-block a rename that collides with another of my books (unique by
     // title, case-insensitive): a silent collision hides a book from the archive
@@ -7704,14 +7727,15 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
     const patch = {};
     if (t !== (book.title || "")) patch.title = t || (book.title || ""); // blank-title guard
     if (buf.author.trim() !== (book.author || "")) patch.author = buf.author.trim();
-    if (Object.keys(patch).length) onUpdate(patch);
+    // A refused write keeps the window open with the edit in place.
+    if (Object.keys(patch).length && (await onUpdate(patch)) === false) return;
     onClose();
   };
-  const addGenre = (raw = genreInput) => {
+  const addGenre = async (raw = genreInput) => {
     const g = canonicalGenre(raw);
     const current = book.genres || [];
     if (!g || current.some((x) => x.toLowerCase() === g.toLowerCase())) return;
-    onUpdate({ genres: [...current, g].slice(0, 6) });
+    if ((await onUpdate({ genres: [...current, g].slice(0, 6) })) === false) return;
     setGenreInput("");
   };
   const removeGenre = (g) => onUpdate({ genres: (book.genres || []).filter((x) => x !== g) });
@@ -7801,6 +7825,7 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
 
   // Header is shared between both variants.
   const header = (
+    <>
     <div className="flex items-start justify-between mb-4 gap-3">
       <div>
         <h2 className="ht-display text-2xl text-pink-100 leading-tight">{book.title}</h2>
@@ -7811,6 +7836,13 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
       </div>
       <button onClick={onClose} className="text-purple-300 hover:text-pink-300 text-xl px-2 flex-shrink-0" aria-label="Close">✕</button>
     </div>
+    {/* Sticky so it stays in view when the failed control is far down the panel. */}
+    {saveError && (
+      <p role="alert" className="sticky top-0 z-10 -mt-2 mb-3 px-3 py-2 rounded-sm border border-pink-500/60 bg-[#1a0d24] text-[15px] text-pink-200">
+        {saveError}
+      </p>
+    )}
+    </>
   );
 
   // ── Archive variant ──────────────────────────────────────────────────────────
@@ -7876,17 +7908,13 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
                   />
                   <button
                     type="button"
-                    onClick={async () => {
-                      setTropeBusy(true);
-                      const s = await suggestTropes(book.title, book.author);
-                      setTropeSuggestions(s);
-                      setTropeBusy(false);
-                    }}
+                    onClick={divine}
                     disabled={tropeBusy}
                     className="ht-display mt-2 text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300 disabled:opacity-40"
                   >
                     {tropeBusy ? "Divining…" : "✨ Divine tropes"}
                   </button>
+                  {tropeMsg && <p role="status" className="mt-1 text-sm text-pink-300">{tropeMsg}</p>}
                 </div>
 
                 <ProgressEditor book={book} onUpdate={onUpdate} />
@@ -7993,17 +8021,13 @@ function DetailPanel({ book, onClose, onUpdate, onRemove, session, me, setHidden
             />
             <button
               type="button"
-              onClick={async () => {
-                setTropeBusy(true);
-                const s = await suggestTropes(book.title, book.author);
-                setTropeSuggestions(s);
-                setTropeBusy(false);
-              }}
+              onClick={divine}
               disabled={tropeBusy}
               className="ht-display mt-2 text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300 disabled:opacity-40"
             >
               {tropeBusy ? "Divining…" : "✨ Divine tropes"}
             </button>
+            {tropeMsg && <p role="status" className="mt-1 text-sm text-pink-300">{tropeMsg}</p>}
           </div>
 
           <ProgressEditor book={book} onUpdate={onUpdate} />
@@ -8034,10 +8058,10 @@ const FORMAT_OPTIONS = Object.entries(FORMAT_META).map(
 function FormatToggles({ book, onUpdate }) {
   const [flash, setFlash] = useState(0);
   const fmts = (book.formats && book.formats.length) ? book.formats : ["print"];
-  const toggle = (fmt) => {
+  const toggle = async (fmt) => {
     const has = fmts.includes(fmt);
     if (has && fmts.length === 1) return; // keep at least one format
-    onUpdate({ formats: has ? fmts.filter((f) => f !== fmt) : [...fmts, fmt] });
+    if ((await onUpdate({ formats: has ? fmts.filter((f) => f !== fmt) : [...fmts, fmt] })) === false) return;
     setFlash((f) => f + 1);
   };
   return (
@@ -8073,8 +8097,8 @@ function FormatToggles({ book, onUpdate }) {
 
 function ToggleRow({ label, action, onClick }) {
   const [flash, setFlash] = useState(0);
-  const handleClick = () => {
-    onClick();
+  const handleClick = async () => {
+    if ((await onClick()) === false) return;
     setFlash((f) => f + 1);
   };
   return (
@@ -8145,7 +8169,7 @@ function NotesSection({ book, onUpdate }) {
     setRecording(true);
   };
 
-  const addNote = () => {
+  const addNote = async () => {
     if (!text.trim()) return;
     const note = {
       id: crypto.randomUUID(),
@@ -8156,7 +8180,8 @@ function NotesSection({ book, onUpdate }) {
       isVoice: wasVoiceRef.current,
       date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }),
     };
-    onUpdate({ notes: [note, ...book.notes] });
+    // Keep the words in the box if the save is refused; they used to be wiped.
+    if ((await onUpdate({ notes: [note, ...book.notes] })) === false) return;
     setPage("");
     setText("");
     setIsQuote(false);
