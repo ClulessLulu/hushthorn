@@ -121,6 +121,35 @@ test.describe('around the reply', () => {
     expect(await db.booksByTitle(title)).toHaveLength(0);
   });
 
+  test('the list shows before slow cover lookups finish', async () => {
+    const title = uniqueTitle('Quick');
+    await page.unroute(/openlibrary\.org/);
+    let release;
+    const held = new Promise((r) => { release = r; });
+    await page.route(/openlibrary\.org/, async (route) => { await held; return route.fulfill({ status: 200, contentType: 'application/json', body: '{"docs":[]}' }); });
+    oracleSays(JSON.stringify([rec(title)]));
+    await consult().click();
+    await expect(page.getByText(title)).toBeVisible({ timeout: 3000 }); // covers still held
+    release();
+  });
+
+  test('Consult again tells the scribe what it already suggested', async () => {
+    const first = uniqueTitle('First');
+    const prompts = [];
+    await page.unroute('**/api/claude');
+    await page.route('**/api/claude', (route) => {
+      prompts.push(route.request().postDataJSON().messages[0].content);
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ content: [{ type: 'text', text: JSON.stringify([rec(prompts.length === 1 ? first : uniqueTitle('Second'))]) }] }) });
+    });
+    await consult().click();
+    await expect(page.getByText(first)).toBeVisible();
+    await consult().click();
+    await expect.poll(() => prompts.length).toBe(2);
+    expect(prompts[0]).not.toContain(first);
+    expect(prompts[1]).toContain(`already suggested to this reader: ${first}`);
+  });
+
   test('a same-instant double press asks the scribe once', async () => {
     const calls = oracleSays(JSON.stringify([rec(uniqueTitle('Once'))]));
     await consult().evaluate((b) => { b.click(); b.click(); });
