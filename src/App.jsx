@@ -3580,7 +3580,7 @@ export default function Hushthorn() {
       formats: book.formats || ['print'],
       progress: book.progress || {},
     });
-    if (error) { console.error('addBook:', error.message); return; }
+    if (error) { console.error('addBook:', error.message); return false; }
     const nextBooks = [{ ...book, id, tropes: normalizeTropes(book.tropes, TROPE_MAX), progress: book.progress || {}, notes: [] }, ...books];
     setBooks(nextBooks);
     runCathedralCheck(nextBooks);
@@ -3595,6 +3595,7 @@ export default function Hushthorn() {
     } else if (book.shelf === 'owned') {
       setActiveId(id);
     }
+    return true;
   };
 
   // In the personal library (currentLibraryId === null) the tabs are UNCHANGED.
@@ -5978,6 +5979,14 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
   // Shared by both batch adds. A ref, because the disabled state only exists after
   // a re-render: two presses in the same instant would both save (duplicate titles).
   const batchBusyRef = useRef(false);
+  // A single add (search pick or hand-entered form) that the database refused used
+  // to do nothing visible: the window stayed open and the reader saw no reason.
+  const [addError, setAddError] = useState("");
+  const submitOne = async (book) => {
+    setAddError("");
+    const ok = await onAdd(book);
+    if (ok === false) setAddError("That tome could not be saved. Check your connection, then tap Add again.");
+  };
   const saveBatch = async (items) => {
     if (batchBusyRef.current) return;
     if (!items.length || !onAddMany) return onClose();
@@ -6165,10 +6174,10 @@ function AddBookModal({ onAdd, onAddMany, onClose, session, books = [], seed = n
     };
     // Already in the archive? Confirm before adding a separate copy.
     if (existingByTitle(doc.title)) {
-      setPendingDup({ title: doc.title, run: () => onAdd(book) });
+      setPendingDup({ title: doc.title, run: () => submitOne(book) });
       return;
     }
-    onAdd(book);
+    submitOne(book);
   };
 
   // Fetch a Google Books cover for a title — runs regardless of whether Claude succeeds.
@@ -6614,7 +6623,7 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
     // Best-effort spine color from the resolved cover; null on any failure.
     const spineColor = coverUrl ? await computeSpineColor(coverUrl) : null;
     const validPageCount = asPageCount(manual.pageCount);
-    onAdd({
+    await submitOne({
       title: manual.title.trim(),
       author: manual.author.trim() || "Unknown author",
       year: null,
@@ -6658,6 +6667,7 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
         <EnamelButton variant="secondary" aria-pressed={mode === "search"} onClick={() => setMode("search")}>Scour the grimoire</EnamelButton>
         <EnamelButton variant="secondary" aria-pressed={mode === "scan"} onClick={() => setMode("scan")}>Scan or upload</EnamelButton>
       </div>
+      {addError && <p role="alert" className="mb-3 text-[15px] text-pink-300">{addError}</p>}
 
       {mode === "search" ? (
         <>
