@@ -114,6 +114,45 @@ test.describe('Add several', () => {
     await expect(inscribe.dialog).toBeHidden();
     await expect.poll(async () => (await saved(a))?.shelf).toBe('owned');
     await expect.poll(async () => (await saved(b))?.shelf).toBe('wishlist');
+    // Each book keeps its own details (the year used to be lost in a batch).
+    expect(await saved(a)).toMatchObject({ author: 'E2E Bot', year: 2020, genres: ['Fantasy'] });
+    expect(await saved(b)).toMatchObject({ author: 'E2E Bot', year: 2020, genres: ['Fantasy'] });
+  });
+
+  test('Add 1 to the archive saves a queue of one', async () => {
+    await queue(a);
+    await inscribe.addToArchive(1).click();
+    await expect(inscribe.dialog).toBeHidden();
+    await expect.poll(async () => (await saved(a))?.shelf).toBe('owned');
+  });
+
+  // Two presses in the same instant, before the button can disable, must save once.
+  test('two presses in the same instant save each book once', async () => {
+    await queue(a);
+    await inscribe.addToArchive(1).evaluate((btn) => { btn.click(); btn.click(); });
+    await expect(inscribe.dialog).toBeHidden();
+    await expect.poll(() => db.booksByTitle(a)).toHaveLength(1);
+    await new Promise((r) => setTimeout(r, 1500)); // a second save would have landed by now
+    expect(await db.booksByTitle(a)).toHaveLength(1);
+  });
+
+  // Negative: the save is refused. The window and the queue must stay, with a plain
+  // message, and nothing may be left on the shelf that is not in the database.
+  test('a failed save keeps the window and the queue, and a second try saves', async ({ page }) => {
+    await queue(a);
+    await queue(b);
+    await page.route('**/rest/v1/books*', (route) =>
+      route.request().method() === 'POST' ? route.fulfill({ status: 500, contentType: 'application/json', body: '{"message":"e2e"}' }) : route.fallback());
+    await inscribe.addToArchive(2).click();
+    await expect(inscribe.dialog.getByRole('alert')).toContainText('could not be saved');
+    await expect(inscribe.dialog.getByText('2 queued')).toBeVisible();
+    expect(await db.booksByTitle(a)).toHaveLength(0);
+    await expect(lib.card(a)).toHaveCount(0); // nothing unsaved left on the shelf
+    await page.unroute('**/rest/v1/books*');
+    await inscribe.addToArchive(2).click();
+    await expect(inscribe.dialog).toBeHidden();
+    await expect.poll(() => db.booksByTitle(a)).toHaveLength(1);
+    await expect.poll(() => db.booksByTitle(b)).toHaveLength(1);
   });
 });
 
