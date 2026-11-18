@@ -118,11 +118,10 @@ test.describe('a refresh keeps the open section', () => {
     await expect(page.getByRole('button', { name: 'Enter the Archive' })).toBeVisible();
 
     await signInThroughForm(page, loadConfig().alpha);
-    // The profile window is still open behind the sign-in page (existing
-    // behaviour, not part of this change); close it to see the screen.
-    if (await lib.profile.dialog.isVisible()) await lib.profile.close.click();
     await expect(lib.shelves.root).toBeVisible();
     await expect(lib.controls.search).toBeVisible();
+    // After the library has rendered, so this cannot pass early while it loads.
+    await expect(lib.profile.dialog).toHaveCount(0);
     await expect(lib.sections.oracle).not.toHaveAttribute('aria-current', 'page');
   });
 });

@@ -1,7 +1,8 @@
 // One positive test per button on the signed-in library screen (section tabs, shelf
 // filters, archive switcher, layout/sort/search/trope controls, profile), through the
 // LibraryPage objects. Runs against staging as the shared test reader.
-import { test, expect } from './helpers/app.js';
+import { test, expect, signInThroughForm } from './helpers/app.js';
+import { loadConfig } from './helpers/env.js';
 import { signIn, rest, uniqueTitle } from './helpers/api.js';
 import { LibraryPage } from './pages/LibraryPage.js';
 import { InscribeModal } from './pages/InscribeModal.js';
@@ -231,11 +232,78 @@ test.describe('profile', () => {
 
   // The sign-out request is answered locally: a real one would revoke the saved
   // test session that every other test in this run relies on.
-  test('Leave the archive returns to the sign-in page', async ({ page }) => {
+  test('Leave the archive returns to the sign-in page and removes Your Profile', async ({ page }) => {
+    await page.route('**/auth/v1/logout*', (route) => route.fulfill({ status: 204, body: '' }));
+    await lib.goto();
+    await lib.profile.chip.click();
+    await expect(lib.profile.dialog).toBeVisible();
+    await lib.profile.leave.click();
+    await expect(page.getByRole('button', { name: 'Enter the Archive' })).toBeVisible();
+    // Gone, not just hidden behind the sign-in page: it stayed mounted before the fix.
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+
+  test('signing back in shows the library with Your Profile closed', async ({ page }) => {
     await page.route('**/auth/v1/logout*', (route) => route.fulfill({ status: 204, body: '' }));
     await lib.goto();
     await lib.profile.chip.click();
     await lib.profile.leave.click();
     await expect(page.getByRole('button', { name: 'Enter the Archive' })).toBeVisible();
+
+    await signInThroughForm(page, loadConfig().alpha);
+    await expect(lib.shelves.root).toBeVisible();
+    await expect(lib.controls.search).toBeVisible();
+    await expect(lib.profile.dialog).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(lib.sections.oracle).not.toHaveAttribute('aria-current', 'page');
+    await expect(lib.sections.codex).not.toHaveAttribute('aria-current', 'page');
+  });
+});
+
+// Signing out in another tab of the same browser reaches the first tab as a
+// SIGNED_OUT event while one of its windows is open: the only UI route to "signed
+// out with a book window or Inscribe open" (those windows cover the profile chip).
+test.describe('signed out from another tab while a window is open', () => {
+  async function signOutInSecondTab(page) {
+    const other = await page.context().newPage();
+    await other.route('**/auth/v1/logout*', (route) => route.fulfill({ status: 204, body: '' }));
+    const otherLib = new LibraryPage(other);
+    await otherLib.goto();
+    await otherLib.profile.chip.click();
+    await otherLib.profile.leave.click();
+    await expect(other.getByRole('button', { name: 'Enter the Archive' })).toBeVisible();
+    await other.close();
+  }
+
+  test('a book window is removed, and the next sign-in shows the library without it', async ({ page }) => {
+    const title = uniqueTitle('SignOut');
+    await db.insertBook({ title, genres: ['Fantasy'], tropes: [] });
+    await lib.goto();
+    await lib.card(title).click();
+    await expect(lib.detail(title)).toBeVisible();
+
+    await signOutInSecondTab(page);
+    await expect(page.getByRole('button', { name: 'Enter the Archive' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    await signInThroughForm(page, loadConfig().alpha);
+    await expect(lib.shelves.root).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+
+  test('the Inscribe window is removed, and the next sign-in shows the library without it', async ({ page }) => {
+    await lib.goto();
+    const inscribe = new InscribeModal(page);
+    await lib.sections.inscribe.click();
+    await expect(inscribe.dialog).toBeVisible();
+
+    await signOutInSecondTab(page);
+    await expect(page.getByRole('button', { name: 'Enter the Archive' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    await signInThroughForm(page, loadConfig().alpha);
+    await expect(lib.shelves.root).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(lib.sections.inscribe).toHaveAttribute('aria-expanded', 'false');
   });
 });
