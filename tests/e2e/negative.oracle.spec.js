@@ -209,6 +209,23 @@ test.describe('around the reply', () => {
     await expect(page.getByRole('img', { name: `Cover of ${title}` })).toHaveCount(1);
   });
 
+  test('a pick the scribe already suggested is not shown again, even if it repeats it', async () => {
+    const first = uniqueTitle('Repeat'), fresh = uniqueTitle('Fresh');
+    let n = 0;
+    await page.unroute('**/api/claude');
+    await page.route('**/api/claude', (route) => {
+      n++;
+      const picks = n === 1 ? [rec(first)] : [rec(first, { reason: 'Already suggested and excluded; replaced below.' }), rec(fresh)];
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(picks) }] }) });
+    });
+    await consult().click();
+    await expect(page.getByText(first)).toBeVisible();
+    await consult().click();
+    await expect(page.getByText(fresh)).toBeVisible();
+    await expect(page.getByText(first)).toHaveCount(0);
+  });
+
   test('a same-instant double press asks the scribe once', async () => {
     const calls = oracleSays(JSON.stringify([rec(uniqueTitle('Once'))]));
     await consult().evaluate((b) => { b.click(); b.click(); });

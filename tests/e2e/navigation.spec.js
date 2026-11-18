@@ -1,5 +1,7 @@
 // The buttons: section tabs, shelf filters, layout switch, shelf search, modal.
-import { test, expect, gotoLibrary, sections, shelves } from './helpers/app.js';
+import { test, expect, gotoLibrary, sections, shelves, signInThroughForm } from './helpers/app.js';
+import { loadConfig } from './helpers/env.js';
+import { LibraryPage } from './pages/LibraryPage.js';
 import { signIn, rest, uniqueTitle } from './helpers/api.js';
 
 test.describe('section tabs and shelf filters', () => {
@@ -45,6 +47,83 @@ test.describe('section tabs and shelf filters', () => {
     } finally {
       await db.deleteE2EBooks();
     }
+  });
+});
+
+// A refresh used to dump the reader on the library. The open section is kept in
+// sessionStorage ('ht-view'), not the URL hash that emailed sign-in links use.
+test.describe('a refresh keeps the open section', () => {
+  test('Oracle is still open after a reload', async ({ page }) => {
+    const lib = new LibraryPage(page);
+    await lib.goto();
+    await lib.sections.oracle.click();
+    await expect(page.getByRole('heading', { name: 'The Oracle' })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'The Oracle' })).toBeVisible();
+    await expect(lib.sections.oracle).toHaveAttribute('aria-current', 'page');
+  });
+
+  test('Codex is still open after a reload', async ({ page }) => {
+    const lib = new LibraryPage(page);
+    await lib.goto();
+    await lib.sections.codex.click();
+    await expect(page.getByRole('heading', { name: 'The Binding' })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'The Binding' })).toBeVisible();
+    await expect(lib.sections.codex).toHaveAttribute('aria-current', 'page');
+  });
+
+  test('leaving the Oracle for a shelf, then reloading, lands on the library', async ({ page }) => {
+    const lib = new LibraryPage(page);
+    await lib.goto();
+    await lib.sections.oracle.click();
+    await expect(page.getByRole('heading', { name: 'The Oracle' })).toBeVisible();
+    await lib.shelves.all.click();
+    await expect(lib.controls.search).toBeVisible();
+
+    await page.reload();
+    await expect(lib.shelves.root).toBeVisible();
+    await expect(lib.controls.search).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'The Oracle' })).toHaveCount(0);
+    await expect(lib.sections.oracle).not.toHaveAttribute('aria-current', 'page');
+  });
+
+  test('a corrupted stored value opens the library with no error', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    const lib = new LibraryPage(page);
+    await lib.goto();
+    await page.evaluate(() => sessionStorage.setItem('ht-view', '{"not":"a view"}\u0000<script>'));
+
+    await page.reload();
+    await expect(lib.shelves.root).toBeVisible();
+    await expect(lib.controls.search).toBeVisible();
+    await expect(lib.sections.oracle).not.toHaveAttribute('aria-current', 'page');
+    expect(errors).toEqual([]);
+  });
+
+  // The sign-out request is answered locally: a real one would revoke the saved
+  // test session that every other test in this run relies on.
+  test('leaving the archive from the Oracle, then signing back in, opens the library', async ({ page }) => {
+    await page.route('**/auth/v1/logout*', (route) => route.fulfill({ status: 204, body: '' }));
+    const lib = new LibraryPage(page);
+    await lib.goto();
+    await lib.sections.oracle.click();
+    await expect(page.getByRole('heading', { name: 'The Oracle' })).toBeVisible();
+
+    await lib.profile.chip.click();
+    await lib.profile.leave.click();
+    await expect(page.getByRole('button', { name: 'Enter the Archive' })).toBeVisible();
+
+    await signInThroughForm(page, loadConfig().alpha);
+    // The profile window is still open behind the sign-in page (existing
+    // behaviour, not part of this change); close it to see the screen.
+    if (await lib.profile.dialog.isVisible()) await lib.profile.close.click();
+    await expect(lib.shelves.root).toBeVisible();
+    await expect(lib.controls.search).toBeVisible();
+    await expect(lib.sections.oracle).not.toHaveAttribute('aria-current', 'page');
   });
 });
 
