@@ -9,6 +9,7 @@ import { hashStr, asPageCount, spineWidthOf, layoutShelfRows } from './lib/shelf
 import { mergeImport } from './lib/importMerge';
 import { buildOraclePrompt, parseRecLines, rememberSeen, verifyPick, ORACLE_MODEL } from './lib/oracle';
 import { readSse } from './lib/sse';
+import { VIEW_KEY, parseSavedView } from './lib/savedView';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { PASSWORD_RULE_MSG, passwordProblem, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl } from './lib/authErrors';
@@ -2794,7 +2795,14 @@ export default function Hushthorn() {
       .catch(() => setAuthReady(true));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') setRecovering(true);
-      if (event === 'SIGNED_OUT') setRecovering(false);
+      if (event === 'SIGNED_OUT') {
+        setRecovering(false);
+        // Every sign-out button lands here. This component stays mounted behind
+        // the sign-in page, so without this the next sign-in would reopen the
+        // Oracle the last reader left open (the effect below saves "library").
+        setView("library");
+        try { sessionStorage.removeItem(VIEW_KEY); } catch { /* nothing stored */ }
+      }
       setSession(session);
     });
     return () => subscription.unsubscribe();
@@ -3227,7 +3235,15 @@ export default function Hushthorn() {
   // Seed for "Add to my library" from an archive entry — prefills the modal with
   // the UnionBook's title/author/cover/genres so the user just picks format/shelf.
   const [addSeed, setAddSeed] = useState(null);
-  const [view, setView] = useState("library"); // library | oracle | pair
+  // Restored from sessionStorage so a refresh on the Oracle or Codex stays there
+  // (it used to dump the reader back on the library). Storage can throw in
+  // private mode, so every access falls back to the library.
+  const [view, setView] = useState(() => {
+    try { return parseSavedView(sessionStorage.getItem(VIEW_KEY)); } catch { return "library"; }
+  }); // library | oracle | pair
+  useEffect(() => {
+    try { sessionStorage.setItem(VIEW_KEY, view); } catch { /* not remembered; harmless */ }
+  }, [view]);
 
   // View controls. Initialized from prefs defaults; synced once an avatar row
   // loads (the effect below runs when prefs change after the data fetch).
