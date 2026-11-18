@@ -150,6 +150,26 @@ test.describe('around the reply', () => {
     expect(prompts[1]).toContain(`already suggested to this reader: ${first}`);
   });
 
+  test('a streamed reply (one pick per line) is shown, and the Oracle asks for a stream', async () => {
+    const a = uniqueTitle('StreamA'), b = uniqueTitle('StreamB');
+    const sse = (text) => `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })}\n\n`;
+    const lines = `${JSON.stringify(rec(a))}\n${JSON.stringify(rec(b))}\n`;
+    let asked;
+    await page.unroute('**/api/claude');
+    await page.route('**/api/claude', (route) => {
+      asked = route.request().postDataJSON();
+      // Split mid-line on purpose: the half line must wait for its other half.
+      return route.fulfill({ status: 200, contentType: 'text/event-stream',
+        body: sse(lines.slice(0, 40)) + sse(lines.slice(40)) + 'event: message_stop\ndata: {"type":"message_stop"}\n\n' });
+    });
+    await consult().click();
+    await expect(page.getByText(a)).toBeVisible();
+    await expect(page.getByText(b)).toBeVisible();
+    await expect(recCards()).toHaveCount(2);
+    expect(asked.stream).toBe(true);
+    expect(asked.model).toBe('claude-haiku-5-5');
+  });
+
   test('a same-instant double press asks the scribe once', async () => {
     const calls = oracleSays(JSON.stringify([rec(uniqueTitle('Once'))]));
     await consult().evaluate((b) => { b.click(); b.click(); });
