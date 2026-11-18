@@ -2,7 +2,7 @@
 // Run: node tests/oracle-unit.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { oracleLibraryLines, buildOraclePrompt, cleanRecs, rememberSeen, ORACLE_SEEN_MAX } from '../src/lib/oracle.js';
+import { oracleLibraryLines, buildOraclePrompt, cleanRecs, rememberSeen, ORACLE_SEEN_MAX, ORACLE_MODEL, ORACLE_COUNT } from '../src/lib/oracle.js';
 
 const book = (o) => ({ title: 'T', author: 'A', shelf: 'owned', read: false, overall: 0, smut: 0, tropes: [], genres: [], ...o });
 
@@ -55,4 +55,10 @@ test('rememberSeen puts newest first, drops repeats in any case, caps the list',
 test('rememberSeen run twice with the same recs changes nothing', () => {
   const once = rememberSeen(['Old'], [{ title: 'A' }]);
   assert.deepEqual(rememberSeen(once, [{ title: 'A' }]), once);
+});
+
+test('the Oracle asks Haiku for exactly 7 picks', () => {
+  assert.equal(ORACLE_MODEL, 'claude-haiku-5-5');
+  assert.equal(ORACLE_COUNT, 7);
+  assert.ok(buildOraclePrompt([book({})]).includes('Recommend exactly 7 real, published books'));
 });

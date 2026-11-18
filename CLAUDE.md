@@ -212,8 +212,10 @@ means touching all of: the migration (both projects), the load mapping,
    batch, never per book in a loop. It is never read for another member.
 8. **Covers load only from allowlisted hosts** (`isAllowedCoverSrc`). A
    co-member controls their `cover_url`, so do not bypass `CoverImage`.
-9. **AI calls** use model `claude-sonnet-4-6` (5 call sites), ask for strict
-   JSON, and parse with `parseClaudeJson()`. Every one has a manual fallback.
+9. **AI calls** use model `claude-sonnet-4-6` (4 call sites), except The Oracle,
+   which uses `ORACLE_MODEL` (`claude-haiku-5-5`, thinking off, 7 picks) from
+   `src/lib/oracle.js` for speed (owner's call, 2026-11-17). All ask for strict
+   JSON and parse with `parseClaudeJson()`. Every one has a manual fallback.
    `SNAP_MAX_EDGE = 1568` in `snapImage.js` is tied to that model tier; do not
    change the model without asking.
 
@@ -388,7 +390,8 @@ Read `docs/BOOK_DESIGN.md` before changing any shelf, card, control or modal.
   sceptical verification, edits inside the 8,300-line file); `backend-dev`,
   `book-data` and `design-guardian` on `sonnet` (small, well-specified work).
   This file overrides them if they ever disagree.
-- The model the APP calls is a separate thing: `claude-sonnet-4-6` (section 4).
+- The models the APP calls are a separate thing: `claude-sonnet-4-6`, and
+  `claude-haiku-5-5` for The Oracle (section 4).
 
 ## 9. Before you say a task is done
 

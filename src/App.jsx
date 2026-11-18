@@ -7,7 +7,7 @@ import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySim
 import { prepareSnapImage } from './lib/snapImage';
 import { hashStr, asPageCount, spineWidthOf, layoutShelfRows } from './lib/shelfLayout';
 import { mergeImport } from './lib/importMerge';
-import { buildOraclePrompt, cleanRecs, rememberSeen } from './lib/oracle';
+import { buildOraclePrompt, cleanRecs, rememberSeen, ORACLE_MODEL } from './lib/oracle';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { PASSWORD_RULE_MSG, passwordProblem, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl } from './lib/authErrors';
@@ -4237,8 +4237,10 @@ function OracleSection({ books, onAddToWishlist }) {
       // Prompt and cleaning live in src/lib/oracle.js (tested). `seen` makes
       // "Consult again" ask for fresh picks instead of the same list.
       const data = await callClaude({
-          model: "claude-sonnet-4-6",
+          model: ORACLE_MODEL,
           max_tokens: 1200,
+          // Haiku 5.5 thinks by default; a short JSON list doesn't need it and it adds wait.
+          thinking: { type: "disabled" },
           messages: [{ role: "user", content: buildOraclePrompt(books, seenRef.current) }],
       });
       shown = cleanRecs(parseClaudeJson(data, "["));

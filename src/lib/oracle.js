@@ -8,7 +8,10 @@
    - Short reasons: output tokens are most of the wait.
 ──────────────────────────────────────────────────────────────── */
 
-export const ORACLE_COUNT = 10;
+// Haiku + 7 picks (owner's call, 2026-11-17): Sonnet 4.6 took ~14.5 s for 10.
+// Only 5 show at a time, so 7 still leaves 2 in reserve.
+export const ORACLE_MODEL = 'claude-haiku-5-5';
+export const ORACLE_COUNT = 7;
 export const ORACLE_SEEN_MAX = 60;
 
 const clean = (s) => (typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : '');
