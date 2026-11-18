@@ -2,7 +2,7 @@
 // Run: node tests/oracle-unit.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { oracleLibraryLines, buildOraclePrompt, cleanRecs, rememberSeen, ORACLE_SEEN_MAX, ORACLE_MODEL, ORACLE_COUNT, parseRecLines } from '../src/lib/oracle.js';
+import { oracleLibraryLines, buildOraclePrompt, cleanRecs, rememberSeen, ORACLE_SEEN_MAX, ORACLE_MODEL, ORACLE_COUNT, parseRecLines, verifyPick } from '../src/lib/oracle.js';
 
 const book = (o) => ({ title: 'T', author: 'A', shelf: 'owned', read: false, overall: 0, smut: 0, tropes: [], genres: [], ...o });
 
@@ -58,10 +58,10 @@ test('rememberSeen run twice with the same recs changes nothing', () => {
   assert.deepEqual(rememberSeen(once, [{ title: 'A' }]), once);
 });
 
-test('the Oracle asks Haiku for exactly 7 picks', () => {
+test('the Oracle asks Haiku for exactly 10 picks', () => {
   assert.equal(ORACLE_MODEL, 'claude-haiku-5-5');
-  assert.equal(ORACLE_COUNT, 7);
-  assert.ok(buildOraclePrompt([book({})]).includes('Recommend exactly 7 real, published books'));
+  assert.equal(ORACLE_COUNT, 10);
+  assert.ok(buildOraclePrompt([book({})]).includes('Recommend exactly 10 real, published books'));
 });
 
 const line = (t) => JSON.stringify({ title: t, author: 'A', genre: 'G', reason: 'R', spice: 3 });
@@ -93,4 +93,29 @@ test('parseRecLines: empty, junk and not-a-string give nothing', () => {
 test('parseRecLines run twice on the same text gives the same picks', () => {
   const t = `${line('A')}\n${line('B')}\n`;
   assert.deepEqual(parseRecLines(t), parseRecLines(t));
+});
+
+const ol = (...docs) => ({ docs });
+
+test('verifyPick: same title and author shows, with the Open Library cover', () => {
+  assert.deepEqual(verifyPick({ title: 'Serpent & Dove', author: 'Shelby Mahurin' },
+    ol({ title: 'Serpent and Dove', author_name: ['Shelby Mahurin'], cover_i: 42 })),
+    { status: 'ok', coverUrl: 'https://covers.openlibrary.org/b/id/42-M.jpg' });
+  assert.deepEqual(verifyPick({ title: 'The Cruel Prince', author: 'Holly Black' }, ol({ title: 'Cruel Prince', author_name: ['Holly Black'] })),
+    { status: 'ok', coverUrl: '' });
+});
+
+test('verifyPick: an invented book or the wrong author is dropped', () => {
+  assert.equal(verifyPick({ title: 'Ruthless Shadows', author: 'Liv Morris' }, ol()).status, 'gone');
+  assert.equal(verifyPick({ title: 'Bloodmarked', author: 'Tracy Wolff' }, ol({ title: 'Bloodmarked', author_name: ['Tracy Deonn'], cover_i: 1 })).status, 'gone');
+  assert.equal(verifyPick({ title: 'Blood and Honey', author: '' }, ol({ title: 'Blood and Honey', author_name: ['Tony Robinson'] })).status, 'gone');
+});
+
+test('verifyPick: no usable reply means unchecked, not dropped', () => {
+  assert.equal(verifyPick({ title: 'A', author: 'B' }, null).status, 'unknown');
+  assert.equal(verifyPick({ title: 'A', author: 'B' }, { error: 'x' }).status, 'unknown');
+});
+
+test('verifyPick: junk inside the reply does not throw', () => {
+  assert.equal(verifyPick({ title: 'A', author: 'Bee' }, ol(null, { title: 7 }, { title: 'A', author_name: 'Bee' })).status, 'gone');
 });

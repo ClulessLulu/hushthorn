@@ -7,7 +7,7 @@ import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySim
 import { prepareSnapImage } from './lib/snapImage';
 import { hashStr, asPageCount, spineWidthOf, layoutShelfRows } from './lib/shelfLayout';
 import { mergeImport } from './lib/importMerge';
-import { buildOraclePrompt, parseRecLines, rememberSeen, ORACLE_MODEL } from './lib/oracle';
+import { buildOraclePrompt, parseRecLines, rememberSeen, verifyPick, ORACLE_MODEL } from './lib/oracle';
 import { readSse } from './lib/sse';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -4243,8 +4243,11 @@ function OracleSection({ books, onAddToWishlist }) {
   // of this list on the next render and the next reserve slides up — that is
   // the whole mechanism; no "added" bookkeeping to drift out of sync.
   const ORACLE_VISIBLE = 5;
+  // A pick shows once Open Library confirms it ('ok') or can't be asked
+  // ('unknown'); invented or misattributed books ('gone') never show.
+  const checking = recs.some((r) => r.status === "pending");
   const visible = recs
-    .filter((r) => !ownedTitles.has((r.title || "").toLowerCase()))
+    .filter((r) => (r.status === "ok" || r.status === "unknown") && !ownedTitles.has((r.title || "").toLowerCase()))
     .slice(0, ORACLE_VISIBLE);
 
   const consult = async () => {
@@ -4262,12 +4265,15 @@ function OracleSection({ books, onAddToWishlist }) {
     const show = (list) => {
       if (runRef.current !== run || !list.length) return;
       anyShown = true;
-      setRecs((prev) => list.map((r) => ({ ...r, coverUrl: prev.find((x) => x.title === r.title)?.coverUrl || "" })));
+      setRecs((prev) => list.map((r) => {
+        const had = prev.find((x) => x.title === r.title);
+        return { ...r, status: had?.status || "pending", coverUrl: had?.coverUrl || "" };
+      }));
       setConsulted(true);
       for (const r of list) {
         if (coverAsked.has(r.title)) continue;
         coverAsked.add(r.title);
-        findCover(r, run);
+        checkPick(r, run);
       }
     };
     try {
@@ -4297,16 +4303,22 @@ function OracleSection({ books, onAddToWishlist }) {
     }
   };
 
-  const findCover = async (r, run) => {
+  // One Open Library lookup per pick: proves the book exists (Haiku invents some)
+  // and finds its cover. Slow or down past 1.5 s: show the pick unchecked rather
+  // than leave the reader with nothing.
+  const checkPick = async (r, run) => {
+    const t = encodeURIComponent(r.title), a = encodeURIComponent(r.author || "");
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1500);
+    let reply = null;
     try {
-      const q = await fetch(
-        `https://openlibrary.org/search.json?title=${encodeURIComponent(r.title)}&author=${encodeURIComponent(r.author)}&limit=1&fields=cover_i`
-      );
-      const cover_i = (await q.json()).docs?.[0]?.cover_i;
-      // A newer consult replaced the list: don't paint covers onto it.
-      if (!cover_i || runRef.current !== run) return;
-      setRecs((list) => list.map((x) => (x.title === r.title ? { ...x, coverUrl: `https://covers.openlibrary.org/b/id/${cover_i}-M.jpg` } : x)));
-    } catch { /* no cover: the crown placeholder stays */ }
+      const q = await fetch(`https://openlibrary.org/search.json?title=${t}&author=${a}&limit=5&fields=title,author_name,cover_i`, { signal: ctrl.signal });
+      if (q.ok) reply = await q.json();
+    } catch { /* unreachable or too slow: unchecked */ } finally { clearTimeout(timer); }
+    const { status, coverUrl } = verifyPick(r, reply);
+    // A newer consult replaced the list: leave it alone.
+    if (runRef.current !== run) return;
+    setRecs((list) => list.map((x) => (x.title === r.title ? { ...x, status, coverUrl } : x)));
   };
 
   const addRec = async (rec) => {
@@ -4346,7 +4358,7 @@ function OracleSection({ books, onAddToWishlist }) {
         )}
       </div>
 
-      {loading && visible.length === 0 && (
+      {(loading || checking) && visible.length === 0 && (
         <p className="text-center text-[15px] text-purple-300/70 italic">Reading the leaves of your library…</p>
       )}
       {error && <p className="text-center text-[15px] text-pink-300">{error}</p>}
@@ -4399,7 +4411,7 @@ function OracleSection({ books, onAddToWishlist }) {
         </p>
       )}
 
-      {consulted && !loading && visible.length === 0 && (
+      {consulted && !loading && !checking && visible.length === 0 && (
         <p className="mt-5 text-center text-[15px] text-purple-300/70 italic">
           The Oracle has given all it saw — consult again for a fresh reading.
         </p>

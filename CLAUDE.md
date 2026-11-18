@@ -70,7 +70,7 @@ hushthorn/
       shelfLayout.js     Spine widths and shelf row packing.
       importMerge.js     noteFingerprint and mergeImport (import and batch-add merge).
       authErrors.js      Auth error text and emailed-link error parsing.
-      oracle.js          The Oracle's prompt, model, JSON Lines parsing, already-suggested titles.
+      oracle.js          The Oracle's prompt, model, JSON Lines parsing, pick check (verifyPick), seen titles.
       sse.js             Reads a streamed Claude reply (callClaude with onText).
   api/claude.js          Vercel serverless proxy to Anthropic (session required).
   tests/
@@ -218,7 +218,8 @@ means touching all of: the migration (both projects), the load mapping,
    `src/lib/oracle.js` for speed (owner's call, 2026-11-17). All ask for strict
    JSON and parse with `parseClaudeJson()`, except The Oracle, which streams
    (`callClaude(body, { onText })`, passed through by `api/claude.js`) and
-   reads one pick per line with `parseRecLines()`. Every one has a manual fallback.
+   reads one pick per line with `parseRecLines()`; each pick shows only after
+   Open Library confirms its title and author (`verifyPick`). Every one has a manual fallback.
    `SNAP_MAX_EDGE = 1568` in `snapImage.js` is tied to that model tier; do not
    change the model without asking.
 
