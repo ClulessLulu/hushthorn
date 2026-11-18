@@ -121,6 +121,21 @@ test.describe('shelf controls', () => {
     await expect(lib.page.locator('.ht-cathedral-back')).toHaveCount(0);
   });
 
+  // A card's swords and candles used to be disabled buttons inside the card's own
+  // button: invalid HTML, and React logged validateDOMNesting. Now they are one image each.
+  test('a cover card reads its ratings out, with no button nested inside the card', async ({ page }) => {
+    const warnings = [];
+    page.on('console', (m) => { if (/validateDOMNesting|cannot appear as a descendant/.test(m.text())) warnings.push(m.text()); });
+    const title = uniqueTitle('Rated');
+    await db.insertBook({ title, overall: 3, smut: 2 });
+    await lib.goto();
+    const card = lib.card(title);
+    await expect(card.getByRole('img', { name: 'Verdict: 3 of 5' })).toBeVisible();
+    await expect(card.getByRole('img', { name: 'Smoulder: 2 of 5' })).toBeVisible();
+    await expect(card.getByRole('button')).toHaveCount(0);
+    expect(warnings).toEqual([]);
+  });
+
   test('Spines shows the cathedral spine shelf', async () => {
     await lib.goto();
     await lib.controls.spines.click();
