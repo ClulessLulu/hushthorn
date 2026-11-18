@@ -7,7 +7,7 @@ import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySim
 import { prepareSnapImage } from './lib/snapImage';
 import { hashStr, asPageCount, spineWidthOf, layoutShelfRows } from './lib/shelfLayout';
 import { mergeImport } from './lib/importMerge';
-import { buildOraclePrompt, parseRecLines, rememberSeen, verifyPick, ORACLE_MODEL } from './lib/oracle';
+import { buildOraclePrompt, parseRecLines, rememberSeen, verifyPick, dropSeen, ORACLE_MODEL } from './lib/oracle';
 import { readSse } from './lib/sse';
 import { VIEW_KEY, parseSavedView } from './lib/savedView';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
@@ -4291,7 +4291,9 @@ function OracleSection({ books, onAddToWishlist }) {
     let anyShown = false;
     // Put picks on screen as they arrive, keeping covers already found, and
     // look up a cover once per new pick. Ignored if a newer consult started.
-    const show = (list) => {
+    const avoid = seenRef.current; // titles offered before this consult
+    const show = (found) => {
+      const list = dropSeen(found, avoid);
       if (runRef.current !== run || !list.length) return;
       anyShown = true;
       setRecs((prev) => list.map((r) => {
@@ -4315,10 +4317,10 @@ function OracleSection({ books, onAddToWishlist }) {
           max_tokens: 1200,
           // Haiku 5.5 thinks by default; a short list doesn't need it and it adds wait.
           thinking: { type: "disabled" },
-          messages: [{ role: "user", content: buildOraclePrompt(books, seenRef.current) }],
+          messages: [{ role: "user", content: buildOraclePrompt(books, avoid) }],
       }, { onText: (t) => show(parseRecLines(t)) });
       const text = (data?.content || []).filter((c) => c?.type === "text").map((c) => c.text).join("\n");
-      const shown = parseRecLines(text, true);
+      const shown = dropSeen(parseRecLines(text, true), avoid);
       if (shown.length === 0) throw new Error("empty");
       show(shown);
       seenRef.current = rememberSeen(seenRef.current, shown);

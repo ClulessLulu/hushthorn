@@ -127,3 +127,11 @@ export function verifyPick(rec, olReply) {
   const id = doc.cover_i;
   return { status: 'ok', coverUrl: Number.isInteger(id) && id > 0 ? `https://covers.openlibrary.org/b/id/${id}-M.jpg` : '' };
 }
+
+// Picks already suggested are dropped here too: the prompt asks the model to
+// avoid them, but Haiku sometimes repeats one anyway ("Iron Widow ... Already
+// suggested and excluded; replaced below." showed up as a card).
+export function dropSeen(recs, seen) {
+  const keys = new Set(list(seen).map((t) => t.toLowerCase()));
+  return (Array.isArray(recs) ? recs : []).filter((r) => !keys.has(clean(r?.title).toLowerCase()));
+}

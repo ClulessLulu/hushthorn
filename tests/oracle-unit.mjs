@@ -2,7 +2,7 @@
 // Run: node tests/oracle-unit.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { oracleLibraryLines, buildOraclePrompt, cleanRecs, rememberSeen, ORACLE_SEEN_MAX, ORACLE_MODEL, ORACLE_COUNT, parseRecLines, verifyPick } from '../src/lib/oracle.js';
+import { oracleLibraryLines, buildOraclePrompt, cleanRecs, rememberSeen, ORACLE_SEEN_MAX, ORACLE_MODEL, ORACLE_COUNT, parseRecLines, verifyPick, dropSeen } from '../src/lib/oracle.js';
 
 const book = (o) => ({ title: 'T', author: 'A', shelf: 'owned', read: false, overall: 0, smut: 0, tropes: [], genres: [], ...o });
 
@@ -118,4 +118,12 @@ test('verifyPick: no usable reply means unchecked, not dropped', () => {
 
 test('verifyPick: junk inside the reply does not throw', () => {
   assert.equal(verifyPick({ title: 'A', author: 'Bee' }, ol(null, { title: 7 }, { title: 'A', author_name: 'Bee' })).status, 'gone');
+});
+
+test('dropSeen removes already-suggested titles in any case, keeps the rest in order', () => {
+  const recs = [{ title: 'Iron Widow' }, { title: 'New One' }, { title: 'serpent & dove' }];
+  assert.deepEqual(dropSeen(recs, ['IRON WIDOW', 'Serpent & Dove']).map((r) => r.title), ['New One']);
+  assert.deepEqual(dropSeen(recs, []).length, 3);
+  assert.deepEqual(dropSeen(null, ['A']), []);
+  assert.deepEqual(dropSeen(dropSeen(recs, ['Iron Widow']), ['Iron Widow']).map((r) => r.title), ['New One', 'serpent & dove']);
 });
