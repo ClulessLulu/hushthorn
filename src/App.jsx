@@ -7,7 +7,8 @@ import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySim
 import { prepareSnapImage } from './lib/snapImage';
 import { hashStr, asPageCount, spineWidthOf, layoutShelfRows } from './lib/shelfLayout';
 import { mergeImport } from './lib/importMerge';
-import { buildOraclePrompt, cleanRecs, rememberSeen, ORACLE_MODEL } from './lib/oracle';
+import { buildOraclePrompt, parseRecLines, rememberSeen, ORACLE_MODEL } from './lib/oracle';
+import { readSse } from './lib/sse';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { PASSWORD_RULE_MSG, passwordProblem, mapForgotError, mapResetError, parseAuthLinkError, cleanAuthLinkUrl } from './lib/authErrors';
@@ -24,7 +25,29 @@ const CLAUDE_PROXY_URL = "/api/claude";
 const ANTHROPIC_DIRECT_URL = "https://api.anthropic.com/v1/messages";
 const CLAUDE_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY || "";
 
-async function callClaude(body) {
+// With `onText`, the reply is streamed and onText gets the text so far as it
+// arrives (The Oracle shows each pick as soon as its line is written). The
+// return value has the same shape either way, so parseClaudeJson still works.
+// If the server answers with plain JSON instead of a stream, that is used.
+async function callClaude(body, { onText } = {}) {
+  if (onText) body = { ...body, stream: true };
+  const res = await sendClaude(body);
+  if (!onText || !(res.headers.get("content-type") || "").includes("text/event-stream") || !res.body) return res.json();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "", text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const { texts, error, rest } = readSse(buffer + decoder.decode(value, { stream: true }));
+    buffer = rest;
+    if (error) throw new Error("Claude stream error");
+    if (texts.length) { text += texts.join(""); onText(text); }
+  }
+  return { content: [{ type: "text", text }] };
+}
+
+async function sendClaude(body) {
   // Dev-only direct path: a client key is present, call Anthropic directly.
   if (CLAUDE_API_KEY) {
     const res = await fetch(ANTHROPIC_DIRECT_URL, {
@@ -38,7 +61,7 @@ async function callClaude(body) {
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`Claude API error ${res.status}`);
-    return res.json();
+    return res;
   }
   // Production path: go through the server-side proxy with the user's session.
   const { data: { session } } = await supabase.auth.getSession();
@@ -51,7 +74,7 @@ async function callClaude(body) {
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`Claude API error ${res.status}`);
-  return res.json();
+  return res;
 }
 
 // Extract and parse the strict-JSON payload from a Claude Messages response.
@@ -4232,42 +4255,58 @@ function OracleSection({ books, onAddToWishlist }) {
     setAddError("");
     setRecs([]);
     const run = ++runRef.current;
-    let shown = [];
+    const coverAsked = new Set();
+    let anyShown = false;
+    // Put picks on screen as they arrive, keeping covers already found, and
+    // look up a cover once per new pick. Ignored if a newer consult started.
+    const show = (list) => {
+      if (runRef.current !== run || !list.length) return;
+      anyShown = true;
+      setRecs((prev) => list.map((r) => ({ ...r, coverUrl: prev.find((x) => x.title === r.title)?.coverUrl || "" })));
+      setConsulted(true);
+      for (const r of list) {
+        if (coverAsked.has(r.title)) continue;
+        coverAsked.add(r.title);
+        findCover(r, run);
+      }
+    };
     try {
-      // Prompt and cleaning live in src/lib/oracle.js (tested). `seen` makes
+      // Prompt and parsing live in src/lib/oracle.js (tested). `seen` makes
       // "Consult again" ask for fresh picks instead of the same list.
+      // Streamed: the first pick shows in about a second instead of after the
+      // whole reply (~4 s on Haiku, ~14.5 s before on Sonnet for 10 picks).
       const data = await callClaude({
           model: ORACLE_MODEL,
           max_tokens: 1200,
-          // Haiku 5.5 thinks by default; a short JSON list doesn't need it and it adds wait.
+          // Haiku 5.5 thinks by default; a short list doesn't need it and it adds wait.
           thinking: { type: "disabled" },
           messages: [{ role: "user", content: buildOraclePrompt(books, seenRef.current) }],
-      });
-      shown = cleanRecs(parseClaudeJson(data, "["));
+      }, { onText: (t) => show(parseRecLines(t)) });
+      const text = (data?.content || []).filter((c) => c?.type === "text").map((c) => c.text).join("\n");
+      const shown = parseRecLines(text, true);
       if (shown.length === 0) throw new Error("empty");
+      show(shown);
       seenRef.current = rememberSeen(seenRef.current, shown);
       try { localStorage.setItem(ORACLE_SEEN_KEY, JSON.stringify(seenRef.current)); } catch { /* private mode: in-memory only */ }
-      // Show the list now; covers fill in per card. It used to wait for the
-      // slowest of ten Open Library lookups before showing anything.
-      setRecs(shown.map((r) => ({ ...r, coverUrl: "" })));
-      setConsulted(true);
     } catch {
-      setError("The Oracle's vision clouded over. Try consulting again.");
+      // Picks already on screen stay; the message only replaces an empty list.
+      if (runRef.current === run && !anyShown) setError("The Oracle's vision clouded over. Try consulting again.");
     } finally {
       setLoading(false);
       busyRef.current = false;
     }
-    shown.forEach(async (r) => {
-      try {
-        const q = await fetch(
-          `https://openlibrary.org/search.json?title=${encodeURIComponent(r.title)}&author=${encodeURIComponent(r.author)}&limit=1&fields=cover_i`
-        );
-        const cover_i = (await q.json()).docs?.[0]?.cover_i;
-        // A newer consult replaced the list: don't paint covers onto it.
-        if (!cover_i || runRef.current !== run) return;
-        setRecs((list) => list.map((x) => (x.title === r.title ? { ...x, coverUrl: `https://covers.openlibrary.org/b/id/${cover_i}-M.jpg` } : x)));
-      } catch { /* no cover: the crown placeholder stays */ }
-    });
+  };
+
+  const findCover = async (r, run) => {
+    try {
+      const q = await fetch(
+        `https://openlibrary.org/search.json?title=${encodeURIComponent(r.title)}&author=${encodeURIComponent(r.author)}&limit=1&fields=cover_i`
+      );
+      const cover_i = (await q.json()).docs?.[0]?.cover_i;
+      // A newer consult replaced the list: don't paint covers onto it.
+      if (!cover_i || runRef.current !== run) return;
+      setRecs((list) => list.map((x) => (x.title === r.title ? { ...x, coverUrl: `https://covers.openlibrary.org/b/id/${cover_i}-M.jpg` } : x)));
+    } catch { /* no cover: the crown placeholder stays */ }
   };
 
   const addRec = async (rec) => {
@@ -4307,7 +4346,7 @@ function OracleSection({ books, onAddToWishlist }) {
         )}
       </div>
 
-      {loading && (
+      {loading && visible.length === 0 && (
         <p className="text-center text-[15px] text-purple-300/70 italic">Reading the leaves of your library…</p>
       )}
       {error && <p className="text-center text-[15px] text-pink-300">{error}</p>}

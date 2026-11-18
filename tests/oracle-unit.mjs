@@ -2,7 +2,7 @@
 // Run: node tests/oracle-unit.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { oracleLibraryLines, buildOraclePrompt, cleanRecs, rememberSeen, ORACLE_SEEN_MAX, ORACLE_MODEL, ORACLE_COUNT } from '../src/lib/oracle.js';
+import { oracleLibraryLines, buildOraclePrompt, cleanRecs, rememberSeen, ORACLE_SEEN_MAX, ORACLE_MODEL, ORACLE_COUNT, parseRecLines } from '../src/lib/oracle.js';
 
 const book = (o) => ({ title: 'T', author: 'A', shelf: 'owned', read: false, overall: 0, smut: 0, tropes: [], genres: [], ...o });
 
@@ -26,7 +26,8 @@ test('prompt names already-suggested titles only when there are some', () => {
   assert.ok(!buildOraclePrompt([book({})], []).includes('already suggested'));
   const p = buildOraclePrompt([book({})], ['Old One', 'Old Two']);
   assert.ok(p.includes('Do NOT recommend any of these, already suggested to this reader: Old One; Old Two.'));
-  assert.ok(p.includes('at most 20 words'));
+  assert.ok(p.includes('at most 15 words'));
+  assert.ok(p.includes('ONLY JSON Lines'));
   assert.ok(p.includes('At most 3 may be widely known bestsellers'));
 });
 
@@ -61,4 +62,35 @@ test('the Oracle asks Haiku for exactly 7 picks', () => {
   assert.equal(ORACLE_MODEL, 'claude-haiku-5-5');
   assert.equal(ORACLE_COUNT, 7);
   assert.ok(buildOraclePrompt([book({})]).includes('Recommend exactly 7 real, published books'));
+});
+
+const line = (t) => JSON.stringify({ title: t, author: 'A', genre: 'G', reason: 'R', spice: 3 });
+
+test('parseRecLines: while streaming, only complete lines count', () => {
+  const partial = `${line('One')}\n${line('Two')}\n{"title":"Thr`;
+  assert.deepEqual(parseRecLines(partial).map((r) => r.title), ['One', 'Two']);
+  assert.deepEqual(parseRecLines(`${line('One')}`).map((r) => r.title), []); // no newline yet
+  assert.deepEqual(parseRecLines(`${line('One')}`, true).map((r) => r.title), ['One']);
+});
+
+test('parseRecLines: tolerates fences, an array wrapper and trailing commas', () => {
+  const text = '```json\n[\n' + line('A') + ',\n' + line('B') + '\n]\n```';
+  assert.deepEqual(parseRecLines(text, true).map((r) => r.title), ['A', 'B']);
+});
+
+test('parseRecLines: a pretty-printed array is read once the reply is done', () => {
+  const pretty = JSON.stringify([{ title: 'P', author: 'A' }], null, 2);
+  assert.deepEqual(parseRecLines(pretty).map((r) => r.title), []);
+  assert.deepEqual(parseRecLines(pretty, true).map((r) => r.title), ['P']);
+});
+
+test('parseRecLines: empty, junk and not-a-string give nothing', () => {
+  assert.deepEqual(parseRecLines('', true), []);
+  assert.deepEqual(parseRecLines('The stars are silent.\n', true), []);
+  assert.deepEqual(parseRecLines(null, true), []);
+});
+
+test('parseRecLines run twice on the same text gives the same picks', () => {
+  const t = `${line('A')}\n${line('B')}\n`;
+  assert.deepEqual(parseRecLines(t), parseRecLines(t));
 });

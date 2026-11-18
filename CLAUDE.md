@@ -70,7 +70,8 @@ hushthorn/
       shelfLayout.js     Spine widths and shelf row packing.
       importMerge.js     noteFingerprint and mergeImport (import and batch-add merge).
       authErrors.js      Auth error text and emailed-link error parsing.
-      oracle.js          The Oracle's prompt, reply cleaning, and already-suggested titles.
+      oracle.js          The Oracle's prompt, model, JSON Lines parsing, already-suggested titles.
+      sse.js             Reads a streamed Claude reply (callClaude with onText).
   api/claude.js          Vercel serverless proxy to Anthropic (session required).
   tests/
     *.mjs                Unit tests. These are what `npm test` runs.
@@ -128,7 +129,7 @@ barcode detection are Chromium-only).
 | `npm install` | Install dependencies |
 | `npm run dev` | Dev server, port 5173, **production** Supabase via `.env` |
 | `npm run dev:staging` | Dev server, port 5174, **staging** Supabase via `.env.staging`. Shows a staging badge |
-| `npm test` | Runs every `tests/*.mjs` with `node --test` (7 files, all passing on 2026-11-17) |
+| `npm test` | Runs every `tests/*.mjs` with `node --test` (8 files, all passing on 2026-11-17) |
 | `node tests/<file>.mjs` | Run one test file |
 | `npm run build` | Production build into `dist/` |
 | `node ..\toolbox\scripts\check-dist-for-keys.mjs` | After every build: must print `OK` |
@@ -215,7 +216,9 @@ means touching all of: the migration (both projects), the load mapping,
 9. **AI calls** use model `claude-sonnet-4-6` (4 call sites), except The Oracle,
    which uses `ORACLE_MODEL` (`claude-haiku-5-5`, thinking off, 7 picks) from
    `src/lib/oracle.js` for speed (owner's call, 2026-11-17). All ask for strict
-   JSON and parse with `parseClaudeJson()`. Every one has a manual fallback.
+   JSON and parse with `parseClaudeJson()`, except The Oracle, which streams
+   (`callClaude(body, { onText })`, passed through by `api/claude.js`) and
+   reads one pick per line with `parseRecLines()`. Every one has a manual fallback.
    `SNAP_MAX_EDGE = 1568` in `snapImage.js` is tied to that model tier; do not
    change the model without asking.
 

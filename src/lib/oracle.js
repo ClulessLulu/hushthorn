@@ -6,6 +6,8 @@
    - `seen` lists titles already offered, so "Consult again" gives fresh picks
      (the same prompt used to return the same list every time).
    - Short reasons: output tokens are most of the wait.
+   - JSON Lines (one book per line) so each pick can be shown the moment its
+     line is complete while the reply streams in.
 ──────────────────────────────────────────────────────────────── */
 
 // Haiku + 7 picks (owner's call, 2026-11-17): Sonnet 4.6 took ~14.5 s for 10.
@@ -46,8 +48,8 @@ Infer their taste (tropes, heat, vibes), weighting highly rated, read and wishli
 At most 3 may be widely known bestsellers; the rest should be strong fits a well-read fan may not have found yet.${avoid.length ? `
 Do NOT recommend any of these, already suggested to this reader: ${avoid.join('; ')}.` : ''}
 
-Respond with ONLY a valid JSON array, no preamble, no markdown fences. Each element has exactly these keys:
-"title" (string), "author" (string), "genre" (short string, e.g. "Vampire romantasy"), "reason" (at most 20 words, why it fits THIS reader's taste), "spice" (integer 1-5, your estimate of its heat).`;
+Respond with ONLY JSON Lines: one JSON object per line, one line per book, best first. No array brackets, no preamble, no markdown fences. Each object has exactly these keys:
+"title" (string), "author" (string), "genre" (short string, e.g. "Vampire romantasy"), "reason" (at most 15 words, why it fits THIS reader's taste), "spice" (integer 1-5, your estimate of its heat).`;
 }
 
 // AI output is untrusted: drop entries with no title, repeats, and junk types.
@@ -82,4 +84,25 @@ export function rememberSeen(prev, recs, max = ORACLE_SEEN_MAX) {
     out.push(title);
   }
   return out.slice(0, max);
+}
+
+// Picks from a reply that may still be arriving. Only complete lines count until
+// `done`; the last line may be cut mid-object. Tolerates the model wrapping the
+// lines in an array or fences anyway; if it pretty-printed a JSON array instead,
+// the whole array is parsed once the reply is complete.
+export function parseRecLines(text, done = false) {
+  const s = typeof text === 'string' ? text : '';
+  const lines = s.split(/\r?\n/);
+  if (!done) lines.pop();
+  const objs = [];
+  for (const raw of lines) {
+    const line = raw.trim().replace(/^[[,\s]+/, '').replace(/[\],\s]+$/, '');
+    if (!line.startsWith('{') || !line.endsWith('}')) continue;
+    try { objs.push(JSON.parse(line)); } catch { /* half a line or junk: skip */ }
+  }
+  if (!objs.length && done) {
+    const a = s.indexOf('['), b = s.lastIndexOf(']');
+    if (a !== -1 && b > a) { try { return cleanRecs(JSON.parse(s.slice(a, b + 1))); } catch { /* not JSON */ } }
+  }
+  return cleanRecs(objs);
 }

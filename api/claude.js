@@ -58,9 +58,29 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify(req.body),
     });
+    // Streamed request (The Oracle): pass the events through as they arrive so
+    // the first pick shows in about a second. Errors before the stream starts
+    // still come back as JSON with Anthropic's status.
+    if (req.body?.stream === true && upstream.ok && upstream.body) {
+      res.status(200);
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      const reader = upstream.body.getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+      } finally {
+        res.end();
+      }
+      return;
+    }
     const data = await upstream.json();
     res.status(upstream.status).json(data);
   } catch {
+    if (res.headersSent) { res.end(); return; }
     res.status(502).json({ error: "Upstream AI request failed." });
   }
 }
