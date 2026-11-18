@@ -2700,6 +2700,19 @@ function SavedFlash({ show }) {
 
 function Meter({ value, onChange, Icon, label, readOnly = false, size }) {
   const [flash, setFlash] = useState(0);
+  // Read-only (cover cards, Oracle picks): plain icons with one spoken value.
+  // These used to be disabled <button>s, nested inside the card's own <button>
+  // (invalid HTML; React's validateDOMNesting warning).
+  if (readOnly) {
+    const v = Math.max(0, Math.min(5, Number(value) || 0));
+    return (
+      <span className="flex items-center gap-1" role="img" aria-label={`${label}: ${v} of 5`}>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <span key={n} className="p-0.5" aria-hidden="true"><Icon filled={n <= v} size={size} /></span>
+        ))}
+      </span>
+    );
+  }
   return (
     <div className="flex items-center gap-1" role={readOnly ? undefined : "radiogroup"} aria-label={label}>
       {[1, 2, 3, 4, 5].map((n) => (
