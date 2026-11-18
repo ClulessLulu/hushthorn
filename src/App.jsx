@@ -2802,6 +2802,11 @@ export default function Hushthorn() {
         // Oracle the last reader left open (the effect below saves "library").
         setView("library");
         try { sessionStorage.removeItem(VIEW_KEY); } catch { /* nothing stored */ }
+        // Same reason: a window left open (Your Profile, a book, Inscribe) stayed
+        // on screen over the sign-in page, and reopened for the next reader.
+        setAvatarOpen(false);
+        setActiveId(null);
+        setAddOpen(false);
       }
       setSession(session);
     });
