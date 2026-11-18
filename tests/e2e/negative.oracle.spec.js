@@ -14,7 +14,20 @@ test.beforeEach(async ({ request, page: p }) => {
   await lib.goto();
   await lib.sections.oracle.click();
   await expect(page.getByRole('heading', { name: 'The Oracle' })).toBeVisible();
+  await openLibraryKnows(() => true);
 });
+
+// Each pick is checked against Open Library before it shows. By default it knows
+// every book it is asked about (same title and author); a test narrows that.
+async function openLibraryKnows(known) {
+  await page.unroute(/openlibrary\.org/);
+  await page.route(/openlibrary\.org\/search\.json/, (route) => {
+    const u = new URL(route.request().url());
+    const title = u.searchParams.get('title'), author = u.searchParams.get('author');
+    const docs = known(title, author) ? [{ title, author_name: [author], cover_i: 1 }] : [];
+    return route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json', body: JSON.stringify({ docs }) });
+  });
+}
 test.afterEach(async () => { await db.deleteE2EBooks(); });
 
 const consult = () => page.getByRole('button', { name: /Consult the Oracle/ });
@@ -67,7 +80,7 @@ test.describe('a reply with problems inside it', () => {
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     const a = uniqueTitle('Spice99'), b = uniqueTitle('SpiceWord');
-    oracleSays(JSON.stringify([rec(a, { spice: 99 }), { title: b, spice: 'very' }]));
+    oracleSays(JSON.stringify([rec(a, { spice: 99 }), { title: b, author: 'Plain Author', spice: 'very' } /* no genre or reason */]));
     await consult().click();
     await expect(page.getByText(a)).toBeVisible();
     await expect(page.getByText(b)).toBeVisible();
@@ -168,6 +181,32 @@ test.describe('around the reply', () => {
     await expect(recCards()).toHaveCount(2);
     expect(asked.stream).toBe(true);
     expect(asked.model).toBe('claude-haiku-5-5');
+  });
+
+  test('a book Open Library has never heard of is not shown', async () => {
+    const real = uniqueTitle('Real'), invented = uniqueTitle('Invented');
+    await openLibraryKnows((title) => title === real);
+    oracleSays(JSON.stringify([rec(invented), rec(real)]));
+    await consult().click();
+    await expect(page.getByText(real)).toBeVisible();
+    await expect(page.getByText(invented)).toHaveCount(0);
+  });
+
+  test('a real title credited to the wrong author is not shown', async () => {
+    const title = uniqueTitle('Misattributed');
+    await openLibraryKnows((t, author) => author === 'Right Author');
+    oracleSays(JSON.stringify([rec(title, { author: 'Wrong Author' })]));
+    await consult().click();
+    await expect(page.getByText(/given all it saw/)).toBeVisible();
+    await expect(page.getByText(title)).toHaveCount(0);
+  });
+
+  test('a confirmed pick shows its Open Library cover', async () => {
+    const title = uniqueTitle('Covered');
+    oracleSays(JSON.stringify([rec(title)]));
+    await consult().click();
+    await expect(page.getByText(title)).toBeVisible();
+    await expect(page.getByRole('img', { name: `Cover of ${title}` })).toHaveCount(1);
   });
 
   test('a same-instant double press asks the scribe once', async () => {
