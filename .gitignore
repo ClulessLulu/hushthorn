@@ -17,3 +17,8 @@ output/
 
 # Local-only env files (keys stay out of builds)
 .env.*.local
+
+# UI tests (Playwright): saved sign-in session, reports, failure traces
+tests/e2e/.auth/
+playwright-report/
+test-results/

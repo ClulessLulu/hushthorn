@@ -962,3 +962,100 @@ from both views for co-members while keeping it visible to its owner; outsider C
 fully isolated; the personal library is unaffected; and migrated Task-1 data is
 intact. The one non-blocking observation (excess view grants) does not constitute
 a security defect and does not block release.
+
+---
+
+# QA Report — Pre-merge: Add several fixes, spine-photo removal, password eye, Inscribe arch (2026-11-16)
+
+Plan: [tests/add-several-merge-test-plan.md](add-several-merge-test-plan.md). Working
+tree of `test/e2e-buttons`, run on STAGING only (badge confirmed; every scripted
+run asserted that all Supabase traffic went to `shwhzfpqjbwukjztlzee`).
+Screenshots: `tests/screenshots/merge-qa-*.png`.
+
+## Summary verdict: NO-GO as-is (2 FAIL, no data-loss or privacy blockers)
+
+Data behaviour of Add several is correct: each book keeps its own data, the window
+waits for the save, a failed save keeps the window and queue with no phantom
+books, and the retry saves exactly once. What fails: the Binding failure copy is
+now wrong (FAIL E-50), and two clicks in one JS task write a duplicate row (FAIL F-08).
+
+## Numbers
+
+- `npm test`: 5 files, 0 failures. Per-file: `_progress_unit` 34, `auth-errors-unit` 20,
+  `import-dedupe-unit` 48 (imports the real `src/lib/importMerge.js`),
+  `progress-snap-unit` 57, `shelf-layout-unit` 13 = 172 assertions. Node's runner counts 24 top-level tests, all passing.
+- `npm run build`: built (one >500 kB chunk warning, as before). `check-dist-for-keys`:
+  `OK`. Bundle: `Enter the Archive` 1 file; `Shelf spine` 0; `hushthorn:spine:` 0; `SpineAppearance` 0.
+- `npm run test:e2e`: **111 passed, 1 skipped (Esc closes the Inscribe window), 0 failed**, 3.2 min, first run.
+- Branch vs master: 0 behind, 5 ahead; committed HEAD merges cleanly.
+
+## Pass/Fail by ID
+
+| ID | Result | Evidence |
+| --- | --- | --- |
+| B-01..B-06 | PASS | Numbers above |
+| F-01 | PASS | Queue of 1 → 1 row, year 2025, owned, own cover |
+| F-02 | PASS | 4 rows from one insert (same `created_at`): Maas 2013 owned / Armentrout 2020 wishlist / Black 2018 owned / Roberts 2024 wishlist, each with its own cover_url, genres and page count |
+| F-03 | PASS | After reload: 1 card each; panel shows own title, author, year |
+| F-04 | PASS | 1 queued after picking the same title twice (observation O-1) |
+| F-05 | PASS | Upper-cased existing title marked "already in archive"; Add count 1; existing title still 1 row |
+| F-06 | PASS | No Add button; existing row unchanged (`owned`) |
+| F-07 | PASS | "INSCRIBING…", disabled, 1 POST, 1 row per title |
+| F-08 | **FAIL** | 2 POSTs, 2 rows, 2 cards after reload for one title (D-2) |
+| F-09 | PASS | Panel hides when unticked; queue back on re-tick; 0 rows |
+| F-10 | PASS (obs.) | Closes with no confirm; queue and checkbox are empty on reopen; 0 rows (O-2) |
+| E-01 | PASS | Alert text exact; dialog open; "2 queued"; 0 cards; 0 rows; both widths |
+| E-02 | PASS | 1 row each (`owned:2000`, `wishlist:2001`); 1 card each after reload; both widths |
+| F-11 | PASS | Saved at once: wishlist, year 2002, author, genres; 1 card after reload |
+| U-01 | PASS | Unit run |
+| F-20 | PASS | No "Shelf spine" in any panel opened |
+| F-21 | PASS | 1280: 64 spines, 64 with title text, 0 invisible; 390: 53/53/0; overflow 0 |
+| E-20 | PASS | 3 leftover keys: same spine count, 0 spines use the data URL, 0 new errors |
+| F-30..F-33 | PASS | Name flips Show/Hide password; Tab reaches eye; Enter and Space toggle; no submit; value kept; confirm eye independent (O-3) |
+| F-34 | NOT TESTED | Needs an emailed recovery link |
+| F-40..F-42 | PASS | `aria-expanded` true + `tab-selected.webp` while open; 390: tabs at x 32-130, 137-253, 261-359; overflow 0 |
+| F-50 | PASS | Both widths: year 2015, overall 4, note row present and shown after reload, 0 rows after banish |
+| F-51 | PASS | Codex renders at both widths, overflow 0 |
+| F-52 | PASS | Run 1: 2 rows (`read/owned`, `to-read/wishlist`). Run 2: 0 write requests, rows unchanged |
+| E-50 | **FAIL** | Copy says "The books are on your shelf for this session"; shelf shows 0 cards and staging has 0 rows (D-1) |
+
+## Defects
+
+**D-1 (should-fix, new in this change)** The Binding failure message is now false.
+Steps: Codex → Upload Goodreads CSV with a new `E2E` title → books INSERT returns 500 → Bind.
+Expected: copy that matches the shelf. Actual: "…The books are on your shelf for this
+session — check your connection and upload the same file again." But `importBooks` now
+removes the unsaved books: 0 cards, 0 rows. Suspected function: `PairSection.doImport`
+(error copy), made stale by the new rollback in `importBooks`. Owner: frontend-dev.
+
+**D-2 (minor, new relative to master: Add several is not on master)** Two clicks on
+"Add N to the archive" in the same JS task write duplicate rows. Steps: queue 1 title,
+then `btn.click(); btn.click()` in one task. Expected: 1 POST, 1 row. Actual: 2 POSTs,
+2 rows, 2 cards after reload (1280 and 390). A real mouse double-click (separate events)
+writes only once (F-07). Suspected: `addSearchBatch` guards with React state
+(`batchSaving`), which is not yet applied when the second click runs, and `importBooks`
+reads the stale `books` closure, so `mergeImport` mints new ids. The DB has no
+unique-title constraint as a backstop. Owner: frontend-dev.
+
+## Observations (not counted as FAIL)
+
+- O-1: picking a queued title again with the other shelf does nothing silently; the first shelf is kept.
+- O-2: closing Inscribe with a queue discards it with no confirm.
+- O-3: the password reveal state and typed value carry from Sign in to Create account (first field opens revealed).
+- O-4 (pre-existing): `validateDOMNesting` button inside button in `Meter`; `Meter` is byte-identical to master.
+- O-5 (pre-existing): an idempotent Goodreads re-import says "Bound 2 books to the archive." while writing nothing.
+- O-6: batch adds save `spine_color` null (single add computes it); raw Open Library subjects reach genres (`Fairies--Fiction.`, `Book_set`) through `cleanGenres`, same as single add.
+- O-7: the e2e failed-save test does not assert "no phantom card on the shelf"; verified here by hand (E-01).
+
+## Not tested
+
+Reset-password screen (needs an emailed link); reduced motion; 200% zoom; keyboard
+traversal of the queue list; second-account privacy (no RLS or schema change in scope).
+
+## Cleanup confirmed
+
+Alpha back to 64 books, 0 `E2E` books, 0 `E2E` notes (staging SQL count). An early
+harness run, before the title guard existed, saved 5 real-titled books to alpha (Google
+429 → Open Library path missed the prefix rewrite). They were deleted by id via REST
+within minutes. Separately, `E2E Verify …` rows on another staging user were created
+by a process other than this run and were left alone.
