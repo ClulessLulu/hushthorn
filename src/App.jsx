@@ -7,7 +7,10 @@ import { shapeProgressShot, planPrintSnap, isPastTotal, applyPrintSnap, applySim
 import { prepareSnapImage } from './lib/snapImage';
 import { hashStr, asPageCount, spineWidthOf, layoutShelfRows } from './lib/shelfLayout';
 import { mergeImport } from './lib/importMerge';
-import { buildOraclePrompt, parseRecLines, rememberSeen, verifyPick, dropSeen, ORACLE_MODEL } from './lib/oracle';
+import { buildOraclePrompt, parseRecLines, rememberSeen, verifyPick, dropSeen, ORACLE_MODEL, oracleStatusText } from './lib/oracle';
+import { wrapTab, FOCUSABLE, pickOpener, firstConnected, trackPresses } from './lib/focusTrap';
+import { countOwnedRead } from './lib/shelfStats';
+import { bulkTropeStatusText } from './lib/liveStatus';
 import { readSse } from './lib/sse';
 import { VIEW_KEY, parseSavedView } from './lib/savedView';
 import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
@@ -179,7 +182,7 @@ const FONT_CSS = `
   50% { box-shadow: 0 0 0 10px rgba(244,114,182,0); }
 }
 .ht-recording { animation: ht-pulse 1.4s ease infinite; }
-@media (prefers-reduced-motion: reduce) { .ht-recording { animation: none; } .ht-card { transition: none; } .ht-saved-flash, .ht-save-bar { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .ht-recording { animation: none; } .ht-card { transition: none; } .ht-card:hover { transform: none; } .ht-saved-flash, .ht-save-bar { animation: none; } }
 
 /* per-format progress sliders — sanctioned accents: violet print, indigo
    ebook, cyan audio (cyan is reserved for audio). Sharp 2px track + thumb. */
@@ -494,7 +497,7 @@ const FONT_CSS = `
 .ht-curio-btn {
   appearance: none;
   cursor: pointer;
-  min-height: 36px;
+  min-height: 44px; /* touch target (review R2-T1) */
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -510,7 +513,7 @@ const FONT_CSS = `
 }
 .ht-curio-pop {
   position: absolute;
-  top: 42px; right: 0;
+  top: 50px; right: 0;
   width: 300px;
   z-index: 30;
   text-align: left;
@@ -605,6 +608,28 @@ const FONT_CSS = `
   .ht-familiar-walk { display: none; }
   .ht-familiar-sit { animation: none; opacity: 1; }
 }
+
+/* Focus for the hand-rolled controls on The Oracle, The Binding and Your
+   Profile (each wrapped in .ht-focus-scope). They showed the browser default,
+   a 1px near-black ring on a near-black card (a11y audit P11, O7, C8). A
+   checkbox inside a card label lights the whole card, not a 13px box.
+   Declared last so it beats Tailwind's focus:outline-none on ties.
+   Elements focused only by script (tabindex=-1: a heading after a step) get no ring. */
+.ht-focus-scope :focus-visible:not([tabindex="-1"]),
+.ht-focus-scope label:has(> input:focus-visible) { outline: 2px solid #ffd5ee; outline-offset: 2px; }
+@media (forced-colors: active) {
+  .ht-focus-scope :focus-visible:not([tabindex="-1"]),
+  .ht-focus-scope label:has(> input:focus-visible) { outline-color: Highlight; }
+  /* Tailwind fills vanish in forced colours; keep every button's edge visible. */
+  .ht-focus-scope button { border: 1px solid ButtonText; }
+}
+
+/* Space the fixed staging badge takes at the bottom of the screen. Overlay pads
+   its scroll area by this plus the iPhone home-bar inset, so its last control is
+   not hidden behind the badge (review R2-B1). 0 in production: no badge. */
+:root { --ht-badge-h: 0px; }
+:root:has(.ht-staging-badge) { --ht-badge-h: 24px; }
+.ht-staging-badge { height: 24px; }
 `;
 
 /* ── image crop utility ─────────────────────────────────────── */
@@ -815,7 +840,8 @@ function GenreSuggestInput({ value, onChange, onCommit, exclude = [], placeholde
         onBlur={() => setTimeout(() => setOpen(false), 120)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === ",") { e.preventDefault(); setOpen(false); onCommit(value); }
-          if (e.key === "Escape") setOpen(false);
+          // preventDefault while the list shows, so Overlay's Escape closes the list, not the book window.
+          if (e.key === "Escape") { if (open && matches.length > 0) e.preventDefault(); setOpen(false); }
         }}
         placeholder={placeholder}
         className="w-full bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400 disabled:opacity-50"
@@ -1045,7 +1071,7 @@ function StagingBadge() {
   if (import.meta.env.MODE !== "staging") return null;
   return (
     <div
-      className="fixed bottom-0 left-0 right-0 z-[60] text-center py-1 ht-display text-[10px] uppercase tracking-widest text-amber-100 bg-amber-900/90 border-t border-amber-400/50 pointer-events-none"
+      className="ht-staging-badge fixed bottom-0 left-0 right-0 z-[60] flex items-center justify-center text-center ht-display text-[10px] uppercase tracking-widest text-amber-100 bg-amber-900/90 border-t border-amber-400/50 pointer-events-none"
     >
       Staging &middot; throwaway data &middot; not your real archive
     </div>
@@ -2494,13 +2520,13 @@ function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery, availa
       <div className="flex rounded-sm overflow-hidden border border-purple-700/50">
         <button
           onClick={() => onLayout("grid")}
-          className={`ht-display px-3 py-1.5 text-[10px] uppercase font-semibold transition-colors ${layout === "grid" ? "bg-purple-600/70 text-white" : "bg-purple-950/50 text-purple-300 hover:bg-purple-900/60"}`}
+          className={`ht-display min-h-[44px] px-3 py-1.5 text-[10px] uppercase font-semibold transition-colors ${layout === "grid" ? "bg-purple-600/70 text-white" : "bg-purple-950/50 text-purple-300 hover:bg-purple-900/60"}`}
         >
           ▦ Covers
         </button>
         <button
           onClick={() => onLayout("spines")}
-          className={`ht-display px-3 py-1.5 text-[10px] uppercase font-semibold transition-colors ${layout === "spines" ? "bg-purple-600/70 text-white" : "bg-purple-950/50 text-purple-300 hover:bg-purple-900/60"}`}
+          className={`ht-display min-h-[44px] px-3 py-1.5 text-[10px] uppercase font-semibold transition-colors ${layout === "spines" ? "bg-purple-600/70 text-white" : "bg-purple-950/50 text-purple-300 hover:bg-purple-900/60"}`}
         >
           ▤ Spines
         </button>
@@ -2508,7 +2534,7 @@ function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery, availa
       <select
         value={sortKey}
         onChange={(e) => onSort(e.target.value)}
-        className="ht-display bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-1.5 text-[10px] uppercase text-purple-200 focus:outline-none focus:border-pink-400"
+        className="ht-display min-h-[44px] bg-purple-950/60 border border-purple-700/50 rounded-sm px-2 py-1.5 text-[10px] uppercase text-purple-200 focus:outline-none focus:border-pink-400"
         aria-label="Sort the shelves"
       >
         <option value="recent">Recently inscribed</option>
@@ -2521,14 +2547,14 @@ function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery, availa
         value={query}
         onChange={(e) => onQuery(e.target.value)}
         placeholder="Search the shelves…"
-        className="bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400 w-44"
+        className="min-h-[44px] bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400 w-44"
         aria-label="Search the shelves"
       />
       {cathedralPeak >= 1 && (
         <CathedralCuriosities peak={cathedralPeak} open={curioOpen} onToggle={onToggleCurio} />
       )}
       {(availableTropes.length > 0 || tropeFilter.length > 0) && (
-        <div className="w-full flex flex-col items-center gap-1.5">
+        <div className="w-full flex flex-col items-center gap-2">
           <div className="flex items-center gap-2">
             <span className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60">Tropes</span>
             <div className="flex rounded-sm overflow-hidden border border-purple-700/50">
@@ -2536,7 +2562,7 @@ function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery, availa
                 <button
                   key={m}
                   onClick={() => onTropeMode(m)}
-                  className={`ht-display px-2.5 py-1 text-[9px] uppercase font-semibold transition-colors ${
+                  className={`ht-display min-h-[44px] px-2.5 py-1 text-[9px] uppercase font-semibold transition-colors ${
                     tropeMode === m ? "bg-purple-600/70 text-white" : "bg-purple-950/50 text-purple-300 hover:bg-purple-900/60"
                   }`}
                 >
@@ -2547,13 +2573,13 @@ function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery, availa
             {tropeFilter.length > 0 && (
               <button
                 onClick={() => onTropeFilter([])}
-                className="ht-display text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300"
+                className="ht-display min-h-[44px] min-w-[44px] px-2 text-[10px] uppercase tracking-widest text-purple-300 hover:text-pink-300"
               >
                 Clear
               </button>
             )}
           </div>
-          <div className="flex flex-wrap justify-center gap-1.5 max-w-3xl">
+          <div className="flex flex-wrap justify-center gap-2 max-w-3xl">
             {availableTropes.map(([t, n]) => {
               const on = tropeFilter.includes(t);
               return (
@@ -2561,7 +2587,7 @@ function ControlsBar({ layout, onLayout, sortKey, onSort, query, onQuery, availa
                   key={t}
                   onClick={() => onTropeFilter(on ? tropeFilter.filter((x) => x !== t) : [...tropeFilter, t])}
                   aria-pressed={on}
-                  className={`ht-display text-[9px] uppercase px-2 py-1 rounded-sm border transition-colors ${
+                  className={`ht-display min-h-[44px] min-w-[44px] text-[9px] uppercase px-2 py-1 rounded-sm border transition-colors ${
                     on ? "border-pink-400/70 bg-pink-500/30 text-pink-100" : "border-purple-500/40 bg-purple-950/50 text-purple-200/90 hover:bg-purple-900/60"
                   }`}
                 >
@@ -2623,7 +2649,7 @@ function ArchiveSwitcher({ current, archives = [], onSwitch }) {
           aria-expanded={open}
           aria-label="Choose which shelf to browse"
           onClick={() => setOpen((o) => !o)}
-          className={`ht-display flex items-center gap-2 rounded-sm border px-3 py-1.5 text-[11px] uppercase tracking-wide focus:outline-none focus:border-pink-400 transition-colors ${
+          className={`ht-display min-h-[44px] flex items-center gap-2 rounded-sm border px-3 py-1.5 text-[11px] uppercase tracking-wide focus:outline-none focus:border-pink-400 transition-colors ${
             inArchive
               ? "bg-purple-800/60 border-pink-400/60 text-pink-100 hover:bg-purple-700/70"
               : "bg-purple-950/60 border-purple-700/50 text-purple-200 hover:bg-purple-900/60"
@@ -2646,7 +2672,7 @@ function ArchiveSwitcher({ current, archives = [], onSwitch }) {
                 aria-selected={current === null}
                 type="button"
                 onClick={() => choose(null)}
-                className={`ht-display w-full text-left px-3 py-2 text-[11px] uppercase tracking-wide hover:bg-purple-800/60 transition-colors ${
+                className={`ht-display w-full min-h-[44px] text-left px-3 py-2 text-[11px] uppercase tracking-wide hover:bg-purple-800/60 transition-colors ${
                   current === null ? "text-pink-200 bg-purple-800/40" : "text-purple-200"
                 }`}
               >
@@ -2660,7 +2686,7 @@ function ArchiveSwitcher({ current, archives = [], onSwitch }) {
                   aria-selected={current === a.id}
                   type="button"
                   onClick={() => choose(a.id)}
-                  className={`ht-display w-full text-left px-3 py-2 text-[11px] uppercase tracking-wide hover:bg-purple-800/60 transition-colors flex items-center gap-1.5 ${
+                  className={`ht-display w-full min-h-[44px] text-left px-3 py-2 text-[11px] uppercase tracking-wide hover:bg-purple-800/60 transition-colors flex items-center gap-1.5 ${
                     current === a.id ? "text-pink-200 bg-purple-800/40" : "text-purple-200"
                   }`}
                 >
@@ -2714,8 +2740,11 @@ function Meter({ value, onChange, Icon, label, readOnly = false, size }) {
       </span>
     );
   }
+  // Each rating button is a 44 x 44 hit area around the drawn icon (review
+  // R2-T1); they sit edge to edge. The "saved" pill has a fixed slot, so its
+  // flash cannot push the meter onto a new line and back.
   return (
-    <div className="flex items-center gap-1" role={readOnly ? undefined : "radiogroup"} aria-label={label}>
+    <div className="flex items-center" role={readOnly ? undefined : "radiogroup"} aria-label={label}>
       {[1, 2, 3, 4, 5].map((n) => (
         <button
           key={n}
@@ -2723,13 +2752,13 @@ function Meter({ value, onChange, Icon, label, readOnly = false, size }) {
           disabled={readOnly}
           // "Saved" only once the write was not refused (false); it used to flash beside the error.
           onClick={async () => { if (onChange && (await onChange(n === value ? 0 : n)) !== false) setFlash((f) => f + 1); }}
-          className={`p-0.5 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${readOnly ? "cursor-default" : "cursor-pointer hover:scale-110 transition-transform"}`}
+          className={`inline-flex items-center justify-center min-w-[44px] min-h-[44px] p-0.5 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${readOnly ? "cursor-default" : "cursor-pointer hover:scale-110 transition-transform"}`}
           aria-label={`${label}: ${n} of 5`}
         >
           <Icon filled={n <= value} size={size} />
         </button>
       ))}
-      {!readOnly && <SavedFlash show={flash} />}
+      {!readOnly && <span className="inline-flex w-12"><SavedFlash show={flash} /></span>}
     </div>
   );
 }
@@ -2768,6 +2797,13 @@ export default function Hushthorn() {
   // Already signed in: the sign-in page never showed it, so drop it. Otherwise a
   // later sign-out would mount a fresh sign-in page and show a stale message.
   useEffect(() => { if (session) setLinkError(null); }, [session]);
+  // Overlay returns focus to the control that opened it; Safari never focuses
+  // a clicked or tapped button, so remember the last press (review R2-W1).
+  useEffect(() => {
+    const t = trackPresses(document);
+    pressTracker.current = t;
+    return () => { t.stop(); if (pressTracker.current === t) pressTracker.current = null; };
+  }, []);
   // Shared-library archive switcher (Phase 2). `currentLibraryId` null = the
   // personal library (unchanged behaviour). `archives` is the list of shared
   // archives the user belongs to, each with the user's own membership role.
@@ -4069,6 +4105,19 @@ function PairSection({ books, onImport }) {
   const [error, setError] = useState("");
   const clipRef = useRef(null);
   const csvRef = useRef(null);
+  // Focus follows the step (a11y audit C1): choosing a file removes the upload
+  // buttons, and Cancel or Bind removes the preview, which dropped focus to the
+  // page. Same-instant double press on Bind is blocked by the ref, as in the Oracle.
+  const uploadRef = useRef(null);
+  const previewHeadRef = useRef(null);
+  const hadPreview = useRef(false);
+  const bindingRef = useRef(false);
+  useEffect(() => {
+    const has = !!preview;
+    if (has === hadPreview.current) return;
+    hadPreview.current = has;
+    (has ? previewHeadRef : uploadRef).current?.focus();
+  }, [preview]);
 
   const existingTitles = new Set(books.map((b) => b.title.toLowerCase()));
 
@@ -4099,9 +4148,12 @@ function PairSection({ books, onImport }) {
     setPreview((p) => ({ ...p, items: p.items.map((it, i) => (i === idx ? { ...it, include: !it.include } : it)) }));
 
   const doImport = async () => {
-    if (!preview) return;
+    if (!preview || bindingRef.current) return;
     const chosen = preview.items.filter((it) => it.include);
     if (chosen.length === 0) return;
+    bindingRef.current = true;
+    setError("");
+    setMessage("");
     setBusy(true);
     // Best-effort covers + genres for the first dozen new books.
     const enriched = await Promise.all(
@@ -4138,10 +4190,11 @@ function PairSection({ books, onImport }) {
     }
     setPreview(null);
     setBusy(false);
+    bindingRef.current = false;
   };
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-3xl mx-auto ht-focus-scope">
       <div className="text-center mb-6">
         <h2 className="ht-display text-2xl text-indigo-200">The Binding</h2>
         <p className="mt-2 text-[15px] text-purple-300/75 italic">
@@ -4153,46 +4206,52 @@ function PairSection({ books, onImport }) {
         <div className="grid sm:grid-cols-2 gap-4">
           <div className="ht-card rounded-md p-4">
             <h3 className="ht-display text-sm uppercase text-pink-200 font-semibold">Highlights & notes</h3>
-            <p className="mt-2 text-sm text-purple-300/80">
+            <p id="pair-clippings-help" className="mt-2 text-sm text-purple-300/80">
               Connect your Kindle by USB and find <span className="text-purple-100">My Clippings.txt</span> in its documents folder. Your highlights become quotes with their page or location.
             </p>
             <button
+              ref={uploadRef}
               onClick={() => clipRef.current?.click()}
-              className="ht-display mt-3 w-full py-2 rounded-sm bg-pink-500/70 hover:bg-pink-500 text-white text-xs font-semibold uppercase"
+              aria-describedby="pair-clippings-help"
+              className="ht-display mt-3 w-full min-h-[44px] py-2 rounded-sm bg-pink-500/70 hover:bg-pink-600 text-white text-xs font-semibold uppercase"
             >
               Upload My Clippings.txt
             </button>
-            <input ref={clipRef} type="file" accept=".txt,text/plain" className="hidden"
+            <input ref={clipRef} type="file" accept=".txt,text/plain" className="hidden" aria-label="Kindle My Clippings.txt file"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) readFile(f, parseClippings, "clippings"); e.target.value = ""; }} />
           </div>
 
           <div className="ht-card rounded-md p-4">
             <h3 className="ht-display text-sm uppercase text-indigo-200 font-semibold">Library & read status</h3>
-            <p className="mt-2 text-sm text-purple-300/80">
+            <p id="pair-goodreads-help" className="mt-2 text-sm text-purple-300/80">
               On Goodreads: My Books → Import/Export → <span className="text-purple-100">Export Library</span>. Read books are marked Read, your to-read shelf becomes the Wishlist, and star ratings carry over.
             </p>
             <button
               onClick={() => csvRef.current?.click()}
-              className="ht-display mt-3 w-full py-2 rounded-sm bg-indigo-500/70 hover:bg-indigo-500 text-white text-xs font-semibold uppercase"
+              aria-describedby="pair-goodreads-help"
+              className="ht-display mt-3 w-full min-h-[44px] py-2 rounded-sm bg-indigo-500/70 hover:bg-indigo-600 text-white text-xs font-semibold uppercase"
             >
               Upload Goodreads CSV
             </button>
-            <input ref={csvRef} type="file" accept=".csv,text/csv" className="hidden"
+            <input ref={csvRef} type="file" accept=".csv,text/csv" className="hidden" aria-label="Goodreads library export CSV file"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) readFile(f, parseGoodreads, "goodreads"); e.target.value = ""; }} />
           </div>
         </div>
       )}
 
-      {error && <p className="mt-4 text-center text-[15px] text-pink-300">{error}</p>}
-      {message && <p className="mt-4 text-center text-[15px] text-indigo-200 italic">{message} ❦</p>}
+      {error && <p role="alert" className="mt-4 text-center text-[15px] text-pink-300">{error}</p>}
+      {/* Always mounted so screen readers hear progress and the outcome (a11y audit C2). */}
+      <p role="status" className={message ? "mt-4 text-center text-[15px] text-indigo-200 italic" : "sr-only"}>
+        {busy ? "Binding your tomes to the archive, fetching covers…" : message ? <>{message} <span aria-hidden="true">❦</span></> : ""}
+      </p>
 
       {preview && (
         <div className="mt-2">
           <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
-            <p className="text-[15px] text-purple-200">
+            <p ref={previewHeadRef} tabIndex={-1} className="text-[15px] text-purple-200 focus:outline-none">
               Found <span className="font-semibold">{preview.items.length}</span> book{preview.items.length > 1 ? "s" : ""} — choose what to bind:
             </p>
-            <button onClick={() => setPreview(null)} className="text-sm text-purple-400/70 hover:text-pink-300 underline underline-offset-2 italic">
+            <button onClick={() => setPreview(null)} className="min-h-[44px] px-2 text-sm text-purple-300/80 hover:text-pink-300 underline underline-offset-2 italic">
               cancel
             </button>
           </div>
@@ -4230,10 +4289,13 @@ function PairSection({ books, onImport }) {
               </label>
             ))}
           </div>
+          {/* aria-disabled, not disabled, while binding: a disabled button drops keyboard focus (a11y audit C2). */}
           <button
             onClick={doImport}
-            disabled={busy || preview.items.every((it) => !it.include)}
-            className="ht-display mt-4 w-full py-2.5 rounded-sm bg-pink-500 hover:bg-pink-400 disabled:opacity-40 text-white text-xs font-semibold uppercase"
+            disabled={preview.items.every((it) => !it.include)}
+            aria-disabled={busy || undefined}
+            aria-busy={busy || undefined}
+            className="ht-display mt-4 w-full min-h-[44px] py-2.5 rounded-sm bg-pink-600 hover:bg-pink-700 disabled:opacity-40 aria-busy:cursor-wait text-white text-xs font-semibold uppercase"
           >
             {busy ? "Binding… fetching covers…" : `Bind ${preview.items.filter((it) => it.include).length} to the archive`}
           </button>
@@ -4241,7 +4303,7 @@ function PairSection({ books, onImport }) {
       )}
 
       {!preview && (
-        <p className="mt-6 text-center text-sm text-purple-400/60 italic">
+        <p className="mt-6 text-center text-sm text-purple-300/75 italic">
           In the mobile app, this becomes a share-sheet import — and a desktop helper could watch for your Kindle on USB. Live sync with Amazon's cloud isn't possible; the archives must be carried by hand.
         </p>
       )}
@@ -4262,6 +4324,18 @@ function OracleSection({ books, onAddToWishlist }) {
   // sent two paid AI calls; the ref blocks the second one immediately.
   const busyRef = useRef(false);
   const runRef = useRef(0);
+  // After "+ Wishlist" the card leaves the list and its button with it, which
+  // dropped keyboard focus to the page (a11y audit O5). Focus moves to the next
+  // pick's button, or back to Consult when none is left.
+  const consultRef = useRef(null);
+  const listRef = useRef(null);
+  const [refocus, setRefocus] = useState(null); // { idx, title }
+  const [addNote, setAddNote] = useState("");
+  // A double click on + Wishlist inserted the same title twice (review M2,
+  // BUG-004; CLAUDE.md rule 1, one book per title). The ref blocks the second
+  // press at once; the state only drives aria-disabled.
+  const addingRef = useRef(new Set());
+  const [adding, setAdding] = useState(() => new Set());
   // Titles already offered, remembered in this browser so a later visit is fresh too.
   // ponytail: one list per browser, not per account; key it by user id if shared devices matter.
   const seenRef = useRef(null);
@@ -4357,8 +4431,22 @@ function OracleSection({ books, onAddToWishlist }) {
     setRecs((list) => list.map((x) => (x.title === r.title ? { ...x, status, coverUrl } : x)));
   };
 
-  const addRec = async (rec) => {
+  const addRec = async (rec, idx) => {
+    const key = (rec.title || "").trim().toLowerCase();
+    if (addingRef.current.has(key)) return;
+    addingRef.current.add(key);
+    setAdding(new Set(addingRef.current));
+    try {
+      await saveRec(rec, idx);
+    } finally {
+      addingRef.current.delete(key);
+      setAdding(new Set(addingRef.current));
+    }
+  };
+
+  const saveRec = async (rec, idx) => {
     setAddError("");
+    setAddNote("");
     const ok = await onAddToWishlist({
       title: rec.title,
       author: rec.author,
@@ -4373,43 +4461,64 @@ function OracleSection({ books, onAddToWishlist }) {
     });
     // It used to fail silently: the card just stayed put.
     if (ok === false) setAddError(`“${rec.title}” could not be saved to your wishlist. Check your connection, then tap + Wishlist again.`);
+    else { setAddNote(`“${rec.title}” is on your wishlist.`); setRefocus({ idx, title: rec.title }); }
   };
 
+  // Wait until the added pick has really left the list (addBook updates state
+  // after its write), then move focus.
+  useEffect(() => {
+    if (!refocus || visible.some((r) => r.title === refocus.title)) return;
+    const buttons = listRef.current?.querySelectorAll("button[data-wishlist]") || [];
+    (buttons[Math.min(refocus.idx, buttons.length - 1)] || consultRef.current)?.focus();
+    setRefocus(null);
+  });
+
+  const statusText = oracleStatusText({ loading, checking, shown: visible.length, consulted, error: !!error });
+
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-3xl mx-auto ht-focus-scope">
       <div className="text-center mb-6">
         <h2 className="ht-display text-2xl text-indigo-200">The Oracle</h2>
         <p className="mt-2 text-[15px] text-purple-300/75 italic">
           The Oracle reads your shelves — what you own, what you covet, what you rated worthy of swords and candles — and divines what you should read next.
         </p>
+        {/* aria-disabled, not disabled, while divining: a disabled button drops
+            keyboard focus to the page (a11y audit O2). busyRef ignores the press. */}
         <button
+          ref={consultRef}
           onClick={consult}
-          disabled={loading || books.length === 0}
-          className="ht-display mt-4 px-6 py-2.5 rounded-sm border border-indigo-400/50 bg-indigo-500/80 hover:bg-indigo-400/90 disabled:opacity-40 text-white text-xs font-semibold uppercase transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
+          disabled={books.length === 0}
+          aria-disabled={loading || undefined}
+          aria-busy={loading || undefined}
+          aria-describedby={books.length === 0 ? "oracle-needs-books" : undefined}
+          className="ht-display mt-4 min-h-[44px] px-6 py-2.5 rounded-sm border border-indigo-400/50 bg-indigo-500/80 hover:bg-indigo-600 disabled:opacity-40 aria-busy:cursor-wait text-white text-xs font-semibold uppercase transition-colors"
         >
           {loading ? "Divining…" : consulted ? "Consult the Oracle again" : "Consult the Oracle"}
         </button>
         {books.length === 0 && (
-          <p className="mt-3 text-sm text-purple-400/60 italic">The Oracle needs at least one book on your shelves to read your taste.</p>
+          <p id="oracle-needs-books" className="mt-3 text-sm text-purple-300/75 italic">The Oracle needs at least one book on your shelves to read your taste.</p>
         )}
       </div>
 
-      {(loading || checking) && visible.length === 0 && (
-        <p className="text-center text-[15px] text-purple-300/70 italic">Reading the leaves of your library…</p>
-      )}
-      {error && <p className="text-center text-[15px] text-pink-300">{error}</p>}
+      {error && <p role="alert" className="text-center text-[15px] text-pink-300">{error}</p>}
       {addError && <p role="alert" className="mb-3 text-center text-[15px] text-pink-300">{addError}</p>}
+      {/* One polite line per phase, not per card, so the list is not re-read as
+          picks stream in (a11y audit O1). The list itself is not live. With no
+          picks on screen this line IS the visible message ("Reading the
+          leaves…", "given all it saw"), so the text is never in the page twice. */}
+      <p role="status" className={statusText && visible.length === 0 ? `${consulted && !loading && !checking ? "mt-5 " : ""}text-center text-[15px] text-purple-300/70 italic` : "sr-only"}>{statusText}</p>
+      <p role="status" className="sr-only">{addNote}</p>
 
-      <div className="space-y-3">
-        {visible.map((r) => {
+      <ul ref={listRef} aria-label="The Oracle's picks" aria-busy={loading || checking || undefined} className="space-y-3">
+        {visible.map((r, idx) => {
           return (
-            <div key={`${r.title}|${r.author}`} className="ht-card rounded-md p-3.5 flex gap-3.5">
+            <li key={`${r.title}|${r.author}`} className="ht-card rounded-md p-3.5 flex gap-3.5">
               <div className="w-16 h-24 rounded-sm overflow-hidden bg-purple-950/60 flex-shrink-0 flex items-center justify-center">
                 <CoverImage
                   src={r.coverUrl}
                   alt={`Cover of ${r.title}`}
                   className="w-full h-full object-cover"
-                  fallback={<span className="text-purple-500 text-xl">♛</span>}
+                  fallback={<span aria-hidden="true" className="text-purple-500 text-xl">♛</span>}
                 />
               </div>
               <div className="flex-1 min-w-0">
@@ -4429,27 +4538,24 @@ function OracleSection({ books, onAddToWishlist }) {
                     <Meter value={Math.max(0, Math.min(5, r.spice || 0))} Icon={Candle} label="Predicted smoulder" readOnly size={13} />
                   </div>
                   <button
-                    onClick={() => addRec(r)}
-                    className="ht-display text-[10px] uppercase px-3 py-1 rounded-sm bg-pink-500/40 hover:bg-pink-500/70 text-pink-100"
+                    data-wishlist
+                    onClick={() => addRec(r, idx)}
+                    aria-disabled={adding.has((r.title || "").trim().toLowerCase()) || undefined}
+                    aria-label={`+ Wishlist: ${r.title}`}
+                    className="ht-display min-h-[44px] min-w-[44px] text-[10px] uppercase px-4 py-1 rounded-sm bg-pink-500/40 hover:bg-pink-500/70 text-pink-100"
                   >
                     + Wishlist
                   </button>
                 </div>
               </div>
-            </div>
+            </li>
           );
         })}
-      </div>
+      </ul>
 
       {consulted && visible.length > 0 && (
-        <p className="mt-5 text-center text-sm text-purple-400/60 italic">
+        <p className="mt-5 text-center text-sm text-purple-300/75 italic">
           The Oracle estimates each Smoulder rating — your own judgment, as always, is final.
-        </p>
-      )}
-
-      {consulted && !loading && !checking && visible.length === 0 && (
-        <p className="mt-5 text-center text-[15px] text-purple-300/70 italic">
-          The Oracle has given all it saw — consult again for a fresh reading.
         </p>
       )}
     </div>
@@ -4463,7 +4569,8 @@ function AvatarChip({ avatar, ownedCount, readCount, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-2 bg-purple-900/50 hover:bg-purple-800/60 border border-purple-600/40 hover:border-pink-400/50 rounded-full px-3 py-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
+      aria-haspopup="dialog"
+      className="flex items-center gap-2 min-h-[44px] bg-purple-900/50 hover:bg-purple-800/60 border border-purple-600/40 hover:border-pink-400/50 rounded-full px-3 py-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ffd5ee]"
     >
       <MiniAvatar imagePath={src} size={28} />
       <div className="text-left">
@@ -4935,7 +5042,9 @@ function MiniAvatar({ imagePath, size = 34 }) {
       <div
         className="rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center bg-gradient-to-br from-purple-900/70 to-pink-950/50 border border-purple-700/40 text-purple-300/70"
         style={{ width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.45)) }}
-        aria-label="No Visage sealed yet"
+        // Decorative, like the sealed image's alt="": the name always sits beside
+        // it. aria-label on a plain div is ignored, so "❦" was read aloud (a11y audit P12).
+        aria-hidden="true"
       >
         ❦
       </div>
@@ -4965,6 +5074,20 @@ function SharedArchives({ session, avatar, onMembershipChanged }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [joinErr, setJoinErr] = useState('');
+  // Bind, Join, Leave and Delete each remove or disable the focused control,
+  // which dropped focus to <body> (review M1). After the list reloads, focus
+  // goes to the archive's row, or to the matching field when there is none.
+  const nameRef = useRef(null);
+  const codeRef = useRef(null);
+  const [focusTo, setFocusTo] = useState(null); // { lib: id } | 'name' | 'code'
+  useEffect(() => {
+    if (!focusTo) return;
+    const el = focusTo === 'name' ? nameRef.current
+      : focusTo === 'code' ? codeRef.current
+      : document.querySelector(`[data-lib-toggle="${focusTo.lib}"]`) || nameRef.current;
+    el?.focus();
+    setFocusTo(null);
+  }, [focusTo, libs]);
 
   const load = async () => {
     const { data, error } = await supabase
@@ -4983,10 +5106,11 @@ function SharedArchives({ session, avatar, onMembershipChanged }) {
     setBusy(true); setErr('');
     const { data, error } = await supabase.rpc('create_library', { p_name: n });
     setBusy(false);
-    if (error) { setErr('Could not bind the archive. Please try again.'); return; }
+    if (error) { setErr('Could not bind the archive. Please try again.'); setFocusTo('name'); return; }
     setName('');
     await load();
     setOpenId(data);
+    setFocusTo(data ? { lib: data } : 'name');
   };
 
   const join = async () => {
@@ -4995,10 +5119,11 @@ function SharedArchives({ session, avatar, onMembershipChanged }) {
     setBusy(true); setJoinErr('');
     const { data, error } = await supabase.rpc('accept_library_invite', { p_code: c });
     setBusy(false);
-    if (error) { setJoinErr('That invite is invalid or expired.'); return; }
+    if (error) { setJoinErr('That invite is invalid or expired.'); setFocusTo('code'); return; }
     setCode('');
     await load();
     setOpenId(data);
+    setFocusTo(data ? { lib: data } : 'code');
   };
 
   return (
@@ -5012,9 +5137,9 @@ function SharedArchives({ session, avatar, onMembershipChanged }) {
 
         {/* library list */}
         {libs === null ? (
-          <p className="text-[12px] text-purple-400/60 italic">Opening…</p>
+          <p className="text-[12px] text-purple-300/75 italic">Opening…</p>
         ) : libs.length === 0 ? (
-          <p className="text-[12px] text-purple-400/60 italic">No shared archives yet. Bind one below, or join with a code.</p>
+          <p className="text-[12px] text-purple-300/75 italic">No shared archives yet. Bind one below, or join with a code.</p>
         ) : (
           <div className="space-y-1.5">
             {libs.map(lib => {
@@ -5023,48 +5148,56 @@ function SharedArchives({ session, avatar, onMembershipChanged }) {
               const isOpen = openId === lib.id;
               return (
                 <div key={lib.id} className="rounded-sm border border-purple-700/40 overflow-hidden">
-                  <button onClick={() => setOpenId(isOpen ? null : lib.id)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-purple-900/30">
+                  <button data-lib-toggle={lib.id} onClick={() => setOpenId(isOpen ? null : lib.id)} aria-expanded={isOpen}
+                    className="w-full min-h-[44px] flex items-center gap-2 px-3 py-2 text-left hover:bg-purple-900/30">
                     <span className="flex-1 min-w-0">
                       <span className="text-[14px] text-pink-100 truncate block">{lib.name}</span>
-                      <span className="text-[11px] text-purple-400/70 italic">
+                      <span className="text-[11px] text-purple-300/75 italic">
                         {members.length} member{members.length === 1 ? '' : 's'}
                         {myRole === 'owner' ? ' · you keep it' : ''}
                       </span>
                     </span>
-                    <span className="text-purple-400 text-xs">{isOpen ? '▾' : '▸'}</span>
+                    <span aria-hidden="true" className="text-purple-400 text-xs">{isOpen ? '▾' : '▸'}</span>
                   </button>
-                  {isOpen && <LibraryDetail lib={lib} me={me} avatar={avatar} onChanged={() => { setOpenId(null); load(); onMembershipChanged?.(); }} />}
+                  {isOpen && <LibraryDetail lib={lib} me={me} avatar={avatar}
+                    onRosterChanged={async () => { const loading = load(); onMembershipChanged?.(); await loading; }}
+                    onChanged={async (focusLib) => { setOpenId(null); const loading = load(); onMembershipChanged?.(); await loading; setFocusTo(focusLib ? { lib: focusLib } : 'name'); }} />}
                 </div>
               );
             })}
           </div>
         )}
-        {err && <p className="text-[12px] text-pink-300">{err}</p>}
+        {err && <p role="alert" className="text-[12px] text-pink-300">{err}</p>}
 
-        {/* create + join */}
+        {/* create + join. Real labels, not placeholder-only (a11y audit P5). */}
         <div className="ht-rule my-1" aria-hidden="true" />
-        <div className="flex gap-2">
-          <input value={name} onChange={e => setName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && create()}
-            placeholder="Name a new shared archive…"
-            className="flex-1 min-w-0 bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400" />
-          <button onClick={create} disabled={busy || !name.trim()}
-            className="ht-display text-[10px] uppercase px-3 py-1.5 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100 flex-shrink-0 whitespace-nowrap">
-            Bind
-          </button>
+        <div>
+          <label htmlFor="shared-archive-name" className="block ht-display text-[9px] uppercase tracking-widest text-purple-300/75 mb-1">New shared archive</label>
+          <div className="flex gap-2">
+            <input ref={nameRef} id="shared-archive-name" value={name} onChange={e => setName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && create()}
+              placeholder="Name a new shared archive…"
+              className="flex-1 min-w-0 min-h-[44px] bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-300/70 focus:outline-none focus:border-pink-400" />
+            <button onClick={create} disabled={busy || !name.trim()}
+              className="ht-display min-h-[44px] text-[10px] uppercase px-3 py-1.5 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100 flex-shrink-0 whitespace-nowrap">
+              Bind
+            </button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <input value={code} onChange={e => setCode(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && join()}
-            placeholder="Have a code? Join an archive…"
-            className="flex-1 min-w-0 bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-400/50 focus:outline-none focus:border-pink-400" />
-          <button onClick={join} disabled={busy || !code.trim()}
-            className="ht-display text-[10px] uppercase px-3 py-1.5 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100 flex-shrink-0 whitespace-nowrap">
-            Join
-          </button>
+        <div>
+          <label htmlFor="shared-archive-code" className="block ht-display text-[9px] uppercase tracking-widest text-purple-300/75 mb-1">Invite code</label>
+          <div className="flex gap-2">
+            <input ref={codeRef} id="shared-archive-code" value={code} onChange={e => setCode(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && join()}
+              placeholder="Have a code? Join an archive…"
+              className="flex-1 min-w-0 min-h-[44px] bg-purple-950/60 border border-purple-700/50 rounded-sm px-3 py-1.5 text-sm placeholder-purple-300/70 focus:outline-none focus:border-pink-400" />
+            <button onClick={join} disabled={busy || !code.trim()}
+              className="ht-display min-h-[44px] text-[10px] uppercase px-3 py-1.5 rounded-sm bg-purple-800/60 hover:bg-purple-700 disabled:opacity-40 text-purple-100 flex-shrink-0 whitespace-nowrap">
+              Join
+            </button>
+          </div>
         </div>
-        {joinErr && <p className="text-[12px] text-pink-300">{joinErr}</p>}
+        {joinErr && <p role="alert" className="text-[12px] text-pink-300">{joinErr}</p>}
       </div>
     </>
   );
@@ -5072,7 +5205,7 @@ function SharedArchives({ session, avatar, onMembershipChanged }) {
 
 // One expanded library: roster (avatars + handles + roles), an invite-code
 // generator (any member), and owner-only rename/remove/delete + member Leave.
-function LibraryDetail({ lib, me, avatar, onChanged }) {
+function LibraryDetail({ lib, me, avatar, onChanged, onRosterChanged }) {
   const members = lib.library_members || [];
   const isOwner = members.find(m => m.user_id === me)?.role === 'owner';
   const [roster, setRoster] = useState(null);
@@ -5084,6 +5217,15 @@ function LibraryDetail({ lib, me, avatar, onChanged }) {
   // library_members.share_reading for this archive.
   const [shareReading, setShareReading] = useState(null);
   const [shareBusy, setShareBusy] = useState(false);
+  // The Invite button is replaced by the code, which dropped focus to <body>
+  // (review M1): move it to Copy once the code shows.
+  const copyRef = useRef(null);
+  const focusCopy = useRef(false);
+  useEffect(() => {
+    if (invite && focusCopy.current) { focusCopy.current = false; copyRef.current?.focus(); }
+  }, [invite]);
+  // After removing a member their row is gone: focus this archive's row button.
+  const focusMyRow = () => document.querySelector(`[data-lib-toggle="${lib.id}"]`)?.focus();
 
   const loadRoster = async () => {
     const { data: mem, error } = await supabase
@@ -5134,6 +5276,7 @@ function LibraryDetail({ lib, me, avatar, onChanged }) {
       .select('code, expires_at').single();
     setBusy(false);
     if (error) { setErr('Could not create an invite.'); return; }
+    focusCopy.current = true;
     setInvite(data);
   };
 
@@ -5147,7 +5290,10 @@ function LibraryDetail({ lib, me, avatar, onChanged }) {
     const { error } = await supabase.from('library_members')
       .delete().eq('library_id', lib.id).eq('user_id', uid);
     if (error) { setErr('Could not remove that member.'); return; }
-    loadRoster();
+    // The archive row's "N members" comes from SharedArchives' list, not this
+    // roster: reload both, or it kept saying "2 members" (review R2-S1).
+    await Promise.all([loadRoster(), onRosterChanged?.()]);
+    focusMyRow();
   };
 
   const leave = async () => {
@@ -5163,7 +5309,7 @@ function LibraryDetail({ lib, me, avatar, onChanged }) {
     if (next == null || !next.trim()) return;
     const { error } = await supabase.from('libraries').update({ name: next.trim() }).eq('id', lib.id);
     if (error) { setErr('Could not rename.'); return; }
-    onChanged();
+    onChanged(lib.id);
   };
 
   const destroy = async () => {
@@ -5177,7 +5323,7 @@ function LibraryDetail({ lib, me, avatar, onChanged }) {
     <div className="px-3 pb-3 pt-1 bg-purple-950/30 border-t border-purple-700/30 space-y-2.5">
       {/* roster */}
       {roster === null ? (
-        <p className="text-[12px] text-purple-400/60 italic pt-1">Gathering the keepers…</p>
+        <p className="text-[12px] text-purple-300/75 italic pt-1">Gathering the keepers…</p>
       ) : (
         <div className="space-y-1.5 pt-1">
           {roster.map(m => (
@@ -5191,7 +5337,7 @@ function LibraryDetail({ lib, me, avatar, onChanged }) {
               }`}>{m.role}</span>
               {isOwner && m.user_id !== me && (
                 <button onClick={() => removeMember(m.user_id)}
-                  className="text-purple-400/60 hover:text-pink-300 text-sm px-1" aria-label="Remove member">✕</button>
+                  className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] text-purple-300/75 hover:text-pink-300 text-sm" aria-label={`Remove @${m.username || 'reader'} from the archive`}>✕</button>
               )}
             </div>
           ))}
@@ -5206,21 +5352,21 @@ function LibraryDetail({ lib, me, avatar, onChanged }) {
           aria-checked={!!shareReading}
           disabled={shareReading === null || shareBusy}
           onClick={() => setArchiveShareReading(!shareReading)}
-          className="flex items-center gap-2.5 w-full text-left disabled:opacity-50"
+          className="flex items-center gap-2.5 w-full min-h-[44px] text-left disabled:opacity-50"
         >
           <span
             aria-hidden="true"
-            className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-sm border transition-colors ${
+            className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-sm border transition-colors motion-reduce:transition-none ${
               shareReading ? 'bg-pink-600/70 border-pink-400/70' : 'bg-purple-900/70 border-purple-700/60'
             }`}
           >
-            <span className={`inline-block h-3.5 w-3.5 rounded-sm bg-purple-50 transition-transform ${shareReading ? 'translate-x-4' : 'translate-x-0.5'}`} />
+            <span className={`inline-block h-3.5 w-3.5 rounded-sm bg-purple-50 transition-transform motion-reduce:transition-none ${shareReading ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </span>
           <span className="ht-display text-[10px] uppercase tracking-wide text-purple-100">
             Share my ratings &amp; progress in this archive
           </span>
         </button>
-        <p className="text-[11px] text-purple-400/60 italic mt-1 leading-snug">
+        <p className="text-[11px] text-purple-300/75 italic mt-1 leading-snug">
           {shareReading
             ? 'Fellow keepers can see your Verdict, Smoulder, and progress here. Your marginalia stays sealed.'
             : 'Your marks stay hidden from co-keepers. Turn this on to let them read your Verdict, Smoulder, and progress — never your notes.'}
@@ -5233,19 +5379,20 @@ function LibraryDetail({ lib, me, avatar, onChanged }) {
           <p className="ht-display text-[9px] uppercase tracking-widest text-purple-400 mb-1">Invite code</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 text-pink-200 text-lg tracking-widest">{invite.code}</code>
-            <button onClick={copyCode}
-              className="ht-display text-[9px] uppercase px-2 py-1 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100">
+            <button ref={copyRef} onClick={copyCode}
+              className="ht-display min-h-[44px] min-w-[44px] text-[9px] uppercase px-3 py-1 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100">
               {copied ? 'Copied' : 'Copy'}
             </button>
+            <span role="status" className="sr-only">{copied ? 'Invite code copied' : ''}</span>
           </div>
-          <p className="text-[11px] text-purple-400/60 italic mt-1">
+          <p className="text-[11px] text-purple-300/75 italic mt-1">
             Share it with a fellow reader · expires {new Date(invite.expires_at).toLocaleDateString()}
           </p>
         </div>
       ) : (
         <button onClick={makeInvite} disabled={busy}
-          className="ht-display text-[10px] uppercase px-3 py-1.5 rounded-sm border border-purple-700/50 hover:border-pink-400/60 text-purple-200 disabled:opacity-40">
-          ✦ Invite a fellow reader
+          className="ht-display min-h-[44px] text-[10px] uppercase px-3 py-1.5 rounded-sm border border-purple-700/50 hover:border-pink-400/60 text-purple-200 disabled:opacity-40">
+          <span aria-hidden="true">✦ </span>Invite a fellow reader
         </button>
       ))}
 
@@ -5254,16 +5401,16 @@ function LibraryDetail({ lib, me, avatar, onChanged }) {
         {isOwner ? (
           <>
             <button onClick={rename}
-              className="ht-display text-[9px] uppercase px-2.5 py-1 rounded-sm text-purple-300 hover:text-pink-200">Rename</button>
+              className="ht-display min-h-[44px] text-[9px] uppercase px-2.5 py-1 rounded-sm text-purple-300 hover:text-pink-200">Rename</button>
             <button onClick={destroy}
-              className="ht-display text-[9px] uppercase px-2.5 py-1 rounded-sm text-pink-400/80 hover:text-pink-300">Delete archive</button>
+              className="ht-display min-h-[44px] text-[9px] uppercase px-2.5 py-1 rounded-sm text-pink-400/80 hover:text-pink-300">Delete archive</button>
           </>
         ) : (
           <button onClick={leave}
-            className="ht-display text-[9px] uppercase px-2.5 py-1 rounded-sm text-pink-400/80 hover:text-pink-300">Leave archive</button>
+            className="ht-display min-h-[44px] text-[9px] uppercase px-2.5 py-1 rounded-sm text-pink-400/80 hover:text-pink-300">Leave archive</button>
         )}
       </div>
-      {err && <p className="text-[12px] text-pink-300">{err}</p>}
+      {err && <p role="alert" className="text-[12px] text-pink-300">{err}</p>}
     </div>
   );
 }
@@ -5387,6 +5534,8 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
 
   const owned       = books.filter(b => b.shelf === 'owned');
   const readCount   = books.filter(b => b.read).length;
+  // "N of M owned books read" counts the Owned shelf on both sides (review R2-P1).
+  const ownedReadCount = countOwnedRead(books);
   const wishlistCount = books.filter(b => b.shelf === 'wishlist').length;
   const ratedBooks  = books.filter(b => b.overall > 0);
   const avgRating   = ratedBooks.length
@@ -5458,6 +5607,7 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
       label={VISAGE_ENABLED ? "The Visage" : "Your Profile"}
       wide
     >
+      <div className="ht-focus-scope">
       {VISAGE_ENABLED ? (
       <>
       <div className="flex items-start justify-between mb-1">
@@ -5610,15 +5760,20 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
       <div className="flex items-start justify-between mb-4">
         <div>
           <h2 className="ht-display text-2xl text-pink-100">Your Profile</h2>
-          <p className="text-[11px] text-purple-400/60 italic mt-1">@{username || '…'}</p>
+          <p className="text-[11px] text-purple-300/75 italic mt-1">@{username || '…'}</p>
         </div>
-        <button onClick={onClose} className="text-purple-300 hover:text-pink-300 text-xl px-2" aria-label="Close">✕</button>
+        <button onClick={onClose} className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] -mr-2 -mt-2 text-purple-300 hover:text-pink-300 text-xl" aria-label="Close">✕</button>
       </div>
       )}
 
       {/* bulk trope backfill */}
       <div className="ht-card rounded-md p-3 mb-4">
-        <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60">Tropes</p>
+        <h3 className="ht-display text-[10px] uppercase tracking-widest text-purple-300/75">Tropes</h3>
+        {/* Start, every 10 tomes, and the outcome, read out politely (a11y audit
+            P8, review m2: once per tome was up to 59 announcements). Always mounted. */}
+        <p role="status" className="sr-only">
+          {bulkTropeStatusText({ running: bulkRunning, done: bulkDone, total: bulkTotal, results: bulkResults })}
+        </p>
         {untagged.length === 0 && !bulkResults ? (
           <p className="mt-1.5 text-[15px] text-purple-300/70 italic">Every tome is tagged.</p>
         ) : (
@@ -5629,18 +5784,18 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
                 : `${untagged.length} tome${untagged.length === 1 ? "" : "s"} have no tropes yet.`}
             </p>
             {bulkNagged && bulkRunning && (
-              <p className="mt-1.5 text-[15px] text-pink-200/90 italic">
+              <p role="alert" className="mt-1.5 text-[15px] text-pink-200/90 italic">
                 Still divining — press Stop first, or let it finish.
               </p>
             )}
             <div className="mt-2 flex gap-2">
               {bulkRunning ? (
-                <button onClick={() => { bulkStopRef.current = true; setBulkNagged(false); }} className="ht-display px-3 py-2 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100 text-[10px] uppercase font-semibold">
+                <button onClick={() => { bulkStopRef.current = true; setBulkNagged(false); }} className="ht-display min-h-[44px] px-4 py-2 rounded-sm bg-purple-800/60 hover:bg-purple-700 text-purple-100 text-[10px] uppercase font-semibold">
                   Stop
                 </button>
               ) : (
-                <button onClick={runBulkTropes} disabled={!untagged.length} className="ht-display px-3 py-2 rounded-sm bg-indigo-500/70 hover:bg-indigo-500 disabled:opacity-40 text-white text-[10px] uppercase font-semibold">
-                  ✨ Divine tropes for my library
+                <button onClick={runBulkTropes} disabled={!untagged.length} className="ht-display min-h-[44px] px-3 py-2 rounded-sm bg-indigo-500/70 hover:bg-indigo-600 disabled:opacity-40 text-white text-[10px] uppercase font-semibold">
+                  <span aria-hidden="true">✨ </span>Divine tropes for my library
                 </button>
               )}
             </div>
@@ -5648,14 +5803,14 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
         )}
         {bulkResults && (
           <div className="mt-3">
-            <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300/60">
+            <p className="ht-display text-[10px] uppercase tracking-widest text-purple-300/75">
               {bulkResults.stopped ? "Stopped early — " : ""}{bulkResults.touched.length} tagged
               {bulkResults.failed?.length ? ` · ${bulkResults.failed.length} could not be saved` : ""} · review below
             </p>
             {bulkResults.touched.length === 0 ? (
               <p className="mt-1 text-[15px] text-purple-300/70 italic">Nothing could be divined.</p>
             ) : (
-              <ul className="mt-1.5 space-y-1 max-h-40 overflow-y-auto pr-1">
+              <ul tabIndex={0} aria-label="Tomes just tagged" className="mt-1.5 space-y-1 max-h-40 overflow-y-auto pr-1">
                 {bulkResults.touched.map((t) => (
                   <li key={t.id} className="text-sm text-purple-200/90">
                     <span className="font-semibold">{t.title}</span>
@@ -5672,18 +5827,19 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
       <h3 className="ht-display text-xs uppercase tracking-widest text-purple-300/70 mb-2">Reading Chronicle</h3>
       <div className="ht-card rounded-md p-3 mb-2 text-center">
         <div className="ht-display text-3xl text-pink-200">{books.length}</div>
-        <div className="text-xs text-purple-400/70 italic">tome{books.length === 1 ? '' : 's'} in your archive</div>
+        <div className="text-xs text-purple-300/75 italic">tome{books.length === 1 ? '' : 's'} in your archive</div>
       </div>
       <div className="grid grid-cols-2 gap-2 mb-5">
         {[
           { n: owned.length,    label: 'tomes owned',    color: 'text-pink-200' },
           { n: readCount,       label: 'tomes read',     color: 'text-purple-300' },
           { n: wishlistCount,   label: 'on the wishlist',color: 'text-indigo-300' },
-          { n: avgRating || 0,  label: avgRating ? `avg · ${'⚔'.repeat(avgRating)}` : 'avg verdict', color: 'text-pink-200' },
-        ].map(({ n, label, color }) => (
-          <div key={label} className="ht-card rounded-md p-3">
+          // The swords are drawn for the eye; a screen reader hears "of 5 swords" (a11y audit P12).
+          { n: avgRating || 0,  label: avgRating ? <>avg · <span aria-hidden="true">{'⚔'.repeat(avgRating)}</span><span className="sr-only">verdict, of 5 swords</span></> : 'avg verdict', key: 'avg', color: 'text-pink-200' },
+        ].map(({ n, label, key, color }) => (
+          <div key={key || label} className="ht-card rounded-md p-3">
             <div className={`ht-display text-2xl ${color}`}>{n}</div>
-            <div className="text-xs text-purple-400/70 italic">{label}</div>
+            <div className="text-xs text-purple-300/75 italic">{label}</div>
           </div>
         ))}
       </div>
@@ -5694,7 +5850,7 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
       {/* mini shelf */}
       <h3 className="ht-display text-xs uppercase tracking-widest text-purple-300/70 mb-2">Your Shelf</h3>
       <div className="ht-card rounded-md p-3">
-        <div className="flex items-end gap-0.5 h-12 bg-black/20 rounded-sm px-2 pt-1 border-b-2 border-purple-500/40 relative overflow-hidden">
+        <div aria-hidden="true" className="flex items-end gap-0.5 h-12 bg-black/20 rounded-sm px-2 pt-1 border-b-2 border-purple-500/40 relative overflow-hidden">
           {owned.slice(0, 20).map((b, i) => (
             <div key={b.id} style={{
               height: `${28 + (i % 3) * 8}px`, width: '10px',
@@ -5712,8 +5868,8 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
             {AVATAR_EMOJI[legacyGenderKey] || '🧝'}
           </span>
         </div>
-        <p className="text-[11px] text-purple-400/60 italic text-center mt-2">
-          {readCount} of {owned.length} owned books read
+        <p className="text-[11px] text-purple-300/75 italic text-center mt-2">
+          {ownedReadCount} of {owned.length} owned books read
           {owned.length < 8 ? ` · ${8 - owned.length} empty slot${8 - owned.length !== 1 ? 's' : ''} waiting` : ''}
         </p>
       </div>
@@ -5725,6 +5881,7 @@ function AvatarPage({ avatar, username, books, session, onSave, onClose, onMembe
       >
         Leave the archive
       </button>
+      </div>
     </Overlay>
   );
 }
@@ -6748,7 +6905,7 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
   };
 
   if (cropSrc) {
-    return <ImageCropModal src={cropSrc} onApply={applyPhoto} onSkip={() => applyPhoto(cropSrc)} onReplace={(dataUrl) => setOriginalPhotoSrc(dataUrl)} />;
+    return <ImageCropModal src={cropSrc} onApply={applyPhoto} onSkip={() => applyPhoto(cropSrc)} onReplace={(dataUrl) => setOriginalPhotoSrc(dataUrl)} onCancel={() => setCropSrc("")} />;
   }
 
   return (
@@ -6756,7 +6913,8 @@ Respond with ONLY a valid JSON object, nothing else: {"author": string or null, 
     <Overlay onClose={onClose} label="Inscribe">
       <div className="flex items-center justify-between mb-4">
         <h2 className="ht-display text-xl text-pink-200">Inscribe</h2>
-        <button onClick={onClose} className="text-purple-300 hover:text-pink-300 text-xl px-2" aria-label="Close">✕</button>
+        {/* 44 x 44 hit area (review R2-T1); the negative margins keep the row height and the glyph's place. */}
+        <button onClick={onClose} className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] -my-2 -mr-2 text-purple-300 hover:text-pink-300 text-xl px-2" aria-label="Close">✕</button>
       </div>
 
       <div className="ht-inscribe-modes mb-4" role="group" aria-label="Inscription method">
@@ -7197,7 +7355,21 @@ function centeredCrop(width, height, aspect) {
   );
 }
 
-function ImageCropModal({ src, onApply, onSkip, onReplace }) {
+function ImageCropModal({ src, onApply, onSkip, onReplace, onCancel }) {
+  // Escape cancels the crop only (review m1). The crop screen sits inside the
+  // book window's Overlay, which closes on Escape from a document listener;
+  // this one listens in the capture phase so it runs first and claims the key.
+  const cancelRef = useRef(onCancel);
+  useEffect(() => { cancelRef.current = onCancel; });
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "Escape" || !cancelRef.current) return;
+      e.preventDefault();
+      cancelRef.current();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, []);
   const [imgSrc, setImgSrc] = useState(src);
   const [crop, setCrop] = useState();
   const [completedCrop, setCompletedCrop] = useState(null);
@@ -7445,7 +7617,7 @@ function CoverEditor({ book, onUpdate, session }) {
   const previewSrc = coverChoice === "photo" ? photoPreview : (apiCoverUrl || book.coverUrl);
 
   if (cropSrc) {
-    return <ImageCropModal src={cropSrc} onApply={applyPhoto} onSkip={() => applyPhoto(cropSrc)} onReplace={(dataUrl) => setOriginalPhotoSrc(dataUrl)} />;
+    return <ImageCropModal src={cropSrc} onApply={applyPhoto} onSkip={() => applyPhoto(cropSrc)} onReplace={(dataUrl) => setOriginalPhotoSrc(dataUrl)} onCancel={() => setCropSrc("")} />;
   }
 
   if (!editing) {
@@ -8376,7 +8548,90 @@ function NotesSection({ book, onUpdate }) {
 
 /* ── overlay shell ─────────────────────────────────────────── */
 
+// Panels of the Overlays now open, in mount order. Only the topmost one reacts
+// to keys, so a window opened over another (pendingDup over Inscribe) is the
+// only one that closes on Escape.
+const overlayStack = [];
+// Each open panel's focus-return chain (its opener, then the fallbacks behind it).
+const overlayChains = new WeakMap();
+// The last control pressed with a mouse, pen or finger (review R2-W1). Started
+// and stopped by the Hushthorn root, so a StrictMode double mount leaves one.
+const pressTracker = { current: null };
+function isTopOverlay(panel) {
+  const active = document.activeElement;
+  const holding = overlayStack.filter((p) => p.contains(active));
+  // The innermost panel holding focus; with focus lost, the last one opened.
+  const top = holding.length
+    ? holding.find((p) => !holding.some((q) => q !== p && p.contains(q)))
+    : overlayStack[overlayStack.length - 1];
+  return top === panel;
+}
+
 function Overlay({ children, onClose, label, wide }) {
+  // Keyboard and screen-reader behaviour for every modal (a11y audit P1-P4,
+  // CODE_REVIEW_TODO item 12): focus moves in on open, Tab stays inside, Escape
+  // closes like a backdrop click, and focus goes back to the opener on close.
+  // The opener is read during the first render, before any child autoFocus.
+  // Safari leaves focus on <body> after a click or tap, so the last pressed
+  // control stands in (review R2-W1). The chain behind it is the opener of the
+  // window that held the opener: "+ Owned" unmounts with Inscribe, so the book
+  // window falls back to + Inscribe instead of <body> (review R2-F1).
+  const [returnChain] = useState(() => {
+    const press = pressTracker.current?.last() || {};
+    const opener = pickOpener({ active: document.activeElement, body: document.body, pressed: press.el, pressedAt: press.at, now: Date.now() });
+    if (!opener) return [];
+    const holder = [...overlayStack].reverse().find((p) => p.contains(opener));
+    return [opener, ...(holder ? overlayChains.get(holder) || [] : [])];
+  });
+  const panelRef = useRef(null);
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; });
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return undefined;
+    overlayStack.push(panel);
+    overlayChains.set(panel, returnChain);
+    if (!panel.contains(document.activeElement)) panel.focus();
+    // Keys are heard on the document, not on the dialog: when the focused
+    // control unmounts (Invite, Bind, Remove member) focus falls to <body>, and
+    // a listener on the dialog went deaf, so Escape and the Tab trap stopped
+    // working (review M1). Children that use Escape themselves (an open
+    // suggestion list, the crop screen) call preventDefault first.
+    const onKey = (e) => {
+      if (!isTopOverlay(panel)) return;
+      if (e.key === "Escape") {
+        if (e.defaultPrevented) return;
+        e.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = [...panel.querySelectorAll(FOCUSABLE)].filter((el) => el.getClientRects().length > 0);
+      const next = wrapTab(items.length, items.indexOf(document.activeElement), e.shiftKey);
+      if (next === null) return;
+      e.preventDefault();
+      if (next >= 0) items[next].focus();
+    };
+    document.addEventListener("keydown", onKey);
+    // Focus lost to <body> because its element left the page: bring it back
+    // into the panel, so a screen reader is not dropped behind the dialog.
+    const watch = new MutationObserver(() => {
+      if ((document.activeElement === document.body || !document.activeElement) && isTopOverlay(panel)) panel.focus();
+    });
+    watch.observe(panel, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled"] });
+    // StrictMode runs this twice on mount: cleanup refocuses the opener, the
+    // second run moves focus back in. With every element of the chain gone
+    // (signing out from Your Profile) focus goes to a window still open, if any.
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      watch.disconnect();
+      const i = overlayStack.indexOf(panel);
+      if (i !== -1) overlayStack.splice(i, 1);
+      overlayChains.delete(panel);
+      const target = firstConnected(returnChain) || overlayStack[overlayStack.length - 1];
+      target?.focus();
+    };
+  }, [returnChain]);
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4"
@@ -8385,7 +8640,9 @@ function Overlay({ children, onClose, label, wide }) {
       aria-label={label}
       aria-modal="true"
     >
-      <div className={`ht-bg !min-h-0 w-full ${wide ? "max-w-3xl" : "max-w-lg"} max-h-[92dvh] overflow-y-auto overscroll-y-contain rounded-t-md sm:rounded-md border border-purple-700/40 p-5 ht-body text-purple-100`}>
+      <div ref={panelRef} tabIndex={-1} className={`ht-bg !min-h-0 w-full ${wide ? "max-w-3xl" : "max-w-lg"} max-h-[92dvh] overflow-y-auto overscroll-y-contain rounded-t-md sm:rounded-md border border-purple-700/40 p-5 ht-body text-purple-100 focus:outline-none`}
+        // p-5 plus the staging badge and the home-bar inset, both 0 in production (review R2-B1).
+        style={{ paddingBottom: "calc(1.25rem + var(--ht-badge-h, 0px) + env(safe-area-inset-bottom, 0px))" }}>
         {children}
       </div>
     </div>

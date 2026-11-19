@@ -64,10 +64,12 @@ Search for the function name; line numbers are not given because they move.
   It sits directly under "Mark as Read" and removes the book and its notes for good.
   Fix: confirm first (name the book), or offer an undo. Test: `tests/e2e/books.spec.js` "Banish" must then confirm.
 
-- [ ] **12. Esc does not close any modal** (`Overlay`)
-  `tests/manual-test-tracker.md` expects "Esc / close works". There is no Escape handler.
-  Fix: close on Escape in `Overlay`, and return focus to the button that opened it.
-  Test: remove `.fixme` from "Esc closes the Inscribe window" in `tests/e2e/navigation.spec.js`.
+- [x] **12. Esc does not close any modal** (`Overlay`). Fixed 2026-11-18 on `a11y/oracle-codex-profile`.
+  `Overlay` now moves focus in on open, keeps Tab inside (`src/lib/focusTrap.js`), closes on
+  Escape and returns focus to the opener. `GenreSuggestInput` keeps its own Escape for its list.
+  Tests: `tests/e2e/a11y.spec.js` (Your Profile and Inscribe). When `test/e2e-buttons` is merged,
+  remove `.fixme` from "Esc closes the Inscribe window" in `tests/e2e/navigation.spec.js`.
+  Audit: `tests/a11y-oracle-codex-profile-audit.md`.
 
 - [ ] **13. There is no way to add a book purely by hand** (`AddBookModal`)
   The empty-search message says "switch to Scan or upload to add it by hand", but the Title/Author

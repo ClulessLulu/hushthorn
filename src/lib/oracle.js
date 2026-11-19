@@ -135,3 +135,18 @@ export function dropSeen(recs, seen) {
   const keys = new Set(list(seen).map((t) => t.toLowerCase()));
   return (Array.isArray(recs) ? recs : []).filter((r) => !keys.has(clean(r?.title).toLowerCase()));
 }
+
+// What the Oracle's polite live region says (a11y audit O1). One short line per
+// phase, not per card: the text only changes when the phase changes, so a
+// screen reader is not read the whole list again each time a pick lands.
+// An error says nothing here; the error has its own role="alert".
+// With no picks on screen the same line is shown, so its copy is the visible copy.
+export function oracleStatusText({ loading = false, checking = false, shown = 0, consulted = false, error = false } = {}) {
+  if (error) return '';
+  const n = Number.isInteger(shown) && shown > 0 ? shown : 0;
+  const busy = !!(loading || checking);
+  if (busy) return n === 0 ? 'Reading the leaves of your library…' : 'Picks are arriving…';
+  if (n > 0) return `${n} ${n === 1 ? 'pick' : 'picks'} from the Oracle.`;
+  if (consulted) return 'The Oracle has given all it saw — consult again for a fresh reading.';
+  return '';
+}

@@ -163,3 +163,69 @@ const leave = async () => {
 ### Suggested fix direction (not applied — QA does not fix)
 
 When `leave()` (or `destroy()`, which likely has the same gap for the owner deleting an archive while viewing it) succeeds and the archive being left/deleted is the one currently selected (`currentLibraryId === lib.id`), reset `currentLibraryId` to `null` (switch back to "My Library") and clear/refetch the union state, rather than relying on `SharedArchives`'s own local list refresh.
+
+---
+
+## BUG-004 — A double click on Oracle "+ Wishlist" saves the same title twice
+
+**STATUS: FIXED** (2026-11-18, branch `a11y/oracle-codex-profile`, uncommitted). `OracleSection`
+`addRec` now holds a per-pick in-flight guard (a ref keyed by lower-cased title, like the Consult
+button's `busyRef`). A second press while the first save is running does nothing, and the button
+exposes `aria-disabled="true"` until the save ends. `addBook` itself is unchanged.
+
+**Severity:** Major (breaks CLAUDE.md section 4 rule 1, one book per title; the duplicate row persists)
+**Found by:** qa-tester, independent review of the a11y fixes, 2026-11-18 (review item M2). Already on master.
+**Owner:** frontend-dev
+
+### Steps to reproduce (staging)
+
+1. Open The Oracle and consult (AI stubbed to return one pick).
+2. Double-click "+ Wishlist" on that pick.
+
+**Expected:** one `books` row with that title. **Actual (before):** 2 rows, on master and on the branch.
+**After the fix:** 1 row.
+
+### Cause
+
+`addRec` awaited `onAddToWishlist` (`addBook`) with no in-flight guard, and the card leaves the list only
+after the insert succeeds, so a second click in that window sent a second insert. `addBook` does not
+check `isTitleTaken`.
+
+### Test
+
+`tests/e2e/a11y.spec.js` "a double click on + Wishlist saves the book once" clicks twice in the same tick
+and counts rows through the REST helper. It fails without the guard (2 rows, on master and on the
+pre-guard branch) and passes with it.
+
+---
+
+## BUG-005 — Your Profile says "48 of 46 owned books read"
+
+**STATUS: FIXED** (2026-11-18, branch `a11y/oracle-codex-profile`, uncommitted). The count moved to
+`countOwnedRead()` in `src/lib/shelfStats.js`: read books with `shelf === 'owned'`, the same test the
+"of N owned" half and the Owned filter use. `AvatarPage` prints it in the mini-shelf line. The "tomes
+read" tile and the profile chip still count every read book (owned and wishlist); they do not claim
+to be a share of the owned shelf.
+
+**Severity:** Minor (wrong number on screen; no data harm)
+**Found by:** qa-tester, a11y review round 2, 2026-11-18 (review item R2-P1). Already on master.
+**Owner:** frontend-dev
+
+### Steps to reproduce (staging)
+
+1. Sign in as a reader with read books on the Wishlist (staging alpha has some).
+2. Open Your Profile and read the line under "Your Shelf".
+
+**Expected:** read count ≤ owned count. **Actual (before):** "48 of 46 owned books read"
+(`tests/screenshots/r2-iphone14-webkit-profile-bottom.png`).
+
+### Cause
+
+`AvatarPage` used `readCount = books.filter(b => b.read).length` (read wishlist books included) next
+to `owned.length` (`shelf === 'owned'` only).
+
+### Test
+
+`tests/shelf-stats-unit.mjs` imports the real module: happy path, empty and non-array input, malformed
+rows, read wishlist books excluded, read ≤ owned for any mix, and run twice. With the old rule
+(`b.read` only) the read-wishlist and malformed-rows cases fail (measured: 2 of 6).

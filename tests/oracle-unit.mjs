@@ -127,3 +127,34 @@ test('dropSeen removes already-suggested titles in any case, keeps the rest in o
   assert.deepEqual(dropSeen(null, ['A']), []);
   assert.deepEqual(dropSeen(dropSeen(recs, ['Iron Widow']), ['Iron Widow']).map((r) => r.title), ['New One', 'serpent & dove']);
 });
+
+// ── what the live region says (a11y audit O1) ──
+import { oracleStatusText } from '../src/lib/oracle.js';
+
+test('oracleStatusText: waiting with nothing shown, then picks arriving, then the count', () => {
+  assert.equal(oracleStatusText({ loading: true, shown: 0 }), 'Reading the leaves of your library…');
+  assert.equal(oracleStatusText({ loading: false, checking: true, shown: 0 }), 'Reading the leaves of your library…');
+  assert.equal(oracleStatusText({ loading: true, shown: 1 }), 'Picks are arriving…');
+  assert.equal(oracleStatusText({ loading: true, shown: 4 }), 'Picks are arriving…');
+  assert.equal(oracleStatusText({ shown: 5, consulted: true }), '5 picks from the Oracle.');
+  assert.equal(oracleStatusText({ shown: 1, consulted: true }), '1 pick from the Oracle.');
+});
+
+test('oracleStatusText: the text does not change as each card lands, so the list is not re-read', () => {
+  const seen = new Set([1, 2, 3, 4].map((n) => oracleStatusText({ loading: true, shown: n })));
+  assert.equal(seen.size, 1);
+});
+
+test('oracleStatusText: all given, error, and before any consult', () => {
+  assert.equal(oracleStatusText({ consulted: true, shown: 0 }), 'The Oracle has given all it saw — consult again for a fresh reading.');
+  assert.equal(oracleStatusText({ error: true, shown: 0, consulted: false }), '');
+  assert.equal(oracleStatusText({ error: true, loading: true }), '');
+  assert.equal(oracleStatusText({}), '');
+  assert.equal(oracleStatusText(), '');
+});
+
+test('oracleStatusText: malformed counts are treated as zero', () => {
+  assert.equal(oracleStatusText({ shown: -2, consulted: true }), 'The Oracle has given all it saw — consult again for a fresh reading.');
+  assert.equal(oracleStatusText({ shown: 'many', loading: true }), 'Reading the leaves of your library…');
+  assert.equal(oracleStatusText({ shown: NaN }), '');
+});
